@@ -1,0 +1,13 @@
+.agents
+.env
+.env.local
+.env.*.local
+.next
+.pnpm-store
+assets
+dev-server*.log
+node_modules
+out
+dist
+*.log
+tsconfig.tsbuildinfo

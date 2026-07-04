@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="力训周期管家">
+  <rect width="512" height="512" rx="112" fill="#0f8a4a"/>
+  <path d="M143 276h226" stroke="#fff" stroke-width="34" stroke-linecap="round"/>
+  <path d="M108 224v104M404 224v104M165 206v140M347 206v140" stroke="#fff" stroke-width="34" stroke-linecap="round"/>
+  <path d="M226 185l-36 72h64l-34 70 96-105h-66l32-58-56 21z" fill="#d8f7e5"/>
+</svg>

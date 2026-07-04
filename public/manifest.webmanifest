@@ -1,0 +1,19 @@
+{
+  "name": "力训周期管家",
+  "short_name": "力训",
+  "description": "移动端优先的力量训练周期管理 MVP",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3f6f1",
+  "theme_color": "#0f8a4a",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

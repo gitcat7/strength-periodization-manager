@@ -1,0 +1,12 @@
+node_modules
+.pnpm-store
+.next
+.vercel
+.agents
+out
+dist
+.env
+.env.local
+.env.*.local
+*.log
+tsconfig.tsbuildinfo
