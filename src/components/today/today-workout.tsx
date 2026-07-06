@@ -75,6 +75,13 @@ type TodayCache = {
   workout: WorkoutRow | null;
 };
 
+type TrainingValidationIssue = {
+  exerciseName: string;
+  message: string;
+  setIndex: number;
+  severity: "error" | "warning";
+};
+
 const todayCacheKey = "strength-training-cache:today";
 const restTimerSettingsKey = "strength-training-rest-timer";
 const restTimerOptions = [60, 90, 120, 180];
@@ -92,6 +99,7 @@ export function TodayWorkout() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [message, setMessage] = useState("");
+  const [validationIssues, setValidationIssues] = useState<TrainingValidationIssue[]>([]);
   const [restTimerEnabled, setRestTimerEnabled] = useState(true);
   const [restSeconds, setRestSeconds] = useState(120);
   const [restRemaining, setRestRemaining] = useState(0);
@@ -364,6 +372,7 @@ export function TodayWorkout() {
 
   function updateSetLog(workoutExerciseId: string, setIndex: number, patch: Partial<SetLogRow>) {
     setSaveStatus("idle");
+    setValidationIssues([]);
     setSetLogs((current) => {
       const nextLogs = {
         ...current,
@@ -411,6 +420,7 @@ export function TodayWorkout() {
 
   function fillByPlan() {
     setSaveStatus("idle");
+    setValidationIssues([]);
     setSetLogs((current) => {
       const nextLogs = Object.fromEntries(
         Object.entries(current).map(([workoutExerciseId, logs]) => [
@@ -430,6 +440,7 @@ export function TodayWorkout() {
 
   function fillExerciseByPlan(exerciseId: string) {
     setSaveStatus("idle");
+    setValidationIssues([]);
     setSetLogs((current) => {
       const nextLogs = {
         ...current,
@@ -461,6 +472,16 @@ export function TodayWorkout() {
       return;
     }
 
+    const nextValidationIssues = validateTrainingLogs({ completeWorkout, exercises, setLogs });
+    const blockingIssues = nextValidationIssues.filter((issue) => issue.severity === "error");
+    if (blockingIssues.length > 0) {
+      setSaveStatus("error");
+      setValidationIssues(nextValidationIssues);
+      setMessage(`发现 ${blockingIssues.length} 个需要修正的数据，请检查后再${completeWorkout ? "完成训练" : "保存"}。`);
+      return;
+    }
+
+    setValidationIssues(nextValidationIssues);
     setSaveStatus("saving");
     setMessage("");
 
@@ -535,6 +556,7 @@ export function TodayWorkout() {
         }))
       );
       setWorkout({ ...workout, status: "completed" });
+      setValidationIssues([]);
       await trackEvent({
         eventName: "workout_completed",
         properties: {
@@ -562,6 +584,9 @@ export function TodayWorkout() {
       setMessage("训练记录已保存。");
     }
 
+    if (!completeWorkout && nextValidationIssues.length === 0) {
+      setValidationIssues([]);
+    }
     setSaveStatus("saved");
   }
 
@@ -677,6 +702,22 @@ export function TodayWorkout() {
         <p className={`rounded-lg border px-3 py-2 text-sm ${saveStatus === "error" ? "border-red-200 text-red-600" : "border-line text-muted"}`}>
           {message}
         </p>
+      ) : null}
+
+      {validationIssues.length > 0 ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <h3 className="font-semibold text-amber-950">提交前检查</h3>
+          <div className="mt-3 space-y-2">
+            {validationIssues.slice(0, 6).map((issue) => (
+              <p className="text-sm leading-6 text-amber-900" key={`${issue.exerciseName}-${issue.setIndex}-${issue.message}`}>
+                {issue.severity === "error" ? "需修正" : "建议"} · {issue.exerciseName} 第 {issue.setIndex} 组：{issue.message}
+              </p>
+            ))}
+            {validationIssues.length > 6 ? (
+              <p className="text-sm text-amber-900">还有 {validationIssues.length - 6} 条检查结果，请先处理前面的关键项。</p>
+            ) : null}
+          </div>
+        </div>
       ) : null}
 
       <RestTimerPanel
@@ -1146,6 +1187,104 @@ function readRestTimerSettings() {
 
 function writeRestTimerSettings(settings: { enabled: boolean; seconds: number }) {
   window.localStorage.setItem(restTimerSettingsKey, JSON.stringify(settings));
+}
+
+function validateTrainingLogs({
+  completeWorkout,
+  exercises,
+  setLogs
+}: {
+  completeWorkout: boolean;
+  exercises: WorkoutExerciseRow[];
+  setLogs: Record<string, SetLogRow[]>;
+}) {
+  const exerciseById = new Map(exercises.map((exercise) => [exercise.id, exercise]));
+  const issues: TrainingValidationIssue[] = [];
+
+  for (const [exerciseId, logs] of Object.entries(setLogs)) {
+    const exercise = exerciseById.get(exerciseId);
+    const exerciseName = exercise?.exercises?.name ?? "动作";
+    const isCardio = exercise?.exercises?.slug === "cardio_zone2";
+
+    for (const log of logs) {
+      if (!log.completed) continue;
+
+      const actualWeight = log.actual_weight ?? log.target_weight;
+      const actualReps = log.actual_reps ?? log.target_reps;
+
+      if (!isCardio && (!Number.isFinite(actualWeight) || actualWeight <= 0)) {
+        issues.push({
+          exerciseName,
+          message: "重量需要大于 0kg。",
+          setIndex: log.set_index,
+          severity: "error"
+        });
+      }
+
+      if (!Number.isFinite(actualReps) || actualReps <= 0) {
+        issues.push({
+          exerciseName,
+          message: isCardio ? "有氧分钟数需要大于 0。" : "次数需要大于 0。",
+          setIndex: log.set_index,
+          severity: "error"
+        });
+      }
+
+      if (!isCardio && completeWorkout && log.rpe === null) {
+        issues.push({
+          exerciseName,
+          message: "完成训练前建议填写 RPE，后续重量建议会更准确。",
+          setIndex: log.set_index,
+          severity: "error"
+        });
+      }
+
+      if (log.rpe !== null && (log.rpe < 1 || log.rpe > 10)) {
+        issues.push({
+          exerciseName,
+          message: "RPE 应在 1 到 10 之间。",
+          setIndex: log.set_index,
+          severity: "error"
+        });
+      }
+
+      if (!isCardio && isExtremeWeight(actualWeight, log.target_weight)) {
+        issues.push({
+          exerciseName,
+          message: `重量 ${actualWeight}kg 明显高于计划 ${log.target_weight}kg，请确认是否输入错误。`,
+          setIndex: log.set_index,
+          severity: "error"
+        });
+      }
+
+      if (!isCardio && actualReps > Math.max(30, log.target_reps * 4)) {
+        issues.push({
+          exerciseName,
+          message: `次数 ${actualReps} 明显高于计划 ${log.target_reps} 次，请确认是否输入错误。`,
+          setIndex: log.set_index,
+          severity: "warning"
+        });
+      }
+
+      if (isCardio && actualReps > 180) {
+        issues.push({
+          exerciseName,
+          message: `有氧 ${actualReps} 分钟偏高，请确认是否输入错误。`,
+          setIndex: log.set_index,
+          severity: "warning"
+        });
+      }
+    }
+  }
+
+  return issues;
+}
+
+function isExtremeWeight(actualWeight: number, targetWeight: number) {
+  if (!Number.isFinite(actualWeight)) return true;
+  if (actualWeight > 450) return true;
+  if (targetWeight > 0 && actualWeight > Math.max(targetWeight * 3, targetWeight + 120)) return true;
+  return false;
 }
 
 function getWeightIncrement(exercise: WorkoutExerciseRow) {
