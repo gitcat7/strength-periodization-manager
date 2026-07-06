@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { BottomNav } from "@/components/navigation/bottom-nav";
+import { ServiceWorkerRegister } from "@/components/pwa/service-worker-register";
 import "./globals.css";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -38,6 +39,7 @@ export default function RootLayout({
       <body>
         {children}
         <BottomNav />
+        <ServiceWorkerRegister />
       </body>
     </html>
   );

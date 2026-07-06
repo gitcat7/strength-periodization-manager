@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Download, Loader2, LogOut, ShieldAlert, UserRound } from "lucide-react";
 import { trackEvent } from "@/lib/analytics";
+import { readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type WorkoutRow = {
@@ -38,6 +39,12 @@ type SetLogRow = {
   completed: boolean;
 };
 
+const settingsCacheKey = "strength-training-cache:settings";
+
+type SettingsCache = {
+  email: string;
+};
+
 export function SettingsPanel() {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<"loading" | "ready" | "working" | "error">("loading");
@@ -45,7 +52,9 @@ export function SettingsPanel() {
 
   useEffect(() => {
     async function loadSession() {
-      setStatus("loading");
+      if (!readClientCache<SettingsCache>(settingsCacheKey)) {
+        setStatus("loading");
+      }
       setMessage("");
 
       try {
@@ -62,11 +71,20 @@ export function SettingsPanel() {
         }
 
         setEmail(user.email ?? "");
+        writeClientCache<SettingsCache>(settingsCacheKey, {
+          email: user.email ?? ""
+        });
         setStatus("ready");
       } catch (error) {
         setStatus("error");
         setMessage(error instanceof Error ? error.message : "设置读取失败，请刷新页面后重试。");
       }
+    }
+
+    const cached = readClientCache<SettingsCache>(settingsCacheKey);
+    if (cached) {
+      setEmail(cached.email);
+      setStatus("ready");
     }
 
     loadSession();
