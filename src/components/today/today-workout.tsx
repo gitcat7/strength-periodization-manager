@@ -11,6 +11,7 @@ import {
   type ExerciseCoachRecommendation
 } from "@/domain/fitness-coach";
 import { trackEvent } from "@/lib/analytics";
+import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { formatPrescription, getExerciseNote, getWorkoutMeta } from "@/domain/training-format";
 
@@ -52,6 +53,17 @@ type SetLogRow = {
   completed: boolean;
 };
 
+type TodayCache = {
+  coachRecommendations: Array<ExerciseCoachRecommendation & { exerciseName: string }>;
+  exercises: WorkoutExerciseRow[];
+  lastCompletedWorkout: LastCompletedWorkoutRow | null;
+  setLogs: Record<string, SetLogRow[]>;
+  userId: string;
+  workout: WorkoutRow | null;
+};
+
+const todayCacheKey = "strength-training-cache:today";
+
 export function TodayWorkout() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -69,6 +81,10 @@ export function TodayWorkout() {
   useEffect(() => {
     async function loadTodayWorkout() {
       try {
+        if (!readClientCache<TodayCache>(todayCacheKey)) {
+          setStatus("loading");
+        }
+
         const supabase = createBrowserSupabaseClient();
         const { data: sessionData, error: sessionError } = await withTimeout(
           supabase.auth.getSession(),
@@ -102,6 +118,14 @@ export function TodayWorkout() {
         }
 
         if (!program) {
+          writeClientCache<TodayCache>(todayCacheKey, {
+            coachRecommendations: [],
+            exercises: [],
+            lastCompletedWorkout: null,
+            setLogs: {},
+            userId: user.id,
+            workout: null
+          });
           setStatus("ready");
           return;
         }
@@ -152,13 +176,34 @@ export function TodayWorkout() {
         const exerciseRows = (exerciseData ?? []) as unknown as WorkoutExerciseRow[];
         setWorkout(workoutData as WorkoutRow);
         setExercises(exerciseRows);
-        await loadLastCompletedWorkout(program.id, workoutData.scheduled_date);
-        await ensureSetLogs(exerciseRows, workoutData.id);
+        const [lastWorkout, groupedLogs] = await Promise.all([
+          loadLastCompletedWorkout(program.id, workoutData.scheduled_date),
+          ensureSetLogs(exerciseRows, workoutData.id)
+        ]);
+        writeClientCache<TodayCache>(todayCacheKey, {
+          coachRecommendations: [],
+          exercises: exerciseRows,
+          lastCompletedWorkout: lastWorkout,
+          setLogs: groupedLogs,
+          userId: user.id,
+          workout: workoutData as WorkoutRow
+        });
         setStatus("ready");
       } catch (error) {
         setStatus("error");
         setMessage(error instanceof Error ? error.message : "今日训练读取失败，请刷新页面后重试。");
       }
+    }
+
+    const cached = readClientCache<TodayCache>(todayCacheKey);
+    if (cached) {
+      setUserId(cached.userId);
+      setWorkout(cached.workout);
+      setExercises(cached.exercises);
+      setSetLogs(cached.setLogs);
+      setLastCompletedWorkout(cached.lastCompletedWorkout);
+      setCoachRecommendations(cached.coachRecommendations);
+      setStatus("ready");
     }
 
     loadTodayWorkout();
@@ -180,16 +225,18 @@ export function TodayWorkout() {
     if (error) {
       setStatus("error");
       setMessage(error.message);
-      return;
+      return null;
     }
 
-    setLastCompletedWorkout((data as LastCompletedWorkoutRow | null) ?? null);
+    const row = (data as LastCompletedWorkoutRow | null) ?? null;
+    setLastCompletedWorkout(row);
+    return row;
   }
 
   async function ensureSetLogs(exerciseRows: WorkoutExerciseRow[], workoutId: string) {
     if (exerciseRows.length === 0) {
       setSetLogs({});
-      return;
+      return {};
     }
 
     const supabase = createBrowserSupabaseClient();
@@ -203,7 +250,7 @@ export function TodayWorkout() {
     if (logsError) {
       setStatus("error");
       setMessage(logsError.message);
-      return;
+      return {};
     }
 
     const existingByKey = new Map(
@@ -238,7 +285,7 @@ export function TodayWorkout() {
       if (insertError) {
         setStatus("error");
         setMessage(insertError.message);
-        return;
+        return {};
       }
     }
 
@@ -251,19 +298,21 @@ export function TodayWorkout() {
     if (refreshError) {
       setStatus("error");
       setMessage(refreshError.message);
-      return;
+      return {};
     }
 
     const groupedLogs = groupSetLogs((refreshedLogs ?? []) as SetLogRow[]);
     const draftLogs = readDraftLogs(workoutId);
     if (draftLogs) {
-      setSetLogs(mergeDraftLogs(groupedLogs, draftLogs));
+      const mergedLogs = mergeDraftLogs(groupedLogs, draftLogs);
+      setSetLogs(mergedLogs);
       setSaveStatus("saved");
       setMessage("已恢复上次未完成的训练草稿。");
-      return;
+      return mergedLogs;
     }
 
     setSetLogs(groupedLogs);
+    return groupedLogs;
   }
 
   function updateSetLog(workoutExerciseId: string, setIndex: number, patch: Partial<SetLogRow>) {
@@ -343,6 +392,7 @@ export function TodayWorkout() {
 
     if (completeWorkout) {
       clearDraftLogs(workout.id);
+      clearTrainingDataCaches();
       const { error: workoutError } = await supabase
         .from("workouts")
         .update({
@@ -401,6 +451,7 @@ export function TodayWorkout() {
       setMessage("训练已完成。Fitness Coach 已生成下次重量建议。");
     } else {
       clearDraftLogs(workout.id);
+      clearTrainingDataCaches();
       await trackEvent({
         eventName: "workout_saved",
         properties: {

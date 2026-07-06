@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Brain, CheckCircle2, Loader2, PlusCircle, XCircle } from "lucide-react";
 import type { RecommendationType } from "@/domain/fitness-coach";
 import { trackEvent } from "@/lib/analytics";
-import { readClientCache, writeClientCache } from "@/lib/client-cache";
+import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import {
   formatPrescription,
@@ -362,6 +362,7 @@ export function ProgramManager() {
       return;
     }
 
+    clearTrainingDataCaches();
     const recommendationStatus =
       Number(appliedWeight) === Number(recommendation.suggested_weight) ? "accepted" : "modified";
     const { error: updateRecommendationError } = await supabase
@@ -418,6 +419,7 @@ export function ProgramManager() {
       return;
     }
 
+    clearTrainingDataCaches();
     await trackEvent({
       eventName: "recommendation_rejected",
       properties: {
@@ -530,6 +532,7 @@ export function ProgramManager() {
       return;
     }
 
+    clearTrainingDataCaches();
     await trackEvent({
       eventName: "program_generated",
       properties: {

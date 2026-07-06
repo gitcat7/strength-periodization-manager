@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Brain, CalendarDays, Loader2, Save, TrendingUp } from "lucide-react";
+import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import type { RecommendationType } from "@/domain/fitness-coach";
 
@@ -52,6 +53,15 @@ type RecommendationRow = {
   } | null;
 };
 
+type HistoryCache = {
+  recommendations: RecommendationRow[];
+  setLogs: SetLogRow[];
+  workoutExercises: WorkoutExerciseRow[];
+  workouts: WorkoutRow[];
+};
+
+const historyCacheKey = "strength-training-cache:history";
+
 export function TrainingHistory() {
   const [workouts, setWorkouts] = useState<WorkoutRow[]>([]);
   const [workoutExercises, setWorkoutExercises] = useState<WorkoutExerciseRow[]>([]);
@@ -63,7 +73,9 @@ export function TrainingHistory() {
 
   useEffect(() => {
     async function loadHistory() {
-      setStatus("loading");
+      if (!readClientCache<HistoryCache>(historyCacheKey)) {
+        setStatus("loading");
+      }
       setMessage("");
 
       try {
@@ -104,6 +116,12 @@ export function TrainingHistory() {
           setWorkoutExercises([]);
           setSetLogs([]);
           setRecommendations([]);
+          writeClientCache<HistoryCache>(historyCacheKey, {
+            recommendations: [],
+            setLogs: [],
+            workoutExercises: [],
+            workouts: completedWorkouts
+          });
           setStatus("ready");
           return;
         }
@@ -140,6 +158,7 @@ export function TrainingHistory() {
         setWorkoutExercises(exerciseRows);
 
         const workoutExerciseIds = exerciseRows.map((exercise) => exercise.id);
+        let logRows: SetLogRow[] = [];
         if (workoutExerciseIds.length > 0) {
           const { data: logsData, error: logsError } = await withTimeout(
             supabase
@@ -156,7 +175,8 @@ export function TrainingHistory() {
             return;
           }
 
-          setSetLogs((logsData ?? []) as SetLogRow[]);
+          logRows = (logsData ?? []) as SetLogRow[];
+          setSetLogs(logRows);
         }
 
         const { data: recommendationData, error: recommendationError } = recommendationResult;
@@ -168,11 +188,26 @@ export function TrainingHistory() {
         }
 
         setRecommendations((recommendationData ?? []) as unknown as RecommendationRow[]);
+        writeClientCache<HistoryCache>(historyCacheKey, {
+          recommendations: (recommendationData ?? []) as unknown as RecommendationRow[],
+          setLogs: logRows,
+          workoutExercises: exerciseRows,
+          workouts: completedWorkouts
+        });
         setStatus("ready");
       } catch (error) {
         setStatus("error");
         setMessage(error instanceof Error ? error.message : "训练历史读取失败，请刷新页面后重试。");
       }
+    }
+
+    const cached = readClientCache<HistoryCache>(historyCacheKey);
+    if (cached) {
+      setWorkouts(cached.workouts);
+      setWorkoutExercises(cached.workoutExercises);
+      setSetLogs(cached.setLogs);
+      setRecommendations(cached.recommendations);
+      setStatus("ready");
     }
 
     loadHistory();
@@ -244,6 +279,7 @@ export function TrainingHistory() {
       return;
     }
 
+    clearTrainingDataCaches();
     setSaveStatus("saved");
     setMessage("历史训练已保存。进展页会按新的记录重新计算。");
   }

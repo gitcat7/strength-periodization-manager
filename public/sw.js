@@ -1,13 +1,19 @@
-const CACHE_VERSION = "strength-periodization-v2";
+const CACHE_VERSION = "strength-periodization-v3";
 const SHELL_CACHE = `${CACHE_VERSION}:shell`;
 const STATIC_CACHE = `${CACHE_VERSION}:static`;
 
 const PRECACHE_URLS = [
   "/",
+  "/today",
   "/plan",
+  "/history",
   "/progress",
   "/pr",
   "/settings",
+  "/onboarding",
+  "/diagnostics",
+  "/feedback",
+  "/privacy",
   "/manifest.webmanifest",
   "/icon.svg"
 ];

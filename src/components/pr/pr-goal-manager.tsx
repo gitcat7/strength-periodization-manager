@@ -12,7 +12,7 @@ import {
   getPrPhaseLabel
 } from "@/domain/pr-planner";
 import { trackEvent } from "@/lib/analytics";
-import { readClientCache, writeClientCache } from "@/lib/client-cache";
+import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type ExerciseRow = {
@@ -230,6 +230,7 @@ export function PrGoalManager() {
       return;
     }
 
+    clearTrainingDataCaches();
     await trackEvent({
       eventName: "pr_goal_created",
       properties: {
@@ -266,6 +267,7 @@ export function PrGoalManager() {
       return;
     }
 
+    clearTrainingDataCaches();
     await trackEvent({
       eventName: nextStatus === "completed" ? "pr_goal_completed" : "pr_goal_cancelled",
       properties: {

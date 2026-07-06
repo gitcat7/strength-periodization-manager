@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { CalendarDays, Dumbbell, Loader2, Save } from "lucide-react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { trackEvent } from "@/lib/analytics";
+import { clearTrainingDataCaches } from "@/lib/client-cache";
 import {
   calculateTrainingMax,
   estimateOneRepMax,
@@ -246,6 +247,7 @@ export function OnboardingForm() {
       return;
     }
 
+    clearTrainingDataCaches();
     setHasSavedProfile(true);
     await trackEvent({
       eventName: "profile_saved",
