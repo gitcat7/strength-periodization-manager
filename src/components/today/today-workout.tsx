@@ -3,7 +3,20 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Brain, CalendarDays, CheckCircle2, Dumbbell, Loader2, Pause, Play, RotateCcw, Save, Timer } from "lucide-react";
+import {
+  Brain,
+  CalendarDays,
+  CheckCircle2,
+  Dumbbell,
+  Loader2,
+  Minus,
+  Pause,
+  Play,
+  Plus,
+  RotateCcw,
+  Save,
+  Timer
+} from "lucide-react";
 import {
   buildExerciseCoachRecommendation,
   getInterruptionAdvice,
@@ -415,6 +428,23 @@ export function TodayWorkout() {
     });
   }
 
+  function fillExerciseByPlan(exerciseId: string) {
+    setSaveStatus("idle");
+    setSetLogs((current) => {
+      const nextLogs = {
+        ...current,
+        [exerciseId]: (current[exerciseId] ?? []).map((log) => ({
+          ...log,
+          actual_weight: log.target_weight,
+          actual_reps: log.target_reps,
+          completed: true
+        }))
+      };
+      writeDraftLogs(workout?.id, nextLogs);
+      return nextLogs;
+    });
+  }
+
   async function saveLogs({ completeWorkout = false }: { completeWorkout?: boolean } = {}) {
     if (!workout) return;
     if (completeWorkout && !userId) {
@@ -732,14 +762,23 @@ export function TodayWorkout() {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                   <h3 className="font-semibold">{exercise.exercises?.name ?? "动作"}</h3>
-                  <p className="font-semibold text-action">
-                    {formatPrescription({
-                      slug: exercise.exercises?.slug,
-                      targetSets: exercise.target_sets,
-                      targetReps: exercise.target_reps,
-                      targetWeight: Number(exercise.target_weight)
-                    })}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                    <p className="font-semibold text-action">
+                      {formatPrescription({
+                        slug: exercise.exercises?.slug,
+                        targetSets: exercise.target_sets,
+                        targetReps: exercise.target_reps,
+                        targetWeight: Number(exercise.target_weight)
+                      })}
+                    </p>
+                    <button
+                      className="h-8 rounded-lg border border-line px-2 text-xs font-semibold text-ink"
+                      onClick={() => fillExerciseByPlan(exercise.id)}
+                      type="button"
+                    >
+                      本动作按计划
+                    </button>
+                  </div>
                 </div>
                 <p className="mt-2 text-sm text-muted">{getExerciseNote(exercise.exercises?.slug, index)}</p>
                 <div className="mt-4 space-y-2">
@@ -751,10 +790,10 @@ export function TodayWorkout() {
                       key={`${exercise.id}-${log.set_index}`}
                     >
                       <span className={`font-semibold ${log.completed ? "text-action" : ""}`}>{log.set_index}</span>
-                      <NumberInput
+                      <WeightInput
+                        increment={getWeightIncrement(exercise)}
                         label="重量"
                         min={0}
-                        step={exercise.exercises?.slug === "cardio_zone2" ? 1 : 0.5}
                         value={log.actual_weight ?? log.target_weight}
                         onChange={(value) => updateSetLog(exercise.id, log.set_index, { actual_weight: value })}
                       />
@@ -933,6 +972,64 @@ function RestTimerPanel({
   );
 }
 
+function WeightInput({
+  increment,
+  label,
+  min,
+  value,
+  onChange
+}: {
+  increment: number;
+  label: string;
+  min: number;
+  value: number | null;
+  onChange: (value: number | null) => void;
+}) {
+  const displayValue = value ?? 0;
+
+  function adjust(delta: number) {
+    const nextValue = roundToHalf(Math.max(min, displayValue + delta));
+    onChange(nextValue);
+  }
+
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[11px] text-muted">{label}</span>
+      <div className="grid h-9 grid-cols-[2rem_1fr_2rem] overflow-hidden rounded-md border border-line bg-white focus-within:border-action">
+        <button
+          aria-label={`${label}减少 ${increment}kg`}
+          className="grid place-items-center border-r border-line text-muted disabled:opacity-40"
+          disabled={displayValue <= min}
+          onClick={() => adjust(-increment)}
+          type="button"
+        >
+          <Minus size={14} />
+        </button>
+        <input
+          className="min-w-0 border-0 bg-white px-1 text-center text-sm outline-none"
+          inputMode="decimal"
+          min={min}
+          onChange={(event) => {
+            const nextValue = event.target.value === "" ? null : Number(event.target.value);
+            onChange(Number.isNaN(nextValue) ? null : nextValue);
+          }}
+          step={0.5}
+          type="number"
+          value={value ?? ""}
+        />
+        <button
+          aria-label={`${label}增加 ${increment}kg`}
+          className="grid place-items-center border-l border-line text-muted"
+          onClick={() => adjust(increment)}
+          type="button"
+        >
+          <Plus size={14} />
+        </button>
+      </div>
+    </label>
+  );
+}
+
 function NumberInput({
   label,
   max,
@@ -1049,6 +1146,17 @@ function readRestTimerSettings() {
 
 function writeRestTimerSettings(settings: { enabled: boolean; seconds: number }) {
   window.localStorage.setItem(restTimerSettingsKey, JSON.stringify(settings));
+}
+
+function getWeightIncrement(exercise: WorkoutExerciseRow) {
+  if (exercise.exercises?.slug === "cardio_zone2") return 1;
+
+  const increment = Number(exercise.exercises?.default_increment);
+  return increment > 0 ? increment : 2.5;
+}
+
+function roundToHalf(value: number) {
+  return Math.round(value * 2) / 2;
 }
 
 function formatRestTimer(seconds: number) {
