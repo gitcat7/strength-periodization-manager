@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import { BottomNav } from "@/components/navigation/bottom-nav";
 import "./globals.css";
 
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+
 export const metadata: Metadata = {
   title: "力训周期管家",
   description: "移动端优先的力量训练周期管理 MVP",
@@ -27,6 +29,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
+      {supabaseUrl ? (
+        <head>
+          <link href={supabaseUrl} rel="preconnect" />
+          <link href={supabaseUrl} rel="dns-prefetch" />
+        </head>
+      ) : null}
       <body>
         {children}
         <BottomNav />

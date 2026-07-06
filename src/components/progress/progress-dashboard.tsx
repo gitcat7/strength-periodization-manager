@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Activity, BarChart3, CalendarDays, Loader2, TrendingUp } from "lucide-react";
 import { estimateOneRepMax } from "@/domain/strength";
+import { readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type WorkoutRow = {
@@ -49,6 +50,14 @@ type WeeklyTrend = {
   plannedSets: number;
 };
 
+type ProgressCache = {
+  setLogs: SetLogRow[];
+  workoutExercises: WorkoutExerciseRow[];
+  workouts: WorkoutRow[];
+};
+
+const progressCacheKey = "strength-training-cache:progress";
+
 export function ProgressDashboard() {
   const [workouts, setWorkouts] = useState<WorkoutRow[]>([]);
   const [workoutExercises, setWorkoutExercises] = useState<WorkoutExerciseRow[]>([]);
@@ -58,7 +67,9 @@ export function ProgressDashboard() {
 
   useEffect(() => {
     async function loadProgress() {
-      setStatus("loading");
+      if (!readClientCache<ProgressCache>(progressCacheKey)) {
+        setStatus("loading");
+      }
       setMessage("");
 
       try {
@@ -98,6 +109,11 @@ export function ProgressDashboard() {
         if (workoutIds.length === 0) {
           setWorkoutExercises([]);
           setSetLogs([]);
+          writeClientCache<ProgressCache>(progressCacheKey, {
+            setLogs: [],
+            workoutExercises: [],
+            workouts: workoutRows
+          });
           setStatus("ready");
           return;
         }
@@ -122,6 +138,11 @@ export function ProgressDashboard() {
         const workoutExerciseIds = exerciseRows.map((exercise) => exercise.id);
         if (workoutExerciseIds.length === 0) {
           setSetLogs([]);
+          writeClientCache<ProgressCache>(progressCacheKey, {
+            setLogs: [],
+            workoutExercises: exerciseRows,
+            workouts: workoutRows
+          });
           setStatus("ready");
           return;
         }
@@ -140,12 +161,26 @@ export function ProgressDashboard() {
           return;
         }
 
-        setSetLogs((logData ?? []) as SetLogRow[]);
+        const logRows = (logData ?? []) as SetLogRow[];
+        setSetLogs(logRows);
+        writeClientCache<ProgressCache>(progressCacheKey, {
+          setLogs: logRows,
+          workoutExercises: exerciseRows,
+          workouts: workoutRows
+        });
         setStatus("ready");
       } catch (error) {
         setStatus("error");
         setMessage(error instanceof Error ? error.message : "进展数据读取失败，请刷新页面后重试。");
       }
+    }
+
+    const cached = readClientCache<ProgressCache>(progressCacheKey);
+    if (cached) {
+      setWorkouts(cached.workouts);
+      setWorkoutExercises(cached.workoutExercises);
+      setSetLogs(cached.setLogs);
+      setStatus("ready");
     }
 
     loadProgress();

@@ -1,8 +1,10 @@
 "use client";
 
+import { useCallback, useEffect } from "react";
 import Link from "next/link";
 import { BarChart3, CalendarDays, Dumbbell, Settings, Trophy } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 const hiddenPrefixes = ["/login", "/auth"];
 
@@ -16,6 +18,24 @@ const navItems = [
 
 export function BottomNav() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const prefetchTabs = useCallback(() => {
+    for (const item of navItems) {
+      router.prefetch(item.href);
+    }
+  }, [router]);
+
+  useEffect(() => {
+    prefetchTabs();
+
+    try {
+      const supabase = createBrowserSupabaseClient();
+      void supabase.auth.getSession();
+    } catch {
+      // Diagnostics surfaces env problems; navigation prefetch should stay silent.
+    }
+  }, [prefetchTabs]);
 
   if (hiddenPrefixes.some((prefix) => pathname.startsWith(prefix))) {
     return null;
@@ -35,6 +55,9 @@ export function BottomNav() {
               }`}
               href={item.href}
               key={item.href}
+              onMouseEnter={() => router.prefetch(item.href)}
+              onTouchStart={() => router.prefetch(item.href)}
+              prefetch
             >
               <Icon size={18} />
               <span>{item.label}</span>

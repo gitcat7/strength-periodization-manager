@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { getDaysUntilTarget } from "@/domain/pr-planner";
 import { formatPrescription, getWorkoutMeta } from "@/domain/training-format";
+import { readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type WorkoutRow = {
@@ -64,6 +65,19 @@ type PrGoalRow = {
   } | null;
 };
 
+type HomeDashboardCache = {
+  completedExercises: WorkoutExerciseRow[];
+  completedWorkouts: WorkoutRow[];
+  email: string;
+  nextWorkout: WorkoutRow | null;
+  nextWorkoutExercises: WorkoutExerciseRow[];
+  prGoals: PrGoalRow[];
+  recommendations: RecommendationRow[];
+  setLogs: SetLogRow[];
+};
+
+const homeDashboardCacheKey = "strength-training-cache:home";
+
 export function HomeDashboard() {
   const [email, setEmail] = useState("");
   const [nextWorkout, setNextWorkout] = useState<WorkoutRow | null>(null);
@@ -77,6 +91,19 @@ export function HomeDashboard() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
+    const cached = readClientCache<HomeDashboardCache>(homeDashboardCacheKey);
+    if (cached) {
+      setEmail(cached.email);
+      setNextWorkout(cached.nextWorkout);
+      setNextWorkoutExercises(cached.nextWorkoutExercises);
+      setCompletedWorkouts(cached.completedWorkouts);
+      setCompletedExercises(cached.completedExercises);
+      setSetLogs(cached.setLogs);
+      setRecommendations(cached.recommendations);
+      setPrGoals(cached.prGoals);
+      setStatus("ready");
+    }
+
     loadDashboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -100,7 +127,9 @@ export function HomeDashboard() {
   }, [completedWorkouts.length, prGoals, setLogs]);
 
   async function loadDashboard() {
-    setStatus("loading");
+    if (!readClientCache<HomeDashboardCache>(homeDashboardCacheKey)) {
+      setStatus("loading");
+    }
     setMessage("");
 
     try {
@@ -119,18 +148,32 @@ export function HomeDashboard() {
       setEmail(user.email ?? "");
 
       const today = formatDate(new Date());
-      const { data: nextWorkoutData, error: nextWorkoutError } = await withTimeout(
-        supabase
-          .from("workouts")
-          .select("id,scheduled_date,name,status")
-          .eq("user_id", user.id)
-          .neq("status", "completed")
-          .gte("scheduled_date", today)
-          .order("scheduled_date", { ascending: true })
-          .limit(1)
-          .maybeSingle(),
-        "训练计划读取超时，请刷新页面后重试。"
-      );
+      const [nextWorkoutResult, completedResult] = await Promise.all([
+        withTimeout(
+          supabase
+            .from("workouts")
+            .select("id,scheduled_date,name,status")
+            .eq("user_id", user.id)
+            .neq("status", "completed")
+            .gte("scheduled_date", today)
+            .order("scheduled_date", { ascending: true })
+            .limit(1)
+            .maybeSingle(),
+          "训练计划读取超时，请刷新页面后重试。"
+        ),
+        withTimeout(
+          supabase
+            .from("workouts")
+            .select("id,scheduled_date,name,status")
+            .eq("user_id", user.id)
+            .eq("status", "completed")
+            .order("scheduled_date", { ascending: false })
+            .limit(12),
+          "训练历史读取超时，请刷新页面后重试。"
+        )
+      ]);
+
+      const { data: nextWorkoutData, error: nextWorkoutError } = nextWorkoutResult;
 
       if (nextWorkoutError) {
         setStatus("error");
@@ -141,36 +184,7 @@ export function HomeDashboard() {
       const nextWorkoutRow = nextWorkoutData as WorkoutRow | null;
       setNextWorkout(nextWorkoutRow);
 
-      if (nextWorkoutRow) {
-        const { data: exerciseData, error: exerciseError } = await withTimeout(
-          supabase
-            .from("workout_exercises")
-            .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
-            .eq("workout_id", nextWorkoutRow.id)
-            .order("order_index", { ascending: true }),
-          "训练动作读取超时，请刷新页面后重试。"
-        );
-
-        if (exerciseError) {
-          setStatus("error");
-          setMessage(exerciseError.message);
-          return;
-        }
-
-        setNextWorkoutExercises((exerciseData ?? []) as unknown as WorkoutExerciseRow[]);
-      }
-
-      const { data: completedData, error: completedError } = await withTimeout(
-        supabase
-          .from("workouts")
-          .select("id,scheduled_date,name,status")
-          .eq("user_id", user.id)
-          .eq("status", "completed")
-          .order("scheduled_date", { ascending: false })
-          .limit(12),
-        "训练历史读取超时，请刷新页面后重试。"
-      );
-
+      const { data: completedData, error: completedError } = completedResult;
       if (completedError) {
         setStatus("error");
         setMessage(completedError.message);
@@ -179,9 +193,28 @@ export function HomeDashboard() {
 
       const completedRows = (completedData ?? []) as WorkoutRow[];
       setCompletedWorkouts(completedRows);
-      await loadCompletedTrainingDetails(completedRows);
-      await loadRecommendations(user.id);
-      await loadPrGoals(user.id);
+
+      const followUpLoads = [
+        loadCompletedTrainingDetails(completedRows),
+        loadRecommendations(user.id),
+        loadPrGoals(user.id)
+      ] as const;
+
+      const [completedDetails, recommendationRows, prGoalRows, nextWorkoutExerciseRows] = await Promise.all([
+        ...followUpLoads,
+        nextWorkoutRow ? loadNextWorkoutExercises(nextWorkoutRow.id) : Promise.resolve([])
+      ]);
+
+      writeClientCache<HomeDashboardCache>(homeDashboardCacheKey, {
+        completedExercises: completedDetails.completedExercises,
+        completedWorkouts: completedRows,
+        email: user.email ?? "",
+        nextWorkout: nextWorkoutRow,
+        nextWorkoutExercises: nextWorkoutExerciseRows,
+        prGoals: prGoalRows,
+        recommendations: recommendationRows,
+        setLogs: completedDetails.setLogs
+      });
       setStatus("ready");
     } catch (error) {
       setStatus("error");
@@ -189,11 +222,29 @@ export function HomeDashboard() {
     }
   }
 
+  async function loadNextWorkoutExercises(workoutId: string) {
+    const supabase = createBrowserSupabaseClient();
+    const { data, error } = await withTimeout(
+      supabase
+        .from("workout_exercises")
+        .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
+        .eq("workout_id", workoutId)
+        .order("order_index", { ascending: true }),
+      "训练动作读取超时，请刷新页面后重试。"
+    );
+
+    if (error) throw new Error(error.message);
+
+    const rows = (data ?? []) as unknown as WorkoutExerciseRow[];
+    setNextWorkoutExercises(rows);
+    return rows;
+  }
+
   async function loadCompletedTrainingDetails(workouts: WorkoutRow[]) {
     if (workouts.length === 0) {
       setCompletedExercises([]);
       setSetLogs([]);
-      return;
+      return { completedExercises: [], setLogs: [] };
     }
 
     const supabase = createBrowserSupabaseClient();
@@ -214,7 +265,7 @@ export function HomeDashboard() {
     const exerciseIds = exerciseRows.map((exercise) => exercise.id);
     if (exerciseIds.length === 0) {
       setSetLogs([]);
-      return;
+      return { completedExercises: exerciseRows, setLogs: [] };
     }
 
     const { data: logData, error: logError } = await withTimeout(
@@ -227,7 +278,9 @@ export function HomeDashboard() {
 
     if (logError) throw new Error(logError.message);
 
-    setSetLogs((logData ?? []) as SetLogRow[]);
+    const rows = (logData ?? []) as SetLogRow[];
+    setSetLogs(rows);
+    return { completedExercises: exerciseRows, setLogs: rows };
   }
 
   async function loadRecommendations(userId: string) {
@@ -245,7 +298,9 @@ export function HomeDashboard() {
 
     if (error) throw new Error(error.message);
 
-    setRecommendations((data ?? []) as unknown as RecommendationRow[]);
+    const rows = (data ?? []) as unknown as RecommendationRow[];
+    setRecommendations(rows);
+    return rows;
   }
 
   async function loadPrGoals(userId: string) {
@@ -263,7 +318,9 @@ export function HomeDashboard() {
 
     if (error) throw new Error(error.message);
 
-    setPrGoals((data ?? []) as unknown as PrGoalRow[]);
+    const rows = (data ?? []) as unknown as PrGoalRow[];
+    setPrGoals(rows);
+    return rows;
   }
 
   if (status === "loading") {

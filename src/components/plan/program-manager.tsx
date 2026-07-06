@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Brain, CheckCircle2, Loader2, PlusCircle, XCircle } from "lucide-react";
 import type { RecommendationType } from "@/domain/fitness-coach";
 import { trackEvent } from "@/lib/analytics";
+import { readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import {
   formatPrescription,
@@ -86,6 +87,17 @@ type AthleteProfileRow = {
   available_weekdays: number[];
 };
 
+type PlanCache = {
+  program: ProgramRow | null;
+  recommendationWeights: Record<string, string>;
+  recommendations: RecommendationRow[];
+  userId: string;
+  workoutExercises: WorkoutExerciseRow[];
+  workouts: WorkoutRow[];
+};
+
+const planCacheKey = "strength-training-cache:plan";
+
 export function ProgramManager() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -98,6 +110,17 @@ export function ProgramManager() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
+    const cached = readClientCache<PlanCache>(planCacheKey);
+    if (cached) {
+      setUserId(cached.userId);
+      setProgram(cached.program);
+      setWorkouts(cached.workouts);
+      setWorkoutExercises(cached.workoutExercises);
+      setRecommendations(cached.recommendations);
+      setRecommendationWeights(cached.recommendationWeights);
+      setStatus("ready");
+    }
+
     loadCurrentProgram();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -112,7 +135,9 @@ export function ProgramManager() {
   }, [workoutExercises]);
 
   async function loadCurrentProgram() {
-    setStatus("loading");
+    if (!readClientCache<PlanCache>(planCacheKey)) {
+      setStatus("loading");
+    }
     setMessage("");
 
     const supabase = createBrowserSupabaseClient();
@@ -124,16 +149,36 @@ export function ProgramManager() {
     }
 
     setUserId(userData.user.id);
-    await loadRecommendations(userData.user.id);
 
-    const { data: programData, error: programError } = await supabase
-      .from("programs")
-      .select("id,name,template_type,status,start_date,end_date")
-      .eq("user_id", userData.user.id)
-      .eq("status", "active")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const [recommendationsResult, programResult] = await Promise.all([
+      fetchRecommendations(userData.user.id),
+      supabase
+        .from("programs")
+        .select("id,name,template_type,status,start_date,end_date")
+        .eq("user_id", userData.user.id)
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    ]);
+
+    if (!recommendationsResult.ok) {
+      setStatus("error");
+      setMessage(recommendationsResult.message);
+      return;
+    }
+
+    setRecommendations(recommendationsResult.rows);
+    setRecommendationWeights(
+      Object.fromEntries(
+        recommendationsResult.rows.map((recommendation) => [
+          recommendation.id,
+          String(recommendation.suggested_weight)
+        ])
+      )
+    );
+
+    const { data: programData, error: programError } = programResult;
 
     if (programError) {
       setStatus("error");
@@ -142,19 +187,69 @@ export function ProgramManager() {
     }
 
     if (!programData) {
+      const nextRecommendationWeights = Object.fromEntries(
+        recommendationsResult.rows.map((recommendation) => [
+          recommendation.id,
+          String(recommendation.suggested_weight)
+        ])
+      );
       setProgram(null);
       setWorkouts([]);
       setWorkoutExercises([]);
+      writePlanCache({
+        program: null,
+        recommendationWeights: nextRecommendationWeights,
+        recommendations: recommendationsResult.rows,
+        userId: userData.user.id,
+        workoutExercises: [],
+        workouts: []
+      });
       setStatus("ready");
       return;
     }
 
     setProgram(programData as ProgramRow);
-    await loadWorkouts(programData.id);
+    const loadedWorkouts = await loadWorkouts(programData.id);
+    if (!loadedWorkouts.ok) {
+      return;
+    }
+
+    writePlanCache({
+      program: programData as ProgramRow,
+      recommendationWeights: Object.fromEntries(
+        recommendationsResult.rows.map((recommendation) => [
+          recommendation.id,
+          String(recommendation.suggested_weight)
+        ])
+      ),
+      recommendations: recommendationsResult.rows,
+      userId: userData.user.id,
+      workoutExercises: loadedWorkouts.value.workoutExercises,
+      workouts: loadedWorkouts.value.workouts
+    });
     setStatus("ready");
   }
 
   async function loadRecommendations(targetUserId: string) {
+    const result = await fetchRecommendations(targetUserId);
+    if (!result.ok) {
+      setStatus("error");
+      setMessage(result.message);
+      return;
+    }
+
+    setRecommendations(result.rows);
+    setRecommendationWeights(
+      Object.fromEntries(
+        result.rows.map((recommendation) => [recommendation.id, String(recommendation.suggested_weight)])
+      )
+    );
+  }
+
+  async function fetchRecommendations(targetUserId: string): Promise<
+    | { ok: true; rows: RecommendationRow[] }
+    | { ok: false; message: string }
+  > {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await supabase
       .from("recommendations")
@@ -165,19 +260,16 @@ export function ProgramManager() {
       .limit(12);
 
     if (error) {
-      setStatus("error");
-      setMessage(error.message);
-      return;
+      return { ok: false, message: error.message };
     }
 
-    const rows = (data ?? []) as unknown as RecommendationRow[];
-    setRecommendations(rows);
-    setRecommendationWeights(
-      Object.fromEntries(rows.map((recommendation) => [recommendation.id, String(recommendation.suggested_weight)]))
-    );
+    return { ok: true, rows: (data ?? []) as unknown as RecommendationRow[] };
   }
 
-  async function loadWorkouts(programId: string) {
+  async function loadWorkouts(programId: string): Promise<
+    | { ok: true; value: { workoutExercises: WorkoutExerciseRow[]; workouts: WorkoutRow[] } }
+    | { ok: false }
+  > {
     const supabase = createBrowserSupabaseClient();
     const { data: workoutData, error: workoutError } = await supabase
       .from("workouts")
@@ -188,15 +280,16 @@ export function ProgramManager() {
     if (workoutError) {
       setStatus("error");
       setMessage(workoutError.message);
-      return;
+      return { ok: false };
     }
 
     const workoutIds = (workoutData ?? []).map((workout) => workout.id);
-    setWorkouts((workoutData ?? []) as WorkoutRow[]);
+    const workoutRows = (workoutData ?? []) as WorkoutRow[];
+    setWorkouts(workoutRows);
 
     if (workoutIds.length === 0) {
       setWorkoutExercises([]);
-      return;
+      return { ok: true, value: { workoutExercises: [], workouts: workoutRows } };
     }
 
     const { data: exerciseData, error: exerciseError } = await supabase
@@ -208,10 +301,16 @@ export function ProgramManager() {
     if (exerciseError) {
       setStatus("error");
       setMessage(exerciseError.message);
-      return;
+      return { ok: false };
     }
 
-    setWorkoutExercises((exerciseData ?? []) as unknown as WorkoutExerciseRow[]);
+    const workoutExerciseRows = (exerciseData ?? []) as unknown as WorkoutExerciseRow[];
+    setWorkoutExercises(workoutExerciseRows);
+    return { ok: true, value: { workoutExercises: workoutExerciseRows, workouts: workoutRows } };
+  }
+
+  function writePlanCache(cache: PlanCache) {
+    writeClientCache<PlanCache>(planCacheKey, cache);
   }
 
   async function acceptRecommendation(recommendation: RecommendationRow) {

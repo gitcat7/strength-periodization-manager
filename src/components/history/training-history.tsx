@@ -108,14 +108,27 @@ export function TrainingHistory() {
           return;
         }
 
-        const { data: exerciseData, error: exerciseError } = await withTimeout(
-          supabase
-            .from("workout_exercises")
-            .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
-            .in("workout_id", workoutIds)
-            .order("order_index", { ascending: true }),
-          "历史动作读取超时，请刷新页面后重试。"
-        );
+        const [exerciseResult, recommendationResult] = await Promise.all([
+          withTimeout(
+            supabase
+              .from("workout_exercises")
+              .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
+              .in("workout_id", workoutIds)
+              .order("order_index", { ascending: true }),
+            "历史动作读取超时，请刷新页面后重试。"
+          ),
+          withTimeout(
+            supabase
+              .from("recommendations")
+              .select("id,workout_id,recommendation_type,previous_weight,suggested_weight,reason,status,exercises(name,slug)")
+              .eq("user_id", user.id)
+              .in("workout_id", workoutIds)
+              .order("created_at", { ascending: false }),
+            "Coach 建议读取超时，请刷新页面后重试。"
+          )
+        ]);
+
+        const { data: exerciseData, error: exerciseError } = exerciseResult;
 
         if (exerciseError) {
           setStatus("error");
@@ -146,15 +159,7 @@ export function TrainingHistory() {
           setSetLogs((logsData ?? []) as SetLogRow[]);
         }
 
-        const { data: recommendationData, error: recommendationError } = await withTimeout(
-          supabase
-            .from("recommendations")
-            .select("id,workout_id,recommendation_type,previous_weight,suggested_weight,reason,status,exercises(name,slug)")
-            .eq("user_id", user.id)
-            .in("workout_id", workoutIds)
-            .order("created_at", { ascending: false }),
-          "Coach 建议读取超时，请刷新页面后重试。"
-        );
+        const { data: recommendationData, error: recommendationError } = recommendationResult;
 
         if (recommendationError) {
           setStatus("error");

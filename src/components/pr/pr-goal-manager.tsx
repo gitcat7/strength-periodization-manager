@@ -12,6 +12,7 @@ import {
   getPrPhaseLabel
 } from "@/domain/pr-planner";
 import { trackEvent } from "@/lib/analytics";
+import { readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type ExerciseRow = {
@@ -41,6 +42,17 @@ type PrGoalRow = {
   } | null;
 };
 
+type PrCache = {
+  exerciseId: string;
+  exercises: ExerciseRow[];
+  goals: PrGoalRow[];
+  liftProfiles: LiftProfileRow[];
+  targetWeight: string;
+  userId: string;
+};
+
+const prCacheKey = "strength-training-cache:pr";
+
 export function PrGoalManager() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -54,6 +66,17 @@ export function PrGoalManager() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
+    const cached = readClientCache<PrCache>(prCacheKey);
+    if (cached) {
+      setUserId(cached.userId);
+      setExercises(cached.exercises);
+      setLiftProfiles(cached.liftProfiles);
+      setGoals(cached.goals);
+      setExerciseId(cached.exerciseId);
+      setTargetWeight(cached.targetWeight);
+      setStatus("ready");
+    }
+
     loadPrData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -86,11 +109,25 @@ export function PrGoalManager() {
     const currentUserId = sessionData.session.user.id;
     setUserId(currentUserId);
 
-    const { data: exerciseData, error: exerciseError } = await supabase
-      .from("exercises")
-      .select("id,slug,name,default_increment,is_main_lift")
-      .eq("is_main_lift", true)
-      .order("name", { ascending: true });
+    const [exerciseResult, liftResult, goalResult] = await Promise.all([
+      supabase
+        .from("exercises")
+        .select("id,slug,name,default_increment,is_main_lift")
+        .eq("is_main_lift", true)
+        .order("name", { ascending: true }),
+      supabase
+        .from("lift_profiles")
+        .select("exercise_id,estimated_1rm")
+        .eq("user_id", currentUserId),
+      supabase
+        .from("pr_goals")
+        .select("id,exercise_id,current_estimated_1rm,target_weight,target_date,status,exercises(name,slug,default_increment)")
+        .eq("user_id", currentUserId)
+        .eq("status", "active")
+        .order("target_date", { ascending: true })
+    ]);
+
+    const { data: exerciseData, error: exerciseError } = exerciseResult;
 
     if (exerciseError) {
       setStatus("error");
@@ -98,10 +135,7 @@ export function PrGoalManager() {
       return;
     }
 
-    const { data: liftData, error: liftError } = await supabase
-      .from("lift_profiles")
-      .select("exercise_id,estimated_1rm")
-      .eq("user_id", currentUserId);
+    const { data: liftData, error: liftError } = liftResult;
 
     if (liftError) {
       setStatus("error");
@@ -109,12 +143,7 @@ export function PrGoalManager() {
       return;
     }
 
-    const { data: goalData, error: goalError } = await supabase
-      .from("pr_goals")
-      .select("id,exercise_id,current_estimated_1rm,target_weight,target_date,status,exercises(name,slug,default_increment)")
-      .eq("user_id", currentUserId)
-      .eq("status", "active")
-      .order("target_date", { ascending: true });
+    const { data: goalData, error: goalError } = goalResult;
 
     if (goalError) {
       setStatus("error");
@@ -136,6 +165,14 @@ export function PrGoalManager() {
       setTargetWeight(String(roundDisplayWeight(Number(firstLift.estimated_1rm) * 1.05)));
     }
 
+    writeClientCache<PrCache>(prCacheKey, {
+      exerciseId: defaultExerciseId,
+      exercises: exerciseRows,
+      goals: (goalData ?? []) as unknown as PrGoalRow[],
+      liftProfiles: liftRows,
+      targetWeight: firstLift ? String(roundDisplayWeight(Number(firstLift.estimated_1rm) * 1.05)) : targetWeight,
+      userId: currentUserId
+    });
     setStatus("ready");
   }
 
