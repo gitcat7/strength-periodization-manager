@@ -82,6 +82,15 @@ type TrainingValidationIssue = {
   severity: "error" | "warning";
 };
 
+type WorkoutSummary = {
+  averageRpe: number | null;
+  completedSets: number;
+  completionRate: number;
+  headline: string;
+  totalSets: number;
+  totalVolume: number;
+};
+
 const todayCacheKey = "strength-training-cache:today";
 const restTimerSettingsKey = "strength-training-rest-timer";
 const restTimerOptions = [60, 90, 120, 180];
@@ -100,6 +109,7 @@ export function TodayWorkout() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [message, setMessage] = useState("");
   const [validationIssues, setValidationIssues] = useState<TrainingValidationIssue[]>([]);
+  const [workoutSummary, setWorkoutSummary] = useState<WorkoutSummary | null>(null);
   const [restTimerEnabled, setRestTimerEnabled] = useState(true);
   const [restSeconds, setRestSeconds] = useState(120);
   const [restRemaining, setRestRemaining] = useState(0);
@@ -481,6 +491,7 @@ export function TodayWorkout() {
     if (blockingIssues.length > 0) {
       setSaveStatus("error");
       setValidationIssues(nextValidationIssues);
+      setWorkoutSummary(null);
       setMessage(`发现 ${blockingIssues.length} 个需要修正的数据，请检查后再${completeWorkout ? "完成训练" : "保存"}。`);
       return;
     }
@@ -561,6 +572,7 @@ export function TodayWorkout() {
       );
       setWorkout({ ...workout, status: "completed" });
       setValidationIssues([]);
+      setWorkoutSummary(buildWorkoutSummary({ exercises, setLogs }));
       await trackEvent({
         eventName: "workout_completed",
         properties: {
@@ -749,6 +761,8 @@ export function TodayWorkout() {
         }}
         onToggle={(enabled) => updateRestTimerSettings({ enabled })}
       />
+
+      {workoutSummary ? <WorkoutSummaryPanel summary={workoutSummary} /> : null}
 
       {coachRecommendations.length > 0 ? (
         <div className="rounded-xl border border-line bg-white p-4">
@@ -1033,6 +1047,37 @@ function RestTimerPanel({
   );
 }
 
+function WorkoutSummaryPanel({ summary }: { summary: WorkoutSummary }) {
+  return (
+    <div className="rounded-xl border border-action/20 bg-action/5 p-4">
+      <div className="flex items-start gap-3">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-action text-white">
+          <CheckCircle2 size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold">本次训练摘要</h3>
+          <p className="mt-1 text-sm leading-6 text-muted">{summary.headline}</p>
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <SummaryMetric label="完成组数" value={`${summary.completedSets}/${summary.totalSets}`} />
+            <SummaryMetric label="完成率" value={`${Math.round(summary.completionRate * 100)}%`} />
+            <SummaryMetric label="总容量" value={`${Math.round(summary.totalVolume).toLocaleString()}kg`} />
+            <SummaryMetric label="平均 RPE" value={summary.averageRpe === null ? "-" : summary.averageRpe.toFixed(1)} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SummaryMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-white px-3 py-2">
+      <p className="text-xs text-muted">{label}</p>
+      <p className="mt-1 font-semibold text-ink">{value}</p>
+    </div>
+  );
+}
+
 function WeightInput({
   increment,
   label,
@@ -1207,6 +1252,68 @@ function readRestTimerSettings() {
 
 function writeRestTimerSettings(settings: { enabled: boolean; seconds: number }) {
   window.localStorage.setItem(restTimerSettingsKey, JSON.stringify(settings));
+}
+
+function buildWorkoutSummary({
+  exercises,
+  setLogs
+}: {
+  exercises: WorkoutExerciseRow[];
+  setLogs: Record<string, SetLogRow[]>;
+}) {
+  const exerciseById = new Map(exercises.map((exercise) => [exercise.id, exercise]));
+  const allLogs = Object.values(setLogs).flat();
+  const completedLogs = allLogs.filter((log) => log.completed);
+  const rpeValues = completedLogs
+    .map((log) => log.rpe)
+    .filter((rpe): rpe is number => typeof rpe === "number" && Number.isFinite(rpe));
+  const averageRpe = rpeValues.length > 0 ? rpeValues.reduce((sum, rpe) => sum + rpe, 0) / rpeValues.length : null;
+  const totalVolume = completedLogs.reduce((sum, log) => {
+    const exercise = exerciseById.get(log.workout_exercise_id);
+    if (exercise?.exercises?.slug === "cardio_zone2") return sum;
+
+    const weight = log.actual_weight ?? log.target_weight;
+    const reps = log.actual_reps ?? log.target_reps;
+    return sum + weight * reps;
+  }, 0);
+  const completionRate = allLogs.length > 0 ? completedLogs.length / allLogs.length : 0;
+
+  return {
+    averageRpe,
+    completedSets: completedLogs.length,
+    completionRate,
+    headline: getWorkoutSummaryHeadline({ averageRpe, completionRate, totalVolume }),
+    totalSets: allLogs.length,
+    totalVolume
+  };
+}
+
+function getWorkoutSummaryHeadline({
+  averageRpe,
+  completionRate,
+  totalVolume
+}: {
+  averageRpe: number | null;
+  completionRate: number;
+  totalVolume: number;
+}) {
+  if (completionRate >= 1 && averageRpe !== null && averageRpe <= 8.5) {
+    return "完成度很好，强度控制在可推进区间。下次按建议微调重量即可。";
+  }
+
+  if (averageRpe !== null && averageRpe >= 9) {
+    return "本次主观强度偏高，下次优先保证动作质量和恢复，不急着继续加重。";
+  }
+
+  if (completionRate < 1) {
+    return "本次没有完全完成计划，先保留记录，后续建议会更偏保守。";
+  }
+
+  if (totalVolume > 0) {
+    return "本次训练已形成有效容量，继续保持稳定记录，系统会逐步校准你的训练重量。";
+  }
+
+  return "训练已记录，继续保持稳定执行。";
 }
 
 function validateTrainingLogs({
