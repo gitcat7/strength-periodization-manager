@@ -410,6 +410,7 @@ export function TodayWorkout() {
     updateSetLog(exercise.id, log.set_index, {
       actual_weight: log.actual_weight ?? log.target_weight,
       actual_reps: log.actual_reps ?? log.target_reps,
+      rpe: completed ? getCompletedSetRpe(exercise, log.rpe) : log.rpe,
       completed
     });
 
@@ -423,12 +424,13 @@ export function TodayWorkout() {
     setValidationIssues([]);
     setSetLogs((current) => {
       const nextLogs = Object.fromEntries(
-        Object.entries(current).map(([workoutExerciseId, logs]) => [
-          workoutExerciseId,
-          logs.map((log) => ({
+        exercises.map((exercise) => [
+          exercise.id,
+          (current[exercise.id] ?? []).map((log) => ({
             ...log,
             actual_weight: log.target_weight,
             actual_reps: log.target_reps,
+            rpe: getCompletedSetRpe(exercise, log.rpe),
             completed: true
           }))
         ])
@@ -441,6 +443,7 @@ export function TodayWorkout() {
   function fillExerciseByPlan(exerciseId: string) {
     setSaveStatus("idle");
     setValidationIssues([]);
+    const exercise = exercises.find((item) => item.id === exerciseId);
     setSetLogs((current) => {
       const nextLogs = {
         ...current,
@@ -448,6 +451,7 @@ export function TodayWorkout() {
           ...log,
           actual_weight: log.target_weight,
           actual_reps: log.target_reps,
+          rpe: exercise ? getCompletedSetRpe(exercise, log.rpe) : log.rpe,
           completed: true
         }))
       };
@@ -1292,6 +1296,11 @@ function getWeightIncrement(exercise: WorkoutExerciseRow) {
 
   const increment = Number(exercise.exercises?.default_increment);
   return increment > 0 ? increment : 2.5;
+}
+
+function getCompletedSetRpe(exercise: WorkoutExerciseRow, currentRpe: number | null) {
+  if (exercise.exercises?.slug === "cardio_zone2") return currentRpe;
+  return currentRpe ?? 8;
 }
 
 function roundToHalf(value: number) {
