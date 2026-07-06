@@ -570,14 +570,18 @@ export function TodayWorkout() {
           exerciseName: item.exerciseName
         }))
       );
+      const summary = buildWorkoutSummary({ exercises, setLogs });
       setWorkout({ ...workout, status: "completed" });
       setValidationIssues([]);
-      setWorkoutSummary(buildWorkoutSummary({ exercises, setLogs }));
+      setWorkoutSummary(summary);
       await trackEvent({
         eventName: "workout_completed",
         properties: {
           completed_sets: allLogs.filter((log) => log.completed).length,
+          average_rpe: summary.averageRpe,
+          completion_rate: summary.completionRate,
           recommendations: recommendationPayload.length,
+          total_volume: summary.totalVolume,
           workout_name: workout.name
         },
         supabase,
