@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Brain, CalendarDays, CheckCircle2, Dumbbell, Loader2, Save } from "lucide-react";
+import { Brain, CalendarDays, CheckCircle2, Dumbbell, Loader2, Pause, Play, RotateCcw, Save, Timer } from "lucide-react";
 import {
   buildExerciseCoachRecommendation,
   getInterruptionAdvice,
@@ -63,6 +63,8 @@ type TodayCache = {
 };
 
 const todayCacheKey = "strength-training-cache:today";
+const restTimerSettingsKey = "strength-training-rest-timer";
+const restTimerOptions = [60, 90, 120, 180];
 
 export function TodayWorkout() {
   const router = useRouter();
@@ -77,6 +79,38 @@ export function TodayWorkout() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [message, setMessage] = useState("");
+  const [restTimerEnabled, setRestTimerEnabled] = useState(true);
+  const [restSeconds, setRestSeconds] = useState(120);
+  const [restRemaining, setRestRemaining] = useState(0);
+  const [restRunning, setRestRunning] = useState(false);
+  const [restContext, setRestContext] = useState("完成一组后自动开始休息");
+
+  useEffect(() => {
+    const settings = readRestTimerSettings();
+    if (!settings) return;
+
+    setRestTimerEnabled(settings.enabled);
+    setRestSeconds(settings.seconds);
+  }, []);
+
+  useEffect(() => {
+    if (!restRunning || restRemaining <= 0) return;
+
+    const timerId = window.setInterval(() => {
+      setRestRemaining((current) => {
+        if (current <= 1) {
+          window.clearInterval(timerId);
+          setRestRunning(false);
+          setRestContext("休息结束，可以开始下一组。");
+          return 0;
+        }
+
+        return current - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timerId);
+  }, [restRemaining, restRunning]);
 
   useEffect(() => {
     async function loadTodayWorkout() {
@@ -327,6 +361,39 @@ export function TodayWorkout() {
       writeDraftLogs(workout?.id, nextLogs);
       return nextLogs;
     });
+  }
+
+  function updateRestTimerSettings(nextSettings: { enabled?: boolean; seconds?: number }) {
+    const nextEnabled = nextSettings.enabled ?? restTimerEnabled;
+    const nextSeconds = nextSettings.seconds ?? restSeconds;
+    setRestTimerEnabled(nextEnabled);
+    setRestSeconds(nextSeconds);
+    writeRestTimerSettings({ enabled: nextEnabled, seconds: nextSeconds });
+  }
+
+  function startRestTimer(exercise: WorkoutExerciseRow, setIndex: number) {
+    if (!restTimerEnabled || exercise.exercises?.slug === "cardio_zone2") return;
+
+    const exerciseName = exercise.exercises?.name ?? "动作";
+    setRestRemaining(restSeconds);
+    setRestRunning(true);
+    setRestContext(`${exerciseName} 第 ${setIndex} 组后休息`);
+
+    if ("vibrate" in navigator) {
+      navigator.vibrate(35);
+    }
+  }
+
+  function handleSetCompletionChange(exercise: WorkoutExerciseRow, log: SetLogRow, completed: boolean) {
+    updateSetLog(exercise.id, log.set_index, {
+      actual_weight: log.actual_weight ?? log.target_weight,
+      actual_reps: log.actual_reps ?? log.target_reps,
+      completed
+    });
+
+    if (completed && !log.completed) {
+      startRestTimer(exercise, log.set_index);
+    }
   }
 
   function fillByPlan() {
@@ -582,6 +649,32 @@ export function TodayWorkout() {
         </p>
       ) : null}
 
+      <RestTimerPanel
+        context={restContext}
+        enabled={restTimerEnabled}
+        isRunning={restRunning}
+        options={restTimerOptions}
+        remaining={restRemaining}
+        seconds={restSeconds}
+        onNudge={(seconds) => setRestRemaining((current) => Math.max(0, current + seconds))}
+        onPause={() => setRestRunning(false)}
+        onResume={() => {
+          if (restRemaining > 0) setRestRunning(true);
+        }}
+        onReset={() => {
+          setRestRemaining(restSeconds);
+          setRestRunning(restTimerEnabled);
+          setRestContext("手动重置组间休息");
+        }}
+        onSecondsChange={(seconds) => updateRestTimerSettings({ seconds })}
+        onSkip={() => {
+          setRestRemaining(0);
+          setRestRunning(false);
+          setRestContext("休息已跳过，可以开始下一组。");
+        }}
+        onToggle={(enabled) => updateRestTimerSettings({ enabled })}
+      />
+
       {coachRecommendations.length > 0 ? (
         <div className="rounded-xl border border-line bg-white p-4">
           <h3 className="font-semibold">下次训练建议</h3>
@@ -652,10 +745,12 @@ export function TodayWorkout() {
                 <div className="mt-4 space-y-2">
                   {(setLogs[exercise.id] ?? []).map((log) => (
                     <div
-                      className="grid grid-cols-[2.5rem_1fr_1fr_1fr_2.25rem] items-center gap-2 rounded-lg bg-field px-2 py-2 text-sm"
+                      className={`grid grid-cols-[2.5rem_1fr_1fr_1fr_2.25rem] items-center gap-2 rounded-lg px-2 py-2 text-sm transition ${
+                        log.completed ? "bg-action/10 ring-1 ring-action/20" : "bg-field"
+                      }`}
                       key={`${exercise.id}-${log.set_index}`}
                     >
-                      <span className="font-semibold">{log.set_index}</span>
+                      <span className={`font-semibold ${log.completed ? "text-action" : ""}`}>{log.set_index}</span>
                       <NumberInput
                         label="重量"
                         min={0}
@@ -683,13 +778,7 @@ export function TodayWorkout() {
                           aria-label={`第 ${log.set_index} 组完成`}
                           checked={log.completed}
                           className="h-4 w-4 accent-action"
-                          onChange={(event) =>
-                            updateSetLog(exercise.id, log.set_index, {
-                              actual_weight: log.actual_weight ?? log.target_weight,
-                              actual_reps: log.actual_reps ?? log.target_reps,
-                              completed: event.target.checked
-                            })
-                          }
+                          onChange={(event) => handleSetCompletionChange(exercise, log, event.target.checked)}
                           type="checkbox"
                         />
                       </label>
@@ -717,6 +806,130 @@ export function TodayWorkout() {
         </Link>
       </div>
     </section>
+  );
+}
+
+function RestTimerPanel({
+  context,
+  enabled,
+  isRunning,
+  options,
+  remaining,
+  seconds,
+  onNudge,
+  onPause,
+  onReset,
+  onResume,
+  onSecondsChange,
+  onSkip,
+  onToggle
+}: {
+  context: string;
+  enabled: boolean;
+  isRunning: boolean;
+  options: number[];
+  remaining: number;
+  seconds: number;
+  onNudge: (seconds: number) => void;
+  onPause: () => void;
+  onReset: () => void;
+  onResume: () => void;
+  onSecondsChange: (seconds: number) => void;
+  onSkip: () => void;
+  onToggle: (enabled: boolean) => void;
+}) {
+  const progress = seconds > 0 ? Math.max(0, Math.min(100, (remaining / seconds) * 100)) : 0;
+  const hasActiveTimer = remaining > 0;
+
+  return (
+    <div className="rounded-xl border border-line bg-white p-4">
+      <div className="flex items-start gap-3">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-action/10 text-action">
+          <Timer size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="font-semibold">组间休息</h3>
+              <p className="mt-1 text-sm text-muted">{enabled ? context : "已关闭自动休息倒计时"}</p>
+            </div>
+            <button
+              className={`h-9 rounded-lg px-3 text-sm font-semibold ${
+                enabled ? "bg-action text-white" : "border border-line text-muted"
+              }`}
+              onClick={() => onToggle(!enabled)}
+              type="button"
+            >
+              {enabled ? "已开启" : "已关闭"}
+            </button>
+          </div>
+
+          <div className="mt-4 flex items-end justify-between gap-3">
+            <div>
+              <p className="font-mono text-4xl font-semibold tabular-nums text-ink">
+                {formatRestTimer(remaining || seconds)}
+              </p>
+              <p className="mt-1 text-xs text-muted">{hasActiveTimer ? "倒计时中" : "默认时长"}</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                aria-label={isRunning ? "暂停休息倒计时" : "继续休息倒计时"}
+                className="grid h-10 w-10 place-items-center rounded-lg border border-line text-ink disabled:opacity-50"
+                disabled={!enabled || !hasActiveTimer}
+                onClick={isRunning ? onPause : onResume}
+                type="button"
+              >
+                {isRunning ? <Pause size={17} /> : <Play size={17} />}
+              </button>
+              <button
+                aria-label="重置休息倒计时"
+                className="grid h-10 w-10 place-items-center rounded-lg border border-line text-ink disabled:opacity-50"
+                disabled={!enabled}
+                onClick={onReset}
+                type="button"
+              >
+                <RotateCcw size={17} />
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-3 h-2 overflow-hidden rounded-full bg-field">
+            <div className="h-full rounded-full bg-action transition-all" style={{ width: `${progress}%` }} />
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {options.map((option) => (
+              <button
+                className={`h-9 rounded-lg px-3 text-sm font-semibold ${
+                  seconds === option ? "bg-ink text-white" : "border border-line text-ink"
+                }`}
+                key={option}
+                onClick={() => onSecondsChange(option)}
+                type="button"
+              >
+                {formatRestOption(option)}
+              </button>
+            ))}
+            <button
+              className="h-9 rounded-lg border border-line px-3 text-sm font-semibold text-ink disabled:opacity-50"
+              disabled={!enabled}
+              onClick={() => onNudge(30)}
+              type="button"
+            >
+              +30 秒
+            </button>
+            <button
+              className="h-9 rounded-lg border border-line px-3 text-sm font-semibold text-ink disabled:opacity-50"
+              disabled={!enabled || !hasActiveTimer}
+              onClick={onSkip}
+              type="button"
+            >
+              跳过
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -816,6 +1029,38 @@ function clearDraftLogs(workoutId: string) {
 
 function getDraftKey(workoutId: string) {
   return `strength-training-draft:${workoutId}`;
+}
+
+function readRestTimerSettings() {
+  try {
+    const rawSettings = window.localStorage.getItem(restTimerSettingsKey);
+    if (!rawSettings) return null;
+
+    const settings = JSON.parse(rawSettings) as { enabled?: boolean; seconds?: number };
+    const seconds = Number(settings.seconds);
+    return {
+      enabled: typeof settings.enabled === "boolean" ? settings.enabled : true,
+      seconds: restTimerOptions.includes(seconds) ? seconds : 120
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeRestTimerSettings(settings: { enabled: boolean; seconds: number }) {
+  window.localStorage.setItem(restTimerSettingsKey, JSON.stringify(settings));
+}
+
+function formatRestTimer(seconds: number) {
+  const safeSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const restSeconds = String(safeSeconds % 60).padStart(2, "0");
+  return `${minutes}:${restSeconds}`;
+}
+
+function formatRestOption(seconds: number) {
+  if (seconds < 60) return `${seconds} 秒`;
+  return `${Math.floor(seconds / 60)} 分${seconds % 60 === 0 ? "" : `${seconds % 60} 秒`}`;
 }
 
 function formatRecommendationType(type: ExerciseCoachRecommendation["type"]) {
