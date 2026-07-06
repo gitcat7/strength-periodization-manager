@@ -798,81 +798,97 @@ export function TodayWorkout() {
       </div>
 
       <div className="space-y-3">
-        {exercises.map((exercise, index) => (
-          <article className="rounded-xl border border-line bg-white p-4" key={exercise.id}>
-            <div className="flex items-start gap-3">
-              <span className="grid h-8 w-8 place-items-center rounded-full bg-action text-sm font-semibold text-white">
-                {index + 1}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                  <h3 className="font-semibold">{exercise.exercises?.name ?? "动作"}</h3>
-                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                    <p className="font-semibold text-action">
-                      {formatPrescription({
-                        slug: exercise.exercises?.slug,
-                        targetSets: exercise.target_sets,
-                        targetReps: exercise.target_reps,
-                        targetWeight: Number(exercise.target_weight)
-                      })}
-                    </p>
-                    <button
-                      className="h-8 rounded-lg border border-line px-2 text-xs font-semibold text-ink"
-                      onClick={() => fillExerciseByPlan(exercise.id)}
-                      type="button"
-                    >
-                      本动作按计划
-                    </button>
+        {exercises.map((exercise, index) => {
+          const exerciseLogs = setLogs[exercise.id] ?? [];
+          const completedExerciseSets = exerciseLogs.filter((log) => log.completed).length;
+
+          return (
+            <article className="rounded-xl border border-line bg-white p-4" key={exercise.id}>
+              <div className="flex items-start gap-3">
+                <span className="grid h-8 w-8 place-items-center rounded-full bg-action text-sm font-semibold text-white">
+                  {index + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-semibold">{exercise.exercises?.name ?? "动作"}</h3>
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                          completedExerciseSets === exerciseLogs.length && exerciseLogs.length > 0
+                            ? "bg-action/10 text-action"
+                            : "bg-field text-muted"
+                        }`}
+                      >
+                        {completedExerciseSets}/{exerciseLogs.length} 组
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                      <p className="font-semibold text-action">
+                        {formatPrescription({
+                          slug: exercise.exercises?.slug,
+                          targetSets: exercise.target_sets,
+                          targetReps: exercise.target_reps,
+                          targetWeight: Number(exercise.target_weight)
+                        })}
+                      </p>
+                      <button
+                        className="h-8 rounded-lg border border-line px-2 text-xs font-semibold text-ink"
+                        onClick={() => fillExerciseByPlan(exercise.id)}
+                        type="button"
+                      >
+                        本动作按计划
+                      </button>
+                    </div>
+                  </div>
+                  <p className="mt-2 text-sm text-muted">{getExerciseNote(exercise.exercises?.slug, index)}</p>
+                  <div className="mt-4 space-y-2">
+                    {exerciseLogs.map((log) => (
+                      <div
+                        className={`grid grid-cols-[2.5rem_1fr_1fr_1fr_2.25rem] items-center gap-2 rounded-lg px-2 py-2 text-sm transition ${
+                          log.completed ? "bg-action/10 ring-1 ring-action/20" : "bg-field"
+                        }`}
+                        key={`${exercise.id}-${log.set_index}`}
+                      >
+                        <span className={`font-semibold ${log.completed ? "text-action" : ""}`}>{log.set_index}</span>
+                        <WeightInput
+                          increment={getWeightIncrement(exercise)}
+                          label="重量"
+                          min={0}
+                          value={log.actual_weight ?? log.target_weight}
+                          onChange={(value) => updateSetLog(exercise.id, log.set_index, { actual_weight: value })}
+                        />
+                        <NumberInput
+                          label={exercise.exercises?.slug === "cardio_zone2" ? "分钟" : "次数"}
+                          min={0}
+                          step={1}
+                          value={log.actual_reps ?? log.target_reps}
+                          onChange={(value) => updateSetLog(exercise.id, log.set_index, { actual_reps: value })}
+                        />
+                        <NumberInput
+                          label="RPE"
+                          max={10}
+                          min={1}
+                          step={0.5}
+                          value={log.rpe}
+                          onChange={(value) => updateSetLog(exercise.id, log.set_index, { rpe: value })}
+                        />
+                        <label className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white">
+                          <input
+                            aria-label={`第 ${log.set_index} 组完成`}
+                            checked={log.completed}
+                            className="h-4 w-4 accent-action"
+                            onChange={(event) => handleSetCompletionChange(exercise, log, event.target.checked)}
+                            type="checkbox"
+                          />
+                        </label>
+                      </div>
+                    ))}
                   </div>
                 </div>
-                <p className="mt-2 text-sm text-muted">{getExerciseNote(exercise.exercises?.slug, index)}</p>
-                <div className="mt-4 space-y-2">
-                  {(setLogs[exercise.id] ?? []).map((log) => (
-                    <div
-                      className={`grid grid-cols-[2.5rem_1fr_1fr_1fr_2.25rem] items-center gap-2 rounded-lg px-2 py-2 text-sm transition ${
-                        log.completed ? "bg-action/10 ring-1 ring-action/20" : "bg-field"
-                      }`}
-                      key={`${exercise.id}-${log.set_index}`}
-                    >
-                      <span className={`font-semibold ${log.completed ? "text-action" : ""}`}>{log.set_index}</span>
-                      <WeightInput
-                        increment={getWeightIncrement(exercise)}
-                        label="重量"
-                        min={0}
-                        value={log.actual_weight ?? log.target_weight}
-                        onChange={(value) => updateSetLog(exercise.id, log.set_index, { actual_weight: value })}
-                      />
-                      <NumberInput
-                        label={exercise.exercises?.slug === "cardio_zone2" ? "分钟" : "次数"}
-                        min={0}
-                        step={1}
-                        value={log.actual_reps ?? log.target_reps}
-                        onChange={(value) => updateSetLog(exercise.id, log.set_index, { actual_reps: value })}
-                      />
-                      <NumberInput
-                        label="RPE"
-                        max={10}
-                        min={1}
-                        step={0.5}
-                        value={log.rpe}
-                        onChange={(value) => updateSetLog(exercise.id, log.set_index, { rpe: value })}
-                      />
-                      <label className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white">
-                        <input
-                          aria-label={`第 ${log.set_index} 组完成`}
-                          checked={log.completed}
-                          className="h-4 w-4 accent-action"
-                          onChange={(event) => handleSetCompletionChange(exercise, log, event.target.checked)}
-                          type="checkbox"
-                        />
-                      </label>
-                    </div>
-                  ))}
-                </div>
               </div>
-            </div>
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
 
       <div className="grid gap-2">
