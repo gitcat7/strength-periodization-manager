@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Download, Loader2, LogOut, ShieldAlert, UserRound } from "lucide-react";
+import { Download, Loader2, LogOut, RefreshCcw, ShieldAlert, UserRound } from "lucide-react";
 import { trackEvent } from "@/lib/analytics";
-import { readClientCache, writeClientCache } from "@/lib/client-cache";
+import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type WorkoutRow = {
@@ -169,6 +169,29 @@ export function SettingsPanel() {
     window.location.href = "/login";
   }
 
+  async function clearLocalCache() {
+    setStatus("working");
+    setMessage("");
+
+    try {
+      clearTrainingDataCaches();
+      if ("caches" in window) {
+        const cacheKeys = await window.caches.keys();
+        await Promise.all(
+          cacheKeys
+            .filter((key) => key.startsWith("strength-periodization"))
+            .map((key) => window.caches.delete(key))
+        );
+      }
+      writeClientCache<SettingsCache>(settingsCacheKey, { email });
+      setMessage("本地缓存已清理。页面会重新从服务器读取最新数据。");
+      setStatus("ready");
+    } catch (error) {
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : "本地缓存清理失败，请刷新页面后重试。");
+    }
+  }
+
   if (status === "loading") {
     return (
       <div className="flex items-center gap-3 rounded-xl border border-line p-4 text-muted">
@@ -245,6 +268,16 @@ export function SettingsPanel() {
       >
         提交问题反馈
       </Link>
+
+      <button
+        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={status === "working"}
+        onClick={clearLocalCache}
+        type="button"
+      >
+        {status === "working" ? <Loader2 className="animate-spin" size={18} /> : <RefreshCcw size={18} />}
+        清理本地缓存
+      </button>
 
       <button
         className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
