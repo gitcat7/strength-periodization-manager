@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, CheckCircle2, Loader2, Target, Trophy, XCircle } from "lucide-react";
 import {
+  assessPrGoal,
   buildAttemptPlan,
   getDaysUntilTarget,
   getDefaultTargetDate,
@@ -305,6 +306,11 @@ export function PrGoalManager() {
         <section className="space-y-4">
           {goals.map((goal) => {
             const activeGoalPlan = buildGoalPlan(goal);
+            const assessment = assessPrGoal({
+              currentEstimatedOneRm: Number(goal.current_estimated_1rm),
+              daysUntilTarget: activeGoalPlan.daysUntilTarget,
+              targetWeight: Number(goal.target_weight)
+            });
 
             return (
               <article className="space-y-4 rounded-xl border border-line bg-white p-4" key={goal.id}>
@@ -324,6 +330,16 @@ export function PrGoalManager() {
                   <Metric label="当前估算 1RM" value={`${Number(goal.current_estimated_1rm).toFixed(1)}kg`} />
                   <Metric label="目标日期" value={goal.target_date} />
                   <Metric label="当前阶段" value={getPrPhaseLabel(activeGoalPlan.phase)} />
+                </div>
+
+                <div className={`rounded-lg border px-4 py-3 ${getAssessmentClassName(assessment.level)}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold">{assessment.label}</p>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold">
+                      当前 1RM 的 {Math.round(assessment.ratio * 100)}%
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm leading-6">{assessment.message}</p>
                 </div>
 
                 <div className="rounded-lg bg-field p-4">
@@ -476,6 +492,13 @@ function buildGoalPlan(goal: PrGoalRow) {
       increment
     )
   };
+}
+
+function getAssessmentClassName(level: "conservative" | "reasonable" | "aggressive" | "overdue") {
+  if (level === "reasonable") return "border-action/20 bg-action/5 text-ink";
+  if (level === "conservative") return "border-line bg-field text-ink";
+  if (level === "overdue") return "border-red-200 bg-red-50 text-red-700";
+  return "border-amber/30 bg-amber/10 text-amber-900";
 }
 
 function roundDisplayWeight(weight: number) {

@@ -1,6 +1,14 @@
 import { roundToNearestPlate } from "@/domain/strength";
 
 export type PrPhase = "base" | "specific" | "taper" | "test" | "overdue";
+export type PrGoalAssessmentLevel = "conservative" | "reasonable" | "aggressive" | "overdue";
+
+export type PrGoalAssessment = {
+  level: PrGoalAssessmentLevel;
+  label: string;
+  message: string;
+  ratio: number;
+};
 
 export function getDaysUntilTarget(targetDate: string, now = new Date()) {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -68,6 +76,61 @@ export function buildAttemptPlan(currentEstimatedOneRm: number, targetWeight: nu
       note: "只在第二把很稳时尝试。"
     }
   ];
+}
+
+export function assessPrGoal({
+  currentEstimatedOneRm,
+  daysUntilTarget,
+  targetWeight
+}: {
+  currentEstimatedOneRm: number;
+  daysUntilTarget: number;
+  targetWeight: number;
+}): PrGoalAssessment {
+  const ratio = currentEstimatedOneRm > 0 ? targetWeight / currentEstimatedOneRm : 0;
+
+  if (daysUntilTarget < 0) {
+    return {
+      level: "overdue",
+      label: "目标已过期",
+      message: "目标日期已经过去。建议标记完成、取消，或根据最近训练表现重新设置日期。",
+      ratio
+    };
+  }
+
+  if (ratio <= 1.02) {
+    return {
+      level: "conservative",
+      label: "偏保守",
+      message: "目标接近当前估算 1RM，适合先建立成功记录；如果近期训练状态很好，可以考虑略微上调。",
+      ratio
+    };
+  }
+
+  if (ratio <= 1.08 && daysUntilTarget >= 21) {
+    return {
+      level: "reasonable",
+      label: "合理目标",
+      message: "目标增幅和准备时间匹配。保持当前周期推进，测试前一周注意减量和恢复。",
+      ratio
+    };
+  }
+
+  if (ratio <= 1.05 && daysUntilTarget >= 7) {
+    return {
+      level: "reasonable",
+      label: "合理目标",
+      message: "目标增幅不大，剩余时间足够做一次专项准备。注意不要在训练中提前硬冲。",
+      ratio
+    };
+  }
+
+  return {
+    level: "aggressive",
+    label: "偏激进",
+    message: "目标相对当前估算 1RM 或剩余准备时间偏激进。建议保守安排第一把，训练中以动作速度和恢复为准。",
+    ratio
+  };
 }
 
 export function getDefaultTargetDate(now = new Date()) {
