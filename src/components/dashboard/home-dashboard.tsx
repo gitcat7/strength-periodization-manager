@@ -375,6 +375,9 @@ export function HomeDashboard() {
     );
   }
 
+  const nextWorkoutMeta = nextWorkout ? getWorkoutMeta(nextWorkout.name) : null;
+  const nextWorkoutDistance = nextWorkout ? getDaysUntilDate(nextWorkout.scheduled_date) : null;
+
   return (
     <main className="min-h-screen px-4 py-6">
       <section className="mx-auto max-w-3xl space-y-5">
@@ -409,8 +412,18 @@ export function HomeDashboard() {
           </div>
           {nextWorkout ? (
             <>
-              <div className="mb-3 rounded-lg bg-field px-3 py-2 text-sm text-muted">
-                {nextWorkout.scheduled_date} · {getWorkoutMeta(nextWorkout.name).focus}
+              <div className="mb-3 rounded-lg bg-field px-3 py-3">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 font-semibold text-ink">
+                    <CalendarDays size={14} />
+                    {formatWorkoutDistance(nextWorkoutDistance)}
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1 font-semibold text-action">
+                    {nextWorkoutMeta?.label} · {nextWorkoutMeta?.intent}
+                  </span>
+                  <span className="text-muted">{nextWorkout.scheduled_date}</span>
+                </div>
+                <p className="mt-2 text-sm text-muted">{nextWorkoutMeta?.focus}</p>
               </div>
               <div className="space-y-2">
                 {nextWorkoutExercises.slice(0, 5).map((exercise) => (
@@ -543,6 +556,20 @@ function formatDate(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function getDaysUntilDate(dateText: string) {
+  const today = new Date(formatDate(new Date()));
+  const target = new Date(dateText);
+  const diffMs = target.getTime() - today.getTime();
+  return Math.round(diffMs / 86400000);
+}
+
+function formatWorkoutDistance(days: number | null) {
+  if (days === null) return "待安排";
+  if (days <= 0) return "今天训练";
+  if (days === 1) return "明天训练";
+  return `${days} 天后`;
 }
 
 function withTimeout<T>(promise: PromiseLike<T>, message: string, timeoutMs = 10000) {
