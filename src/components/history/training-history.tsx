@@ -60,6 +60,16 @@ type HistoryCache = {
   workouts: WorkoutRow[];
 };
 
+type WorkoutReview = {
+  averageRpe: number | null;
+  completedSets: number;
+  completionRate: number;
+  headline: string;
+  plannedSets: number;
+  tone: "good" | "neutral" | "warning";
+  volume: number;
+};
+
 const historyCacheKey = "strength-training-cache:history";
 
 export function TrainingHistory() {
@@ -354,11 +364,7 @@ export function TrainingHistory() {
           const exercises = exercisesByWorkoutId[workout.id] ?? [];
           const workoutRecommendations = recommendationsByWorkoutId[workout.id] ?? [];
           const workoutLogs = exercises.flatMap((exercise) => setLogsByExerciseId[exercise.id] ?? []);
-          const completedSets = workoutLogs.filter((log) => log.completed);
-          const volume = completedSets.reduce(
-            (sum, log) => sum + Number(log.actual_weight ?? 0) * Number(log.actual_reps ?? 0),
-            0
-          );
+          const review = buildWorkoutReview(workoutLogs);
 
           return (
             <article className="rounded-xl border border-line bg-white p-4" key={workout.id}>
@@ -367,10 +373,20 @@ export function TrainingHistory() {
                   <p className="text-sm text-muted">{workout.scheduled_date}</p>
                   <h2 className="font-semibold">{workout.name}</h2>
                   <p className="mt-1 text-sm text-muted">
-                    {completedSets.length} 组 · {Math.round(volume).toLocaleString()} kg
+                    {review.completedSets} 组 · {Math.round(review.volume).toLocaleString()} kg
                   </p>
                 </div>
                 <span className="rounded-full bg-action/10 px-3 py-1 text-xs font-semibold text-action">已完成</span>
+              </div>
+
+              <div className={`mb-4 rounded-lg border px-3 py-3 ${getWorkoutReviewClassName(review.tone)}`}>
+                <div className="grid gap-2 text-sm sm:grid-cols-4">
+                  <ReviewMetric label="完成率" value={`${Math.round(review.completionRate * 100)}%`} />
+                  <ReviewMetric label="完成组数" value={`${review.completedSets}/${review.plannedSets}`} />
+                  <ReviewMetric label="平均 RPE" value={review.averageRpe === null ? "-" : review.averageRpe.toFixed(1)} />
+                  <ReviewMetric label="训练量" value={`${Math.round(review.volume).toLocaleString()}kg`} />
+                </div>
+                <p className="mt-3 text-sm leading-6">{review.headline}</p>
               </div>
 
               <div className="space-y-3">
@@ -494,6 +510,62 @@ function Metric({ label, value }: { label: string; value: string }) {
       <p className="text-xl font-semibold">{value}</p>
     </div>
   );
+}
+
+function ReviewMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs opacity-75">{label}</p>
+      <p className="mt-1 font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function buildWorkoutReview(logs: SetLogRow[]): WorkoutReview {
+  const completedLogs = logs.filter((log) => log.completed);
+  const rpeValues = completedLogs
+    .map((log) => log.rpe)
+    .filter((rpe): rpe is number => typeof rpe === "number");
+  const averageRpe = rpeValues.length > 0 ? rpeValues.reduce((sum, rpe) => sum + rpe, 0) / rpeValues.length : null;
+  const volume = completedLogs.reduce(
+    (sum, log) => sum + Number(log.actual_weight ?? 0) * Number(log.actual_reps ?? 0),
+    0
+  );
+  const completionRate = logs.length > 0 ? completedLogs.length / logs.length : 0;
+  const tone = getWorkoutReviewTone(completionRate, averageRpe);
+
+  return {
+    averageRpe,
+    completedSets: completedLogs.length,
+    completionRate,
+    headline: getWorkoutReviewHeadline(tone, completionRate, averageRpe),
+    plannedSets: logs.length,
+    tone,
+    volume
+  };
+}
+
+function getWorkoutReviewTone(completionRate: number, averageRpe: number | null): WorkoutReview["tone"] {
+  if (completionRate < 0.8 || (averageRpe !== null && averageRpe >= 9)) return "warning";
+  if (completionRate >= 0.95 && averageRpe !== null && averageRpe <= 8.5) return "good";
+  return "neutral";
+}
+
+function getWorkoutReviewHeadline(
+  tone: WorkoutReview["tone"],
+  completionRate: number,
+  averageRpe: number | null
+) {
+  if (tone === "good") return "这次执行质量不错：完成度高，主观强度也处在可持续推进区间。";
+  if (completionRate < 0.8) return "这次完成度偏低，复盘时优先看是否是时间、恢复或计划难度造成。";
+  if (averageRpe !== null && averageRpe >= 9) return "这次平均 RPE 偏高，下次同方向训练可以更关注恢复和动作速度。";
+  return "这次训练整体稳定，可以结合 Coach 建议继续微调后续重量。";
+}
+
+function getWorkoutReviewClassName(tone: WorkoutReview["tone"]) {
+  if (tone === "good") return "border-action/20 bg-action/5 text-ink";
+  if (tone === "warning") return "border-amber/30 bg-amber/10 text-amber-900";
+  return "border-line bg-field text-ink";
 }
 
 function NumberInput({
