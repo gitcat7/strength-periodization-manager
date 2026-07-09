@@ -636,6 +636,8 @@ export function ProgramManager() {
     );
   }
 
+  const nextPlanWorkoutId = workouts.find((workout) => workout.status !== "completed")?.id ?? null;
+
   return (
     <div className="space-y-5">
       <section className="grid gap-3 md:grid-cols-7">
@@ -784,17 +786,39 @@ export function ProgramManager() {
 
       {workouts.length > 0 ? (
         <section className="space-y-3">
-          {workouts.map((workout) => (
-            <article className="rounded-xl border border-line bg-white p-4" key={workout.id}>
+          {workouts.map((workout) => {
+            const workoutMeta = getWorkoutMeta(workout.name);
+            const workoutState = getPlanWorkoutState(workout, workout.id === nextPlanWorkoutId);
+
+            return (
+            <article
+              className={`rounded-xl border p-4 ${
+                workoutState.isNext
+                  ? "border-action bg-action/5"
+                  : workout.status === "completed"
+                    ? "border-line bg-field"
+                    : "border-line bg-white"
+              }`}
+              key={workout.id}
+            >
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm text-muted">{workout.scheduled_date}</p>
                   <h3 className="font-semibold">{workout.name}</h3>
-                  <p className="mt-1 text-sm text-muted">{getWorkoutMeta(workout.name).focus}</p>
+                  <p className="mt-1 text-sm text-muted">{workoutMeta.focus}</p>
                 </div>
-                <span className="rounded-full bg-action/10 px-3 py-1 text-xs font-semibold text-action">
-                  {getWorkoutMeta(workout.name).intent}
-                </span>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <span
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                      workoutState.isNext ? "bg-action text-white" : "bg-action/10 text-action"
+                    }`}
+                  >
+                    {workoutState.label}
+                  </span>
+                  <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-muted">
+                    {workoutMeta.intent}
+                  </span>
+                </div>
               </div>
               <div className="space-y-2">
                 {(workoutExercisesByWorkoutId[workout.id] ?? []).map((exercise) => (
@@ -812,7 +836,8 @@ export function ProgramManager() {
                 ))}
               </div>
             </article>
-          ))}
+            );
+          })}
         </section>
       ) : null}
     </div>
@@ -879,6 +904,33 @@ function formatRecommendationType(type: RecommendationType) {
   if (type === "decrease") return "降重";
   if (type === "deload") return "减量恢复";
   return "保持";
+}
+
+function getPlanWorkoutState(workout: WorkoutRow, isNextWorkout: boolean) {
+  if (workout.status === "completed") {
+    return {
+      isNext: false,
+      label: "已完成"
+    };
+  }
+
+  const days = getDaysFromToday(workout.scheduled_date);
+  return {
+    isNext: isNextWorkout,
+    label: formatPlanWorkoutDistance(days)
+  };
+}
+
+function getDaysFromToday(dateText: string) {
+  const today = new Date(formatDate(new Date()));
+  const target = new Date(dateText);
+  return Math.round((target.getTime() - today.getTime()) / 86400000);
+}
+
+function formatPlanWorkoutDistance(days: number) {
+  if (days <= 0) return "今天训练";
+  if (days === 1) return "明天训练";
+  return `${days} 天后`;
 }
 
 function formatDate(date: Date) {
