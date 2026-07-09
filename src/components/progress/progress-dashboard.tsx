@@ -50,6 +50,12 @@ type WeeklyTrend = {
   plannedSets: number;
 };
 
+type ProgressInsight = {
+  title: string;
+  message: string;
+  tone: "good" | "neutral" | "warning";
+};
+
 type ProgressCache = {
   setLogs: SetLogRow[];
   workoutExercises: WorkoutExerciseRow[];
@@ -198,9 +204,11 @@ export function ProgressDashboard() {
     const completionRate = plannedSets > 0 ? completedLogs.length / plannedSets : 0;
     const weeklyTrends = buildWeeklyTrends({ workoutById, exerciseById, workoutExercises, setLogs });
     const liftTrends = buildLiftTrends({ workoutById, exerciseById, setLogs });
+    const insight = buildProgressInsight({ completionRate, liftTrends, weeklyTrends });
 
     return {
       completionRate,
+      insight,
       liftTrends,
       totalVolume,
       weeklyTrends
@@ -246,6 +254,8 @@ export function ProgressDashboard() {
         <Metric icon={<BarChart3 size={16} />} label="总训练量" value={`${Math.round(progress.totalVolume).toLocaleString()} kg`} />
         <Metric icon={<TrendingUp size={16} />} label="完成率" value={`${Math.round(progress.completionRate * 100)}%`} />
       </section>
+
+      <ProgressInsightCard insight={progress.insight} />
 
       <section className="rounded-xl border border-line bg-white p-4">
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -304,6 +314,29 @@ function Metric({
   );
 }
 
+function ProgressInsightCard({ insight }: { insight: ProgressInsight }) {
+  const toneClassName =
+    insight.tone === "good"
+      ? "border-action/20 bg-action/5"
+      : insight.tone === "warning"
+        ? "border-amber/30 bg-amber/10"
+        : "border-line bg-white";
+
+  return (
+    <section className={`rounded-xl border p-4 ${toneClassName}`}>
+      <div className="flex items-start gap-3">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-action">
+          <TrendingUp size={18} />
+        </span>
+        <div>
+          <h2 className="font-semibold">{insight.title}</h2>
+          <p className="mt-1 text-sm leading-6 text-muted">{insight.message}</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function BarRow({ label, max, note, value }: { label: string; max: number; note: string; value: number }) {
   const width = max > 0 ? Math.max(5, Math.round((value / max) * 100)) : 0;
 
@@ -352,6 +385,59 @@ function LiftTrendCard({ trend }: { trend: LiftTrend }) {
       </div>
     </article>
   );
+}
+
+function buildProgressInsight({
+  completionRate,
+  liftTrends,
+  weeklyTrends
+}: {
+  completionRate: number;
+  liftTrends: LiftTrend[];
+  weeklyTrends: WeeklyTrend[];
+}): ProgressInsight {
+  const recentWeeks = weeklyTrends.slice(-2);
+  const previousWeek = recentWeeks[0];
+  const latestWeek = recentWeeks[1];
+  const volumeChange =
+    previousWeek && latestWeek && previousWeek.volume > 0
+      ? (latestWeek.volume - previousWeek.volume) / previousWeek.volume
+      : 0;
+  const improvingLiftCount = liftTrends.filter((trend) => {
+    const first = trend.points[0]?.e1rm ?? trend.bestE1rm;
+    const latest = trend.points[trend.points.length - 1]?.e1rm ?? trend.bestE1rm;
+    return latest > first;
+  }).length;
+
+  if (completionRate < 0.7) {
+    return {
+      title: "先把执行稳定下来",
+      message: "最近完成率偏低，系统后续建议会更保守。优先固定训练时间和完成主项，再考虑继续加量。",
+      tone: "warning"
+    };
+  }
+
+  if (volumeChange > 0.25) {
+    return {
+      title: "训练量上升较快",
+      message: "最近一周训练量明显增加。短期可以接受，但要关注睡眠、关节反馈和主项速度，避免连续多周猛增。",
+      tone: "warning"
+    };
+  }
+
+  if (improvingLiftCount > 0 && completionRate >= 0.85) {
+    return {
+      title: "趋势在推进",
+      message: `已有 ${improvingLiftCount} 个主项 e1RM 走高，完成率也不错。继续按周期推进，保持 RPE 记录质量。`,
+      tone: "good"
+    };
+  }
+
+  return {
+    title: "训练趋势稳定",
+    message: "当前数据没有明显异常。继续稳定记录重量、次数和 RPE，累积到更多训练后趋势会更清晰。",
+    tone: "neutral"
+  };
 }
 
 function buildWeeklyTrends({
