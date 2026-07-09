@@ -880,7 +880,7 @@ export function TodayWorkout() {
                   <div className="mt-4 space-y-2">
                     {exerciseLogs.map((log) => (
                       <div
-                        className={`grid grid-cols-[2.5rem_1fr_1fr_1fr_2.25rem] items-center gap-2 rounded-lg px-2 py-2 text-sm transition ${
+                        className={`grid grid-cols-[2.25rem_1fr_1fr_2.25rem] items-center gap-2 rounded-lg px-2 py-2 text-sm transition sm:grid-cols-[2.5rem_1fr_1fr_1fr_2.25rem] ${
                           log.completed ? "bg-action/10 ring-1 ring-action/20" : "bg-field"
                         }`}
                         key={`${exercise.id}-${log.set_index}`}
@@ -901,6 +901,7 @@ export function TodayWorkout() {
                           onChange={(value) => updateSetLog(exercise.id, log.set_index, { actual_reps: value })}
                         />
                         <NumberInput
+                          className="col-span-2 col-start-2 sm:col-auto"
                           label="RPE"
                           max={10}
                           min={1}
@@ -1171,6 +1172,7 @@ function WeightInput({
 }
 
 function NumberInput({
+  className = "",
   label,
   max,
   min,
@@ -1178,6 +1180,7 @@ function NumberInput({
   value,
   onChange
 }: {
+  className?: string;
   label: string;
   max?: number;
   min: number;
@@ -1186,7 +1189,7 @@ function NumberInput({
   onChange: (value: number | null) => void;
 }) {
   return (
-    <label className="block">
+    <label className={`block ${className}`}>
       <span className="mb-1 block text-[11px] text-muted">{label}</span>
       <input
         className="h-9 w-full rounded-md border border-line bg-white px-2 text-sm outline-none focus:border-action"
