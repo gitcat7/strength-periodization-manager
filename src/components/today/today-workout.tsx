@@ -216,8 +216,21 @@ export function TodayWorkout() {
         }
 
         if (!workoutData) {
+          writeClientCache<TodayCache>(todayCacheKey, {
+            coachRecommendations: [],
+            exercises: [],
+            lastCompletedWorkout: null,
+            setLogs: {},
+            userId: user.id,
+            workout: null
+          });
+          setWorkout(null);
+          setExercises([]);
+          setSetLogs({});
+          setCoachRecommendations([]);
+          setLastCompletedWorkout(null);
           setStatus("ready");
-          setMessage("当前计划已经没有待训练日。");
+          setMessage("当前计划已经没有待训练日。可以查看历史复盘，或去计划页生成下一轮周期。");
           return;
         }
 
@@ -660,9 +673,14 @@ export function TodayWorkout() {
             <p className="text-sm text-muted">{message || "先基于训练画像生成 4 周计划。"}</p>
           </div>
         </div>
-        <Link className="inline-flex rounded-lg bg-action px-4 py-2 font-semibold text-white" href="/plan">
-          去生成训练计划
-        </Link>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Link className="inline-flex h-11 items-center justify-center rounded-lg bg-action px-4 font-semibold text-white" href="/plan">
+            去生成训练计划
+          </Link>
+          <Link className="inline-flex h-11 items-center justify-center rounded-lg border border-line px-4 font-semibold text-ink" href="/history">
+            查看训练历史
+          </Link>
+        </div>
       </section>
     );
   }
