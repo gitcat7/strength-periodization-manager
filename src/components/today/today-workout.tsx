@@ -927,7 +927,19 @@ export function TodayWorkout() {
         })}
       </div>
 
-      <div className="grid gap-2">
+      <div className="sticky bottom-3 z-20 grid gap-2 rounded-xl border border-line bg-white/95 p-3 shadow-lg backdrop-blur">
+        <div className="flex items-center justify-between gap-3 text-xs text-muted">
+          <span>训练进度</span>
+          <span className="font-semibold text-action">
+            {completedSets}/{totalSets} 组
+          </span>
+        </div>
+        <div className="h-2 overflow-hidden rounded-full bg-field">
+          <div
+            className="h-full rounded-full bg-action transition-all"
+            style={{ width: `${totalSets > 0 ? Math.round((completedSets / totalSets) * 100) : 0}%` }}
+          />
+        </div>
         <button
           className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
           disabled={saveStatus === "saving" || workout.status === "completed"}
