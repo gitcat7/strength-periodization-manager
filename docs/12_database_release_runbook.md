@@ -22,6 +22,7 @@
 - `pr_goals`
 - `feedback_reports`
 - `analytics_events`
+- `agent_access_tokens`
 
 备份记录：
 
@@ -40,6 +41,7 @@
 2. 执行 `supabase/migrations/20260703_push_pull_squat.sql`
 3. 执行 `supabase/migrations/20260704_feedback_reports.sql`
 4. 执行 `supabase/migrations/20260704_analytics_events.sql`
+5. 执行 `supabase/migrations/20260711_agent_access_tokens.sql`
 
 日常发布：
 
@@ -82,6 +84,7 @@
 - `feedback_reports`
 - `analytics_events`
 - `exercises`
+- `agent_access_tokens`
 
 策略原则：
 
@@ -90,6 +93,7 @@
 - `workout_exercises` 和 `set_logs` 通过所属 workout 间接判断用户。
 - `feedback_reports` 允许登录用户创建和读取自己的反馈。
 - `analytics_events` 允许登录用户创建和读取自己的行为事件。
+- `agent_access_tokens` 只允许用户管理自己的令牌元数据，匿名角色无权读取；数据库只保存 SHA-256 哈希，不保存原始令牌。
 
 ## 5. 回滚策略
 

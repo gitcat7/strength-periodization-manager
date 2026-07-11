@@ -26,6 +26,19 @@
 - [MVP 发布验收清单](docs/11_mvp_release_checklist.md)
 - [数据库发布与备份手册](docs/12_database_release_runbook.md)
 - [Vercel 上线交接清单](docs/13_vercel_deployment_handoff.md)
+- [Agent Skill、中文命令与用户隔离](docs/14_agent_skill.md)
+
+## 可分发 Agent Skill
+
+仓库内置用户侧 Skill：[skills/strength-training-manager](skills/strength-training-manager)。安装后，用户可以用中文查看计划、记录训练组和完成训练。每个用户必须在系统设置页生成自己的 Agent 令牌，服务端根据令牌确定用户身份，不接收客户端传入的 `user_id`。
+
+Codex 安装示例：
+
+```bash
+python install-skill-from-github.py --repo gitcat7/strength-periodization-manager --path skills/strength-training-manager
+```
+
+安装后在 Agent 的安全环境变量中配置 `STRENGTH_MANAGER_TOKEN`，不要把令牌发送到聊天或提交到 Git。
 
 ## 效果方向图
 

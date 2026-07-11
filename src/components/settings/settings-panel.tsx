@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Download, Loader2, LogOut, RefreshCcw, ShieldAlert, UserRound } from "lucide-react";
+import { Copy, Download, KeyRound, Loader2, LogOut, RefreshCcw, ShieldAlert, Trash2, UserRound } from "lucide-react";
 import { trackEvent } from "@/lib/analytics";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
@@ -45,10 +45,24 @@ type SettingsCache = {
   email: string;
 };
 
+type AgentTokenRow = {
+  created_at: string;
+  expires_at: string;
+  id: string;
+  last_used_at: string | null;
+  name: string;
+  revoked_at: string | null;
+};
+
 export function SettingsPanel() {
   const [email, setEmail] = useState("");
+  const [userId, setUserId] = useState("");
   const [status, setStatus] = useState<"loading" | "ready" | "working" | "error">("loading");
   const [message, setMessage] = useState("");
+  const [agentTokens, setAgentTokens] = useState<AgentTokenRow[]>([]);
+  const [newAgentToken, setNewAgentToken] = useState("");
+  const [agentMessage, setAgentMessage] = useState("");
+  const [agentStatus, setAgentStatus] = useState<"ready" | "working" | "error">("ready");
 
   useEffect(() => {
     async function loadSession() {
@@ -71,6 +85,8 @@ export function SettingsPanel() {
         }
 
         setEmail(user.email ?? "");
+        setUserId(user.id);
+        await loadAgentTokens();
         writeClientCache<SettingsCache>(settingsCacheKey, {
           email: user.email ?? ""
         });
@@ -192,6 +208,82 @@ export function SettingsPanel() {
     }
   }
 
+  async function loadAgentTokens() {
+    const supabase = createBrowserSupabaseClient();
+    const { data, error } = await supabase
+      .from("agent_access_tokens")
+      .select("id,name,created_at,last_used_at,expires_at,revoked_at")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      setAgentStatus("error");
+      setAgentMessage(
+        error.message.includes("schema cache")
+          ? "Agent 授权表尚未部署，请先执行最新数据库迁移。"
+          : error.message
+      );
+      return;
+    }
+
+    setAgentTokens((data ?? []) as AgentTokenRow[]);
+    setAgentStatus("ready");
+  }
+
+  async function createAgentToken() {
+    if (!userId) return;
+    setAgentStatus("working");
+    setAgentMessage("");
+    setNewAgentToken("");
+
+    try {
+      const token = createRawAgentToken();
+      const tokenHash = await sha256(token);
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 180);
+      const supabase = createBrowserSupabaseClient();
+      const { error } = await supabase.from("agent_access_tokens").insert({
+        expires_at: expiresAt.toISOString(),
+        name: "训练 Agent",
+        token_hash: tokenHash,
+        user_id: userId
+      });
+
+      if (error) throw new Error(error.message);
+      setNewAgentToken(token);
+      setAgentMessage("令牌已生成，只显示这一次。安装 Skill 后将它配置为 STRENGTH_MANAGER_TOKEN。");
+      await loadAgentTokens();
+    } catch (error) {
+      setAgentStatus("error");
+      setAgentMessage(error instanceof Error ? error.message : "Agent 令牌生成失败。");
+    }
+  }
+
+  async function revokeAgentToken(tokenId: string) {
+    setAgentStatus("working");
+    setAgentMessage("");
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase
+      .from("agent_access_tokens")
+      .update({ revoked_at: new Date().toISOString() })
+      .eq("id", tokenId)
+      .eq("user_id", userId);
+
+    if (error) {
+      setAgentStatus("error");
+      setAgentMessage(error.message);
+      return;
+    }
+
+    setAgentMessage("Agent 令牌已撤销。使用该令牌的 Agent 将立即失去访问权限。");
+    await loadAgentTokens();
+  }
+
+  async function copyAgentToken() {
+    if (!newAgentToken) return;
+    await navigator.clipboard.writeText(newAgentToken);
+    setAgentMessage("令牌已复制。请保存到 Agent 的安全环境变量中。");
+  }
+
   if (status === "loading") {
     return (
       <div className="flex items-center gap-3 rounded-xl border border-line p-4 text-muted">
@@ -222,6 +314,72 @@ export function SettingsPanel() {
         <Link className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink" href="/onboarding">
           修改训练画像
         </Link>
+      </section>
+
+      <section className="rounded-xl border border-line bg-white p-4">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
+            <KeyRound size={20} />
+          </span>
+          <div>
+            <h2 className="font-semibold">Agent 中文操作授权</h2>
+            <p className="text-sm text-muted">每个令牌只访问当前账号的数据，可随时撤销，有效期 180 天。</p>
+          </div>
+        </div>
+
+        {agentMessage ? (
+          <p className={`mb-3 rounded-lg border px-3 py-2 text-sm ${agentStatus === "error" ? "border-red-200 text-red-600" : "border-line text-muted"}`}>
+            {agentMessage}
+          </p>
+        ) : null}
+
+        {newAgentToken ? (
+          <div className="mb-3 rounded-lg bg-field p-3">
+            <p className="mb-2 text-xs font-semibold text-muted">新令牌（关闭页面后无法再次查看）</p>
+            <code className="block break-all text-sm text-ink">{newAgentToken}</code>
+            <button
+              className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-action bg-white px-3 font-semibold text-action"
+              onClick={copyAgentToken}
+              type="button"
+            >
+              <Copy size={17} />
+              复制令牌
+            </button>
+          </div>
+        ) : null}
+
+        <div className="mb-3 space-y-2">
+          {agentTokens.filter((token) => !token.revoked_at).map((token) => (
+            <div className="flex items-center justify-between gap-3 rounded-lg bg-field px-3 py-3" key={token.id}>
+              <div className="min-w-0 text-sm">
+                <p className="font-semibold">{token.name}</p>
+                <p className="text-xs text-muted">
+                  {token.last_used_at ? `最近使用 ${formatTimestamp(token.last_used_at)}` : "尚未使用"} · 到期 {formatTimestamp(token.expires_at)}
+                </p>
+              </div>
+              <button
+                aria-label="撤销 Agent 令牌"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-line bg-white text-red-600 disabled:opacity-60"
+                disabled={agentStatus === "working"}
+                onClick={() => revokeAgentToken(token.id)}
+                title="撤销令牌"
+                type="button"
+              >
+                <Trash2 size={17} />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <button
+          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={agentStatus === "working" || !userId}
+          onClick={createAgentToken}
+          type="button"
+        >
+          {agentStatus === "working" ? <Loader2 className="animate-spin" size={18} /> : <KeyRound size={18} />}
+          生成新的 Agent 令牌
+        </button>
       </section>
 
       <section className="rounded-xl border border-line bg-white p-4">
@@ -433,6 +591,30 @@ function formatDate(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function createRawAgentToken() {
+  const bytes = new Uint8Array(32);
+  window.crypto.getRandomValues(bytes);
+  const encoded = btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+  return `ltp_${encoded}`;
+}
+
+async function sha256(value: string) {
+  const encoded = new TextEncoder().encode(value);
+  const digest = await window.crypto.subtle.digest("SHA-256", encoded);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function formatTimestamp(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric"
+  }).format(new Date(value));
 }
 
 function withTimeout<T>(promise: PromiseLike<T>, message: string, timeoutMs = 10000) {

@@ -1,0 +1,7 @@
+interface:
+  display_name: "力训周期管家"
+  short_description: "用中文查看并记录个人力量训练"
+  default_prompt: "Use $strength-training-manager to show my current workout in Chinese."
+
+policy:
+  allow_implicit_invocation: true

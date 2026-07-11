@@ -80,7 +80,10 @@ pnpm install
 ```text
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
 ```
+
+`SUPABASE_SERVICE_ROLE_KEY` 只用于服务端 Agent API。必须配置为 Vercel Secret，绝不能使用 `NEXT_PUBLIC_` 前缀、写入客户端代码或提交到 Git。
 
 8. 点击 Deploy。
 
