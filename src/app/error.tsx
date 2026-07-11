@@ -10,6 +10,28 @@ export default function ErrorPage({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const chunkLoadFailed = /ChunkLoadError|Loading chunk|dynamically imported module/i.test(error.message);
+
+  async function reloadPage() {
+    if (!chunkLoadFailed) {
+      reset();
+      return;
+    }
+
+    if ("caches" in window) {
+      const cacheKeys = await window.caches.keys();
+      await Promise.all(
+        cacheKeys
+          .filter((key) => key.startsWith("strength-periodization-"))
+          .map((key) => window.caches.delete(key))
+      );
+    }
+
+    const registrations = await navigator.serviceWorker?.getRegistrations();
+    await Promise.all((registrations ?? []).map((registration) => registration.update().catch(() => undefined)));
+    window.location.reload();
+  }
+
   return (
     <main className="min-h-screen px-4 py-6">
       <section className="mx-auto max-w-xl rounded-[20px] border border-line bg-white p-5 text-center shadow-sm">
@@ -26,11 +48,11 @@ export default function ErrorPage({
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <button
             className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white"
-            onClick={reset}
+            onClick={reloadPage}
             type="button"
           >
             <RotateCcw size={18} />
-            重新加载
+            {chunkLoadFailed ? "清缓存并重载" : "重新加载"}
           </button>
           <Link className="inline-flex h-11 items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink" href="/">
             回首页

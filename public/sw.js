@@ -1,19 +1,8 @@
-const CACHE_VERSION = "strength-periodization-v3";
+const CACHE_VERSION = "strength-periodization-v4";
 const SHELL_CACHE = `${CACHE_VERSION}:shell`;
 const STATIC_CACHE = `${CACHE_VERSION}:static`;
 
 const PRECACHE_URLS = [
-  "/",
-  "/today",
-  "/plan",
-  "/history",
-  "/progress",
-  "/pr",
-  "/settings",
-  "/onboarding",
-  "/diagnostics",
-  "/feedback",
-  "/privacy",
   "/manifest.webmanifest",
   "/icon.svg"
 ];
@@ -51,7 +40,7 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/")) return;
 
   if (request.mode === "navigate") {
-    event.respondWith(staleWhileRevalidate(request, SHELL_CACHE));
+    event.respondWith(networkFirst(request, SHELL_CACHE));
     return;
   }
 
@@ -64,19 +53,23 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
-async function staleWhileRevalidate(request, cacheName) {
+async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
-  const cached = await cache.match(request);
-  const networkPromise = fetch(request)
-    .then((response) => {
-      if (response.ok) {
-        cache.put(request, response.clone());
-      }
-      return response;
-    })
-    .catch(() => cached);
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      await cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    const cached = await cache.match(request);
+    if (cached) return cached;
 
-  return cached || networkPromise;
+    return new Response("当前网络不可用，请恢复网络后重试。", {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      status: 503
+    });
+  }
 }
 
 async function cacheFirst(request, cacheName) {
