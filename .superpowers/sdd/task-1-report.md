@@ -10,7 +10,7 @@
 ## Files
 
 - Modified: `package.json`, `pnpm-lock.yaml`, `README.md`
-- Created: `vitest.config.ts`, `pnpm-workspace.yaml`, `THIRD_PARTY_NOTICES.md`
+- Created: `vitest.config.mts`, `pnpm-workspace.yaml`, `THIRD_PARTY_NOTICES.md`
 - Created: `scripts/exercise-catalog-core.mjs`, `scripts/exercise-catalog-core.test.mjs`, `scripts/sync-exercise-catalog.mjs`, `scripts/verify-exercise-catalog.mjs`, `scripts/fixtures/exercise-catalog-valid.json`
 - Created: `public/exercise-catalog/manifest.json`, `public/exercise-catalog/exercises.118e4bd6.zh.json`
 
@@ -112,7 +112,7 @@ Result: typecheck, production build, local server startup, and all existing smok
 ### Changed Files
 
 - Modified: `scripts/exercise-catalog-core.mjs`, `scripts/exercise-catalog-core.test.mjs`, `scripts/sync-exercise-catalog.mjs`
-- Replaced: `vitest.config.ts` with `vitest.config.mts`
+- Configuration: `vitest.config.mts`
 - Updated: `.superpowers/sdd/task-1-report.md`
 
 ### Pair-Publication Rollback
@@ -164,6 +164,64 @@ Outputs:
 
 ```text
 pnpm test: Test Files 1 passed (1); Tests 8 passed (8)
+pnpm catalog:verify: Verified 1324 records: commit 118e4bd6b14da6df0e36605d7169b65db18389a4, file exercises.118e4bd6.zh.json, sha256 f6dd2105d60a365369c552dc1bb6cc6d2bbf93ba0323489cdb18b037409450ce.
+media scan: No media fields or paths found.
+pnpm release:check: typecheck, production build, and all smoke routes passed.
+```
+
+## Fix Review
+
+### Cleanup Commit Boundary
+
+The second review found that a backup-deletion failure entered the rollback path after one backup could already be deleted. Publication now commits immediately after both temporary-to-published renames succeed. Backup cleanup runs afterward as a bounded, three-attempt best-effort phase; it logs exhausted cleanup paths and never rolls back the committed data/manifest pair.
+
+RED command:
+
+```powershell
+$env:PATH = 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;' + $env:PATH; pnpm vitest run scripts/exercise-catalog-core.test.mjs
+```
+
+Relevant RED output:
+
+```text
+publishCatalogArtifacts > keeps the new pair when backup cleanup has a transient failure
+injected transient backup cleanup failure
+Test Files 1 failed (1)
+Tests 1 failed | 8 passed (9)
+```
+
+GREEN command:
+
+```powershell
+$env:PATH = 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;' + $env:PATH; pnpm vitest run scripts/exercise-catalog-core.test.mjs
+```
+
+Relevant GREEN output:
+
+```text
+Test Files 1 passed (1)
+Tests 9 passed (9)
+```
+
+The new failure-injection test fails the first data-backup removal after both publishes. It asserts the new data and manifest bytes remain paired, cleanup retries successfully, and sorted directory contents contain no temporary or backup files. The earlier second-publish rollback test now also sorts directory entries before asserting cleanup.
+
+### Plan Alignment
+
+The approved ESM-native Vitest configuration is now reflected in `docs/superpowers/plans/2026-07-11-exercise-catalog-integration.md`: Task 1 and its commit command reference `vitest.config.mts`. This report inventory likewise lists `vitest.config.mts`.
+
+### Verification Evidence
+
+```powershell
+$env:PATH = 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;' + $env:PATH; pnpm test
+$env:PATH = 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;' + $env:PATH; pnpm catalog:verify
+rg -n 'image|gif_url|media_id|attribution|images/|videos/' public/exercise-catalog
+$env:PATH = 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;' + $env:PATH; pnpm release:check
+```
+
+Relevant outputs:
+
+```text
+pnpm test: Test Files 1 passed (1); Tests 9 passed (9).
 pnpm catalog:verify: Verified 1324 records: commit 118e4bd6b14da6df0e36605d7169b65db18389a4, file exercises.118e4bd6.zh.json, sha256 f6dd2105d60a365369c552dc1bb6cc6d2bbf93ba0323489cdb18b037409450ce.
 media scan: No media fields or paths found.
 pnpm release:check: typecheck, production build, and all smoke routes passed.

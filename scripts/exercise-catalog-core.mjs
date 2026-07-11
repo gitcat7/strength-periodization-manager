@@ -8,6 +8,7 @@ export const RECORD_COUNT = 1324;
 export const DATA_FILE = "exercises.118e4bd6.zh.json";
 
 const defaultFileSystem = { access, rename, rm };
+const BACKUP_CLEANUP_ATTEMPTS = 3;
 
 const NORMALIZED_KEYS = [
   "bodyPart",
@@ -119,6 +120,28 @@ async function removeIfPresent(filePath, fileSystem) {
   await fileSystem.rm(filePath, { force: true });
 }
 
+async function cleanupBackups(backupPaths, fileSystem, logger) {
+  let remainingPaths = backupPaths;
+
+  for (let attempt = 0; attempt < BACKUP_CLEANUP_ATTEMPTS && remainingPaths.length > 0; attempt += 1) {
+    const failedPaths = [];
+
+    for (const backupPath of remainingPaths) {
+      try {
+        await removeIfPresent(backupPath, fileSystem);
+      } catch {
+        failedPaths.push(backupPath);
+      }
+    }
+
+    remainingPaths = failedPaths;
+  }
+
+  if (remainingPaths.length > 0) {
+    logger.error(`Catalog publication cleanup failed for: ${remainingPaths.join(", ")}.`);
+  }
+}
+
 async function restoreOriginalArtifact({ destinationPath, backupPath, hadOriginal, fileSystem }) {
   if (await fileExists(backupPath, fileSystem)) {
     await removeIfPresent(destinationPath, fileSystem);
@@ -136,7 +159,8 @@ export async function publishCatalogArtifacts({
   manifestPath,
   dataTemporaryPath,
   manifestTemporaryPath,
-  fileSystem = defaultFileSystem
+  fileSystem = defaultFileSystem,
+  logger = console
 }) {
   const dataBackupPath = `${dataPath}.backup`;
   const manifestBackupPath = `${manifestPath}.backup`;
@@ -153,11 +177,6 @@ export async function publishCatalogArtifacts({
 
     await fileSystem.rename(dataTemporaryPath, dataPath);
     await fileSystem.rename(manifestTemporaryPath, manifestPath);
-
-    await Promise.all([
-      removeIfPresent(dataBackupPath, fileSystem),
-      removeIfPresent(manifestBackupPath, fileSystem)
-    ]);
   } catch (error) {
     const rollbackErrors = [];
 
@@ -191,6 +210,8 @@ export async function publishCatalogArtifacts({
 
     throw error;
   }
+
+  await cleanupBackups([dataBackupPath, manifestBackupPath], fileSystem, logger);
 }
 
 function assertNormalizedRecord(record, index) {

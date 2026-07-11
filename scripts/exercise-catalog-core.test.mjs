@@ -160,7 +160,52 @@ describe("publishCatalogArtifacts", () => {
 
       await expect(readFile(dataPath, "utf8")).resolves.toBe(priorData);
       await expect(readFile(manifestPath, "utf8")).resolves.toBe(priorManifest);
-      await expect(readdir(directory)).resolves.toEqual([
+      await expect(readdir(directory).then((entries) => entries.sort())).resolves.toEqual([
+        "exercises.118e4bd6.zh.json",
+        "manifest.json"
+      ]);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps the new pair when backup cleanup has a transient failure", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "exercise-catalog-publish-"));
+    const dataPath = join(directory, "exercises.118e4bd6.zh.json");
+    const manifestPath = join(directory, "manifest.json");
+    const dataTemporaryPath = `${dataPath}.tmp`;
+    const manifestTemporaryPath = `${manifestPath}.tmp`;
+    const dataBackupPath = `${dataPath}.backup`;
+    let failedCleanup = false;
+
+    try {
+      await writeFile(dataPath, "prior data");
+      await writeFile(manifestPath, "prior manifest");
+      await writeFile(dataTemporaryPath, "new data");
+      await writeFile(manifestTemporaryPath, "new manifest");
+
+      await publishCatalogArtifacts({
+        dataPath,
+        manifestPath,
+        dataTemporaryPath,
+        manifestTemporaryPath,
+        fileSystem: {
+          access,
+          rename,
+          rm: async (filePath, options) => {
+            if (filePath === dataBackupPath && !failedCleanup) {
+              failedCleanup = true;
+              throw new Error("injected transient backup cleanup failure");
+            }
+            await rm(filePath, options);
+          }
+        }
+      });
+
+      expect(failedCleanup).toBe(true);
+      await expect(readFile(dataPath, "utf8")).resolves.toBe("new data");
+      await expect(readFile(manifestPath, "utf8")).resolves.toBe("new manifest");
+      await expect(readdir(directory).then((entries) => entries.sort())).resolves.toEqual([
         "exercises.118e4bd6.zh.json",
         "manifest.json"
       ]);
