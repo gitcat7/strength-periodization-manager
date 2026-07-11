@@ -1,6 +1,6 @@
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   DATA_FILE,
@@ -8,6 +8,7 @@ import {
   SOURCE_COMMIT,
   buildManifest,
   normalizeCatalog,
+  publishCatalogArtifacts,
   verifyCatalogArtifacts
 } from "./exercise-catalog-core.mjs";
 
@@ -46,8 +47,12 @@ async function main() {
       dataPath: dataTemporaryPath
     });
 
-    await rename(dataTemporaryPath, dataPath);
-    await rename(manifestTemporaryPath, manifestPath);
+    await publishCatalogArtifacts({
+      dataPath,
+      manifestPath,
+      dataTemporaryPath,
+      manifestTemporaryPath
+    });
     console.log(`Synced ${records.length} records from ${SOURCE_COMMIT}.`);
   } catch (error) {
     await Promise.all([

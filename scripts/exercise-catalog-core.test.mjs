@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildManifest,
   normalizeCatalog,
+  publishCatalogArtifacts,
   RECORD_COUNT,
   verifyCatalogArtifacts
 } from "./exercise-catalog-core.mjs";
@@ -116,6 +117,53 @@ describe("verifyCatalogArtifacts", () => {
       await expect(verifyCatalogArtifacts({ manifestPath, dataPath })).rejects.toThrow(
         /checksum/i
       );
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+});
+
+describe("publishCatalogArtifacts", () => {
+  it("restores both prior artifacts when the second publish rename fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "exercise-catalog-publish-"));
+    const dataPath = join(directory, "exercises.118e4bd6.zh.json");
+    const manifestPath = join(directory, "manifest.json");
+    const dataTemporaryPath = `${dataPath}.tmp`;
+    const manifestTemporaryPath = `${manifestPath}.tmp`;
+    const priorData = "prior data";
+    const priorManifest = "prior manifest";
+
+    try {
+      await writeFile(dataPath, priorData);
+      await writeFile(manifestPath, priorManifest);
+      await writeFile(dataTemporaryPath, "new data");
+      await writeFile(manifestTemporaryPath, "new manifest");
+
+      await expect(
+        publishCatalogArtifacts({
+          dataPath,
+          manifestPath,
+          dataTemporaryPath,
+          manifestTemporaryPath,
+          fileSystem: {
+            access,
+            rename: async (from, to) => {
+              if (from === manifestTemporaryPath && to === manifestPath) {
+                throw new Error("injected second publish failure");
+              }
+              await rename(from, to);
+            },
+            rm
+          }
+        })
+      ).rejects.toThrow("injected second publish failure");
+
+      await expect(readFile(dataPath, "utf8")).resolves.toBe(priorData);
+      await expect(readFile(manifestPath, "utf8")).resolves.toBe(priorManifest);
+      await expect(readdir(directory)).resolves.toEqual([
+        "exercises.118e4bd6.zh.json",
+        "manifest.json"
+      ]);
     } finally {
       await rm(directory, { force: true, recursive: true });
     }

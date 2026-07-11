@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { access, readFile, rename, rm } from "node:fs/promises";
 
 export const SOURCE_COMMIT = "118e4bd6b14da6df0e36605d7169b65db18389a4";
 export const SOURCE_REPOSITORY = "https://github.com/hasaneyldrm/exercises-dataset.git";
 export const SOURCE_COMMIT_TIME = "2026-07-09T18:10:06Z";
 export const RECORD_COUNT = 1324;
 export const DATA_FILE = "exercises.118e4bd6.zh.json";
+
+const defaultFileSystem = { access, rename, rm };
 
 const NORMALIZED_KEYS = [
   "bodyPart",
@@ -102,6 +104,93 @@ export function buildManifest(bytes) {
     sourceCommit: SOURCE_COMMIT,
     sourceRepository: SOURCE_REPOSITORY
   };
+}
+
+async function fileExists(filePath, fileSystem) {
+  try {
+    await fileSystem.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function removeIfPresent(filePath, fileSystem) {
+  await fileSystem.rm(filePath, { force: true });
+}
+
+async function restoreOriginalArtifact({ destinationPath, backupPath, hadOriginal, fileSystem }) {
+  if (await fileExists(backupPath, fileSystem)) {
+    await removeIfPresent(destinationPath, fileSystem);
+    await fileSystem.rename(backupPath, destinationPath);
+    return;
+  }
+
+  if (!hadOriginal) {
+    await removeIfPresent(destinationPath, fileSystem);
+  }
+}
+
+export async function publishCatalogArtifacts({
+  dataPath,
+  manifestPath,
+  dataTemporaryPath,
+  manifestTemporaryPath,
+  fileSystem = defaultFileSystem
+}) {
+  const dataBackupPath = `${dataPath}.backup`;
+  const manifestBackupPath = `${manifestPath}.backup`;
+  const dataHadOriginal = await fileExists(dataPath, fileSystem);
+  const manifestHadOriginal = await fileExists(manifestPath, fileSystem);
+
+  try {
+    if (dataHadOriginal) {
+      await fileSystem.rename(dataPath, dataBackupPath);
+    }
+    if (manifestHadOriginal) {
+      await fileSystem.rename(manifestPath, manifestBackupPath);
+    }
+
+    await fileSystem.rename(dataTemporaryPath, dataPath);
+    await fileSystem.rename(manifestTemporaryPath, manifestPath);
+
+    await Promise.all([
+      removeIfPresent(dataBackupPath, fileSystem),
+      removeIfPresent(manifestBackupPath, fileSystem)
+    ]);
+  } catch (error) {
+    const rollbackErrors = [];
+
+    for (const artifact of [
+      {
+        destinationPath: dataPath,
+        backupPath: dataBackupPath,
+        hadOriginal: dataHadOriginal
+      },
+      {
+        destinationPath: manifestPath,
+        backupPath: manifestBackupPath,
+        hadOriginal: manifestHadOriginal
+      }
+    ]) {
+      try {
+        await restoreOriginalArtifact({ ...artifact, fileSystem });
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+
+    await Promise.all([
+      removeIfPresent(dataTemporaryPath, fileSystem),
+      removeIfPresent(manifestTemporaryPath, fileSystem)
+    ]);
+
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError([error, ...rollbackErrors], "Catalog artifact publication failed.");
+    }
+
+    throw error;
+  }
 }
 
 function assertNormalizedRecord(record, index) {
