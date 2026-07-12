@@ -89,6 +89,23 @@ describe("createServerExerciseCatalogLoader", () => {
       await rm(directory, { force: true, recursive: true });
     }
   });
+
+  it("returns reviewed Chinese detail with full instructions", async () => {
+    const directory = await writeCatalogFixture({
+      data: catalogBytes("detail", { firstExternalId: "0025" })
+    });
+    const loader = createServerExerciseCatalogLoader({ cwd: directory });
+
+    try {
+      await expect(loader.getServerExerciseCatalogRecord("0025")).resolves.toMatchObject({
+        externalId: "0025",
+        nameZh: "卧推",
+        instructionsZh: "中文说明"
+      });
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
 });
 
 async function writeCatalogFixture({
@@ -119,14 +136,20 @@ async function writeCatalogFixture({
   return directory;
 }
 
-function catalogBytes(prefix: string, { nameZh = null }: { nameZh?: string | null } = {}) {
+function catalogBytes(
+  prefix: string,
+  {
+    firstExternalId,
+    nameZh = null
+  }: { firstExternalId?: string; nameZh?: string | null } = {}
+) {
   return new TextEncoder().encode(
     JSON.stringify(
       Array.from({ length: 1324 }, (_, index) => ({
         bodyPart: "back",
         category: "back",
         equipment: "cable",
-        externalId: `${prefix}-${String(index).padStart(4, "0")}`,
+        externalId: index === 0 && firstExternalId ? firstExternalId : `${prefix}-${String(index).padStart(4, "0")}`,
         instructionsZh: "中文说明",
         muscleGroup: "rhomboids",
         nameEn: "cable row",

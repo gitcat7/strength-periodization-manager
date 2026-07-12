@@ -1,4 +1,8 @@
-import type { ExerciseCatalogManifest, ExerciseCatalogRecord } from "../domain/exercise-catalog";
+import {
+  findExerciseCatalogRecord,
+  type ExerciseCatalogManifest,
+  type ExerciseCatalogRecord
+} from "../domain/exercise-catalog";
 
 const catalogVerificationKey = "strength-training-exercise-catalog:last-verified";
 const catalogBasePath = "/exercise-catalog";
@@ -109,7 +113,7 @@ export function createExerciseCatalogClientLoader({
 
   async function loadExerciseCatalogRecord(externalId: string) {
     const records = await loadExerciseCatalog();
-    return records.find((record) => record.externalId === externalId) ?? null;
+    return findExerciseCatalogRecord(records, externalId);
   }
 
   return {

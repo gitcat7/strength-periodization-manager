@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { ExerciseCatalogManifest, ExerciseCatalogRecord } from "../domain/exercise-catalog";
+import {
+  findExerciseCatalogRecord,
+  type ExerciseCatalogManifest,
+  type ExerciseCatalogRecord
+} from "../domain/exercise-catalog";
 
 const expectedRecordCount = 1324;
 const expectedDataFile = "exercises.118e4bd6.zh.json";
@@ -51,7 +55,7 @@ export function createServerExerciseCatalogLoader({
 
   async function getServerExerciseCatalogRecord(externalId: string) {
     const records = await getServerExerciseCatalog();
-    return records.find((record) => record.externalId === externalId) ?? null;
+    return findExerciseCatalogRecord(records, externalId);
   }
 
   return {

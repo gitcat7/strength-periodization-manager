@@ -185,16 +185,40 @@ describe("createExerciseCatalogClientLoader", () => {
     await expect(loader.loadExerciseCatalog()).rejects.toThrow(/valid JSON/i);
     await expect(loader.loadExerciseCatalog()).resolves.toHaveLength(1324);
   });
+
+  it("returns reviewed Chinese detail with full instructions", async () => {
+    const bytes = catalogBytes("detail", { firstExternalId: "0025" });
+    const loader = createExerciseCatalogClientLoader({
+      fetchImpl: fetchFrom({
+        "/exercise-catalog/manifest.json": manifestBytes(bytes),
+        [catalogDataPath]: bytes
+      }),
+      cryptoImpl: cryptoForTests,
+      storage: memoryStorage()
+    });
+
+    await expect(loader.loadExerciseCatalogRecord("0025")).resolves.toMatchObject({
+      externalId: "0025",
+      nameZh: "卧推",
+      instructionsZh: "中文说明"
+    });
+  });
 });
 
-function catalogBytes(prefix: string, { nameZh = null }: { nameZh?: string | null } = {}) {
+function catalogBytes(
+  prefix: string,
+  {
+    firstExternalId,
+    nameZh = null
+  }: { firstExternalId?: string; nameZh?: string | null } = {}
+) {
   return new TextEncoder().encode(
     JSON.stringify(
       Array.from({ length: 1324 }, (_, index) => ({
         bodyPart: "back",
         category: "back",
         equipment: "cable",
-        externalId: `${prefix}-${String(index).padStart(4, "0")}`,
+        externalId: index === 0 && firstExternalId ? firstExternalId : `${prefix}-${String(index).padStart(4, "0")}`,
         instructionsZh: "中文说明",
         muscleGroup: "rhomboids",
         nameEn: "cable row",
