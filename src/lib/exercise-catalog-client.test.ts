@@ -8,13 +8,15 @@ import {
 } from "./exercise-catalog-client";
 
 const catalogVerificationKey = "strength-training-exercise-catalog:last-verified";
+const catalogDataFile = "exercises.118e4bd6.zh.json";
+const catalogDataPath = `/exercise-catalog/${catalogDataFile}`;
 
 describe("createExerciseCatalogClientLoader", () => {
   it("does not fetch the catalog until it is requested", async () => {
     const bytes = catalogBytes("old");
     const fetchImpl = vi.fn(fetchFrom({
-      "/exercise-catalog/manifest.json": manifestBytes("old.json", bytes),
-      "/exercise-catalog/old.json": bytes
+      "/exercise-catalog/manifest.json": manifestBytes(bytes),
+      [catalogDataPath]: bytes
     }));
     const loader = createExerciseCatalogClientLoader({
       fetchImpl,
@@ -35,8 +37,8 @@ describe("createExerciseCatalogClientLoader", () => {
     const storage = memoryStorage();
     const loader = createExerciseCatalogClientLoader({
       fetchImpl: fetchFrom({
-        "/exercise-catalog/manifest.json": manifestBytes("expected.json", expectedBytes),
-        "/exercise-catalog/expected.json": catalogBytes("altered")
+        "/exercise-catalog/manifest.json": manifestBytes(expectedBytes),
+        [catalogDataPath]: catalogBytes("altered")
       }),
       cryptoImpl: cryptoForTests,
       storage
@@ -53,8 +55,8 @@ describe("createExerciseCatalogClientLoader", () => {
 
     const priorLoader = createExerciseCatalogClientLoader({
       fetchImpl: fetchFrom({
-        "/exercise-catalog/manifest.json": manifestBytes("prior.json", priorBytes),
-        "/exercise-catalog/prior.json": priorBytes
+        "/exercise-catalog/manifest.json": manifestBytes(priorBytes),
+        [catalogDataPath]: priorBytes
       }),
       cryptoImpl: cryptoForTests,
       storage
@@ -63,9 +65,8 @@ describe("createExerciseCatalogClientLoader", () => {
 
     const loader = createExerciseCatalogClientLoader({
       fetchImpl: fetchFrom({
-        "/exercise-catalog/manifest.json": manifestBytes("current.json", currentBytes),
-        "/exercise-catalog/current.json": catalogBytes("tampered"),
-        "/exercise-catalog/prior.json": priorBytes
+        "/exercise-catalog/manifest.json": manifestBytes(currentBytes),
+        [catalogDataPath]: [catalogBytes("tampered"), priorBytes]
       }),
       cryptoImpl: cryptoForTests,
       storage
@@ -78,11 +79,11 @@ describe("createExerciseCatalogClientLoader", () => {
   it("does not replace the verified manifest pointer when the current manifest is malformed", async () => {
     const priorBytes = catalogBytes("prior");
     const storage = memoryStorage();
-    const priorManifest = manifestBytes("prior.json", priorBytes);
+    const priorManifest = manifestBytes(priorBytes);
     const priorLoader = createExerciseCatalogClientLoader({
       fetchImpl: fetchFrom({
         "/exercise-catalog/manifest.json": priorManifest,
-        "/exercise-catalog/prior.json": priorBytes
+        [catalogDataPath]: priorBytes
       }),
       cryptoImpl: cryptoForTests,
       storage
@@ -92,7 +93,7 @@ describe("createExerciseCatalogClientLoader", () => {
     const loader = createExerciseCatalogClientLoader({
       fetchImpl: fetchFrom({
         "/exercise-catalog/manifest.json": new TextEncoder().encode("not json"),
-        "/exercise-catalog/prior.json": priorBytes
+        [catalogDataPath]: priorBytes
       }),
       cryptoImpl: cryptoForTests,
       storage
@@ -105,8 +106,8 @@ describe("createExerciseCatalogClientLoader", () => {
   it("shares one in-flight catalog request across concurrent callers", async () => {
     const bytes = catalogBytes("shared");
     const fetchImpl = vi.fn(fetchFrom({
-      "/exercise-catalog/manifest.json": manifestBytes("shared.json", bytes),
-      "/exercise-catalog/shared.json": bytes
+      "/exercise-catalog/manifest.json": manifestBytes(bytes),
+      [catalogDataPath]: bytes
     }));
     const loader = createExerciseCatalogClientLoader({
       fetchImpl,
@@ -138,9 +139,55 @@ describe("createExerciseCatalogClientLoader", () => {
     expect(storage.getItem(catalogVerificationKey)).toBeNull();
     expect(storage.getItem("strength-training-cache:today")).toBe("training cache");
   });
+
+  it("rejects a safe but non-pinned catalog data filename", async () => {
+    const bytes = catalogBytes("other");
+    const loader = createExerciseCatalogClientLoader({
+      fetchImpl: fetchFrom({
+        "/exercise-catalog/manifest.json": manifestBytes(bytes, "other-safe.json"),
+        "/exercise-catalog/other-safe.json": bytes
+      }),
+      cryptoImpl: cryptoForTests,
+      storage: memoryStorage()
+    });
+
+    await expect(loader.loadExerciseCatalog()).rejects.toThrow(/manifest.*invalid shape/i);
+  });
+
+  it("rejects catalog artifacts with an unreviewed raw Chinese name", async () => {
+    const bytes = catalogBytes("raw-name", { nameZh: "未经审核的中文名称" });
+    const loader = createExerciseCatalogClientLoader({
+      fetchImpl: fetchFrom({
+        "/exercise-catalog/manifest.json": manifestBytes(bytes),
+        [catalogDataPath]: bytes
+      }),
+      cryptoImpl: cryptoForTests,
+      storage: memoryStorage()
+    });
+
+    await expect(loader.loadExerciseCatalog()).rejects.toThrow(/record.*invalid shape/i);
+  });
+
+  it("clears a rejected load so a later real fetch can succeed", async () => {
+    const bytes = catalogBytes("retry");
+    const loader = createExerciseCatalogClientLoader({
+      fetchImpl: fetchFrom({
+        "/exercise-catalog/manifest.json": [
+          new TextEncoder().encode("not json"),
+          manifestBytes(bytes)
+        ],
+        [catalogDataPath]: bytes
+      }),
+      cryptoImpl: cryptoForTests,
+      storage: memoryStorage()
+    });
+
+    await expect(loader.loadExerciseCatalog()).rejects.toThrow(/valid JSON/i);
+    await expect(loader.loadExerciseCatalog()).resolves.toHaveLength(1324);
+  });
 });
 
-function catalogBytes(prefix: string) {
+function catalogBytes(prefix: string, { nameZh = null }: { nameZh?: string | null } = {}) {
   return new TextEncoder().encode(
     JSON.stringify(
       Array.from({ length: 1324 }, (_, index) => ({
@@ -151,7 +198,7 @@ function catalogBytes(prefix: string) {
         instructionsZh: "中文说明",
         muscleGroup: "rhomboids",
         nameEn: "cable row",
-        nameZh: null,
+        nameZh,
         secondaryMuscles: ["biceps"],
         target: "lats"
       }))
@@ -159,7 +206,7 @@ function catalogBytes(prefix: string) {
   );
 }
 
-function manifestBytes(dataFile: string, data: Uint8Array) {
+function manifestBytes(data: Uint8Array, dataFile = catalogDataFile) {
   return new TextEncoder().encode(
     JSON.stringify({
       generatedAt: "2026-07-09T18:10:06Z",
@@ -173,9 +220,10 @@ function manifestBytes(dataFile: string, data: Uint8Array) {
   );
 }
 
-function fetchFrom(responses: Record<string, Uint8Array>) {
+function fetchFrom(responses: Record<string, Uint8Array | Uint8Array[]>) {
   return async (input: string) => {
-    const bytes = responses[input];
+    const response = responses[input];
+    const bytes = Array.isArray(response) ? response.shift() : response;
     if (!bytes) throw new Error(`Unexpected fetch: ${input}`);
 
     return {

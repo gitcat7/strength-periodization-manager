@@ -40,6 +40,13 @@ export function filterExerciseCatalog(
   records: readonly ExerciseCatalogRecord[],
   filters: ExerciseCatalogFilters = {}
 ): ExerciseCatalogSummary[] {
+  if (
+    filters.limit !== undefined &&
+    (!Number.isFinite(filters.limit) || filters.limit < 0 || !Number.isInteger(filters.limit))
+  ) {
+    throw new RangeError("Catalog limit must be a finite non-negative integer.");
+  }
+
   const query = normalizeText(filters.query);
   const bodyPart = normalizeText(filters.bodyPart);
   const equipment = normalizeText(filters.equipment);
@@ -75,7 +82,7 @@ export function filterExerciseCatalog(
 
   const limitedRecords = filters.limit === undefined
     ? matchingRecords
-    : matchingRecords.slice(0, Math.max(0, Math.floor(filters.limit)));
+    : matchingRecords.slice(0, filters.limit);
 
   return limitedRecords.map(toExerciseCatalogSummary);
 }
@@ -101,7 +108,7 @@ function withReviewedName(record: ExerciseCatalogRecord): ExerciseCatalogRecord 
 }
 
 function reviewedNameFor(record: ExerciseCatalogRecord) {
-  return reviewedExerciseNamesZh[record.externalId] ?? record.nameZh;
+  return reviewedExerciseNamesZh[record.externalId] ?? null;
 }
 
 function normalizeText(value: string | undefined) {

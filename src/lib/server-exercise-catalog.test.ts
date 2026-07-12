@@ -7,6 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createServerExerciseCatalogLoader } from "./server-exercise-catalog";
 
+const catalogDataFile = "exercises.118e4bd6.zh.json";
+
 describe("createServerExerciseCatalogLoader", () => {
   it("validates catalog bytes and memoizes the fulfilled catalog promise", async () => {
     const directory = await writeCatalogFixture();
@@ -46,26 +48,69 @@ describe("createServerExerciseCatalogLoader", () => {
       await rm(directory, { force: true, recursive: true });
     }
   });
+
+  it("rejects a safe but non-pinned catalog data filename", async () => {
+    const directory = await writeCatalogFixture({ dataFile: "other-safe.json" });
+    const loader = createServerExerciseCatalogLoader({ cwd: directory });
+
+    try {
+      await expect(loader.getServerExerciseCatalog()).rejects.toThrow(/manifest.*invalid shape/i);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects catalog artifacts with an unreviewed raw Chinese name", async () => {
+    const directory = await writeCatalogFixture({
+      data: catalogBytes("raw-name", { nameZh: "未经审核的中文名称" })
+    });
+    const loader = createServerExerciseCatalogLoader({ cwd: directory });
+
+    try {
+      await expect(loader.getServerExerciseCatalog()).rejects.toThrow(/record.*invalid shape/i);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("clears a rejected load so a later real file read can succeed", async () => {
+    const validData = catalogBytes("retry");
+    const directory = await writeCatalogFixture({
+      data: catalogBytes("changed"),
+      manifestData: validData
+    });
+    const loader = createServerExerciseCatalogLoader({ cwd: directory });
+
+    try {
+      await expect(loader.getServerExerciseCatalog()).rejects.toThrow(/checksum/i);
+      await writeFile(join(directory, "public", "exercise-catalog", catalogDataFile), validData);
+      await expect(loader.getServerExerciseCatalog()).resolves.toHaveLength(1324);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
 });
 
 async function writeCatalogFixture({
   data = catalogBytes("server"),
-  manifestData = data
+  manifestData = data,
+  dataFile = catalogDataFile
 }: {
   data?: Uint8Array;
   manifestData?: Uint8Array;
+  dataFile?: string;
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "server-exercise-catalog-"));
   const catalogDirectory = join(directory, "public", "exercise-catalog");
   await mkdir(catalogDirectory, { recursive: true });
-  await writeFile(join(catalogDirectory, "server.json"), data);
+  await writeFile(join(catalogDirectory, dataFile), data);
   await writeFile(
     join(catalogDirectory, "manifest.json"),
     JSON.stringify({
       generatedAt: "2026-07-09T18:10:06Z",
       recordCount: 1324,
       schemaVersion: 1,
-      dataFile: "server.json",
+      dataFile,
       sha256: sha256(manifestData),
       sourceCommit: "118e4bd6b14da6df0e36605d7169b65db18389a4",
       sourceRepository: "https://github.com/hasaneyldrm/exercises-dataset.git"
@@ -74,7 +119,7 @@ async function writeCatalogFixture({
   return directory;
 }
 
-function catalogBytes(prefix: string) {
+function catalogBytes(prefix: string, { nameZh = null }: { nameZh?: string | null } = {}) {
   return new TextEncoder().encode(
     JSON.stringify(
       Array.from({ length: 1324 }, (_, index) => ({
@@ -85,7 +130,7 @@ function catalogBytes(prefix: string) {
         instructionsZh: "中文说明",
         muscleGroup: "rhomboids",
         nameEn: "cable row",
-        nameZh: null,
+        nameZh,
         secondaryMuscles: ["biceps"],
         target: "lats"
       }))

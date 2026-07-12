@@ -102,6 +102,33 @@ describe("filterExerciseCatalog", () => {
       "0861"
     ]);
   });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5])(
+    "rejects an invalid limit: %s",
+    (limit) => {
+      expect(() => filterExerciseCatalog(records, { limit })).toThrow(RangeError);
+    }
+  );
+
+  it("allows a zero limit", () => {
+    expect(filterExerciseCatalog(records, { limit: 0 })).toEqual([]);
+  });
+
+  it("ignores an unreviewed raw Chinese name for search and display", () => {
+    const unreviewedRecord: ExerciseCatalogRecord = {
+      ...records[2],
+      externalId: "unreviewed",
+      nameZh: "未经审核的中文名称"
+    };
+
+    expect(filterExerciseCatalog([unreviewedRecord], { query: "未经审核" })).toEqual([]);
+    expect(filterExerciseCatalog([unreviewedRecord])).toEqual([
+      expect.objectContaining({ externalId: "unreviewed", nameZh: null })
+    ]);
+    expect(findExerciseCatalogRecord([unreviewedRecord], "unreviewed")).toEqual(
+      expect.objectContaining({ externalId: "unreviewed", nameZh: null })
+    );
+  });
 });
 
 describe("findExerciseCatalogRecord", () => {

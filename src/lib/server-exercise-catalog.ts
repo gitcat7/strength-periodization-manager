@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { ExerciseCatalogManifest, ExerciseCatalogRecord } from "../domain/exercise-catalog";
 
 const expectedRecordCount = 1324;
+const expectedDataFile = "exercises.118e4bd6.zh.json";
 const expectedSourceCommit = "118e4bd6b14da6df0e36605d7169b65db18389a4";
 const expectedSourceRepository = "https://github.com/hasaneyldrm/exercises-dataset.git";
 
@@ -85,6 +86,7 @@ function parseManifest(rawManifest: string): ExerciseCatalogManifest {
     typeof candidate.generatedAt !== "string" ||
     typeof candidate.dataFile !== "string" ||
     !/^[A-Za-z0-9][A-Za-z0-9._-]*\.json$/.test(candidate.dataFile) ||
+    candidate.dataFile !== expectedDataFile ||
     typeof candidate.sha256 !== "string" ||
     !/^[a-f0-9]{64}$/i.test(candidate.sha256)
   ) {
@@ -132,7 +134,7 @@ function isExerciseCatalogRecord(value: unknown): value is ExerciseCatalogRecord
     typeof record.instructionsZh === "string" &&
     typeof record.muscleGroup === "string" &&
     typeof record.nameEn === "string" &&
-    (typeof record.nameZh === "string" || record.nameZh === null) &&
+    record.nameZh === null &&
     Array.isArray(record.secondaryMuscles) &&
     record.secondaryMuscles.every((muscle) => typeof muscle === "string") &&
     typeof record.target === "string"
