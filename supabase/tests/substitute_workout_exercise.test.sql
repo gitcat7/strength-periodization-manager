@@ -90,7 +90,18 @@ as $$
 $$;
 
 select has_function('public', 'substitute_workout_exercise', array['uuid', 'uuid', 'workout_exercise_substitution_scope'], 'substitution RPC exists with its public contract');
-select is(has_function_privilege('public', 'public.substitute_workout_exercise(uuid, uuid, public.workout_exercise_substitution_scope)', 'execute'), false, 'PUBLIC cannot execute the substitution RPC');
+select is(
+  exists (
+    select 1
+    from pg_proc as proc
+    cross join lateral aclexplode(coalesce(proc.proacl, acldefault('f', proc.proowner))) as acl
+    where proc.oid = 'public.substitute_workout_exercise(uuid, uuid, public.workout_exercise_substitution_scope)'::regprocedure
+      and acl.grantee = 0
+      and acl.privilege_type = 'EXECUTE'
+  ),
+  false,
+  'PUBLIC cannot execute the substitution RPC'
+);
 select is(has_function_privilege('anon', 'public.substitute_workout_exercise(uuid, uuid, public.workout_exercise_substitution_scope)', 'execute'), false, 'anon cannot execute the substitution RPC');
 select is(has_function_privilege('authenticated', 'public.substitute_workout_exercise(uuid, uuid, public.workout_exercise_substitution_scope)', 'execute'), true, 'authenticated can execute the substitution RPC');
 select is((select count(*) from public.exercises where training_direction is not null and training_direction not in ('push', 'pull', 'squat', 'cardio')), 0::bigint, 'reviewed catalog metadata uses only allowed directions');

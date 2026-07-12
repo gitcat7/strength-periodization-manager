@@ -6,6 +6,9 @@ const migrationPath = fileURLToPath(
   new URL("../supabase/migrations/20260711190000_exercise_catalog_bridge.sql", import.meta.url)
 );
 const schemaPath = fileURLToPath(new URL("../supabase/schema.sql", import.meta.url));
+const pgTapPath = fileURLToPath(
+  new URL("../supabase/tests/substitute_workout_exercise.test.sql", import.meta.url)
+);
 
 async function readBridgeFiles() {
   const [migration, schema] = await Promise.all([
@@ -128,5 +131,14 @@ describe("exercise catalog bridge SQL contract", () => {
     }
 
     expect(schema).toMatch(/do \$\$[\s\S]*create type public\.workout_exercise_substitution_scope[\s\S]*when duplicate_object then null[\s\S]*\$\$;/i);
+  });
+
+  it("checks PUBLIC function ACLs through the ACL pseudo-role instead of a nonexistent role", async () => {
+    const pgTap = await readFile(pgTapPath, "utf8");
+
+    expect(pgTap).not.toMatch(/has_function_privilege\(\s*'public'/i);
+    expect(pgTap).toMatch(/aclexplode/i);
+    expect(pgTap).toMatch(/grantee\s*=\s*0/i);
+    expect(pgTap).toMatch(/privilege_type\s*=\s*'EXECUTE'/i);
   });
 });
