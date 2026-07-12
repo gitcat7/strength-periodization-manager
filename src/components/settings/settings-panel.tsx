@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Copy, Download, KeyRound, Loader2, LogOut, RefreshCcw, ShieldAlert, Trash2, UserRound } from "lucide-react";
 import { trackEvent } from "@/lib/analytics";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
+import { clearExerciseCatalogVerificationState } from "@/lib/exercise-catalog-client";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type WorkoutRow = {
@@ -191,6 +192,7 @@ export function SettingsPanel() {
 
     try {
       clearTrainingDataCaches();
+      clearExerciseCatalogVerificationState();
       if ("caches" in window) {
         const cacheKeys = await window.caches.keys();
         await Promise.all(
