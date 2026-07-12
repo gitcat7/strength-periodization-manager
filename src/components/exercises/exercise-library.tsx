@@ -7,6 +7,7 @@ import { loadExerciseCatalog } from "@/lib/exercise-catalog-client";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { ExerciseCatalogList } from "./exercise-catalog-list";
 import { ExerciseDetailPanel } from "./exercise-detail-panel";
+import { getErrorMessage, loadExerciseLibraryData } from "./exercise-library-load";
 import { deriveExerciseLibraryState } from "./exercise-library-state";
 
 type LoadStatus = "loading" | "ready" | "error";
@@ -25,6 +26,8 @@ const initialFilters: ExerciseCatalogFilters = {
 
 export function ExerciseLibrary() {
   const [filters, setFilters] = useState<ExerciseCatalogFilters>(initialFilters);
+  const [bridgeError, setBridgeError] = useState<string | null>(null);
+  const [bridgeRetrying, setBridgeRetrying] = useState(false);
   const [message, setMessage] = useState("");
   const [programExternalIds, setProgramExternalIds] = useState<string[]>([]);
   const [records, setRecords] = useState<ExerciseCatalogRecord[]>([]);
@@ -39,6 +42,7 @@ export function ExerciseLibrary() {
     async function loadLibrary() {
       setStatus("loading");
       setMessage("");
+      setBridgeError(null);
 
       try {
         const supabase = createBrowserSupabaseClient();
@@ -49,20 +53,15 @@ export function ExerciseLibrary() {
           return;
         }
 
-        const [catalogRecords, bridgeResult] = await Promise.all([
-          loadExerciseCatalog(),
-          supabase.from("exercises").select("catalog_external_id").not("catalog_external_id", "is", null)
-        ]);
-
-        if (bridgeResult.error) throw new Error(bridgeResult.error.message);
+        const library = await loadExerciseLibraryData({
+          loadCatalog: loadExerciseCatalog,
+          loadProgramExternalIds
+        });
         if (!active) return;
 
-        setRecords(catalogRecords);
-        setProgramExternalIds(
-          ((bridgeResult.data ?? []) as CatalogExternalIdRow[])
-            .map((row) => row.catalog_external_id)
-            .filter((externalId): externalId is string => typeof externalId === "string")
-        );
+        setRecords(library.records);
+        setProgramExternalIds(library.programExternalIds);
+        setBridgeError(library.bridgeError);
         setStatus("ready");
       } catch (error) {
         if (!active) return;
@@ -76,6 +75,19 @@ export function ExerciseLibrary() {
       active = false;
     };
   }, [retryKey]);
+
+  async function retryBridgeMapping() {
+    setBridgeRetrying(true);
+    setBridgeError(null);
+
+    try {
+      setProgramExternalIds(await loadProgramExternalIds());
+    } catch (error) {
+      setBridgeError(getErrorMessage(error));
+    } finally {
+      setBridgeRetrying(false);
+    }
+  }
 
   const libraryState = useMemo(
     () => deriveExerciseLibraryState({ filters, programExternalIds, records, selectedExternalId }),
@@ -140,11 +152,26 @@ export function ExerciseLibrary() {
         <input
           checked={Boolean(filters.programOnly)}
           className="h-4 w-4 rounded border-line text-action focus:ring-action"
+          disabled={Boolean(bridgeError)}
           onChange={(event) => updateFilter("programOnly", event.target.checked)}
           type="checkbox"
         />
         仅看计划可替换动作
       </label>
+
+      {bridgeError ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted" role="status">
+          <span>计划动作映射暂不可用，仍可浏览动作库。</span>
+          <button
+            className="font-semibold text-action disabled:opacity-60"
+            disabled={bridgeRetrying}
+            onClick={() => void retryBridgeMapping()}
+            type="button"
+          >
+            {bridgeRetrying ? "重试中" : "重试映射"}
+          </button>
+        </div>
+      ) : null}
 
       <p className="text-sm text-muted">{libraryState.results.length} 个动作</p>
 
@@ -165,6 +192,20 @@ export function ExerciseLibrary() {
       </div>
     </div>
   );
+}
+
+async function loadProgramExternalIds() {
+  const supabase = createBrowserSupabaseClient();
+  const bridgeResult = await supabase
+    .from("exercises")
+    .select("catalog_external_id")
+    .not("catalog_external_id", "is", null);
+
+  if (bridgeResult.error) throw new Error(bridgeResult.error.message);
+
+  return ((bridgeResult.data ?? []) as CatalogExternalIdRow[])
+    .map((row) => row.catalog_external_id)
+    .filter((externalId): externalId is string => typeof externalId === "string");
 }
 
 function FilterSelect({

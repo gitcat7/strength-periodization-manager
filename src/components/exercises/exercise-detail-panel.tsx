@@ -4,12 +4,14 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ExternalLink, X } from "lucide-react";
 import type { ExerciseCatalogRecord } from "@/domain/exercise-catalog";
 import type { LocalExerciseGuidance } from "@/domain/exercise-guidance";
+import { createDetailFocusManager, getNextDialogFocusTarget } from "./exercise-detail-focus";
 
 type ExerciseDetailPanelProps = {
   localGuidance: LocalExerciseGuidance | null;
   onClose: () => void;
   open: boolean;
   record: ExerciseCatalogRecord | null;
+  restoreFocusTarget?: HTMLElement | null;
   desktopSide?: boolean;
 };
 
@@ -18,10 +20,13 @@ export function ExerciseDetailPanel({
   localGuidance,
   onClose,
   open,
-  record
+  record,
+  restoreFocusTarget = null
 }: ExerciseDetailPanelProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const focusManagerRef = useRef(createDetailFocusManager());
+  const onCloseRef = useRef(onClose);
   const [isMobile, setIsMobile] = useState(false);
   const titleId = useId();
   const detail = record ?? localGuidance;
@@ -35,24 +40,51 @@ export function ExerciseDetailPanel({
   }, []);
 
   useEffect(() => {
-    if (!open || !detail || !isMobile) return;
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
-    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  useEffect(() => {
+    if (!open || !detail) return;
+
+    const focusManager = focusManagerRef.current;
+    focusManager.capture(
+      restoreFocusTarget ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
+    );
+
+    if (!isMobile) {
+      return () => focusManager.restore();
+    }
+
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     closeButtonRef.current?.focus();
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+
+      if (event.key !== "Tab") return;
+      const focusTarget = getNextDialogFocusTarget(
+        getDialogFocusTargets(dialogRef.current),
+        document.activeElement instanceof HTMLElement ? document.activeElement : null,
+        event.shiftKey
+      );
+      if (!focusTarget) return;
+
+      event.preventDefault();
+      focusTarget.focus();
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
-      previousFocusRef.current?.focus();
+      focusManager.restore();
     };
-  }, [detail, isMobile, onClose, open]);
+  }, [detail, isMobile, open, restoreFocusTarget]);
 
   if (!open || !detail) return null;
 
@@ -76,6 +108,7 @@ export function ExerciseDetailPanel({
         className={`max-h-[min(82dvh,44rem)] w-full overflow-y-auto rounded-t-xl bg-white px-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-4 shadow-xl md:max-h-none md:rounded-xl ${
           desktopSide ? "md:h-full md:w-[360px]" : "md:max-h-[80vh] md:max-w-lg md:rounded-xl"
         }`}
+        ref={dialogRef}
       >
         <div className="mb-5 flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -140,4 +173,14 @@ export function ExerciseDetailPanel({
       </section>
     </div>
   );
+}
+
+function getDialogFocusTargets(dialog: HTMLElement | null) {
+  if (!dialog) return [];
+
+  return Array.from(
+    dialog.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((element) => element.tabIndex >= 0);
 }
