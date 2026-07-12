@@ -22,6 +22,10 @@ create table if not exists public.exercises (
   category text not null,
   default_increment numeric(5, 2) not null,
   is_main_lift boolean not null default false,
+  catalog_external_id text unique,
+  training_direction text,
+  movement_pattern text,
+  substitution_enabled boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -69,7 +73,8 @@ create table if not exists public.workout_exercises (
   target_sets integer not null check (target_sets > 0),
   target_reps integer not null check (target_reps > 0),
   target_weight numeric(7, 2) not null check (target_weight >= 0),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists public.set_logs (
@@ -149,31 +154,57 @@ create table if not exists public.agent_access_tokens (
 create index if not exists agent_access_tokens_user_id_idx
 on public.agent_access_tokens (user_id, created_at desc);
 
-insert into public.exercises (slug, name, category, default_increment, is_main_lift)
+insert into public.exercises (
+  slug,
+  name,
+  category,
+  default_increment,
+  is_main_lift,
+  catalog_external_id,
+  training_direction,
+  movement_pattern,
+  substitution_enabled
+)
 values
-  ('back_squat', '深蹲', 'lower', 5.00, true),
-  ('bench_press', '卧推', 'upper', 2.50, true),
-  ('deadlift', '硬拉', 'lower', 5.00, true),
-  ('overhead_press', '推举', 'upper', 2.50, true),
-  ('barbell_row', '杠铃划船', 'upper', 2.50, false),
-  ('pull_up', '引体向上', 'upper', 2.50, false),
-  ('lat_pulldown', '高位下拉', 'upper', 2.50, false),
-  ('romanian_deadlift', '罗马尼亚硬拉', 'lower', 5.00, false),
-  ('leg_press', '腿举', 'lower', 5.00, false),
-  ('leg_curl', '腿弯举', 'lower', 2.50, false),
-  ('incline_dumbbell_press', '上斜哑铃卧推', 'push', 2.50, false),
-  ('lateral_raise', '侧平举', 'push', 1.00, false),
-  ('triceps_pushdown', '绳索下压', 'push', 2.50, false),
-  ('seated_cable_row', '坐姿划船', 'pull', 2.50, false),
-  ('face_pull', '面拉', 'pull', 1.00, false),
-  ('dumbbell_curl', '哑铃弯举', 'pull', 1.00, false),
-  ('standing_calf_raise', '站姿提踵', 'squat', 2.50, false),
-  ('cardio_zone2', 'Zone 2 有氧', 'cardio', 0.00, false)
+  ('back_squat', '深蹲', 'squat', 5.00, true, '0043', 'squat', 'knee_dominant', false),
+  ('bench_press', '卧推', 'push', 2.50, true, '0025', 'push', 'horizontal_press', false),
+  ('deadlift', '硬拉', 'pull', 5.00, true, '0032', 'pull', 'hip_hinge', false),
+  ('overhead_press', '推举', 'push', 2.50, true, '0091', 'push', 'vertical_press', true),
+  ('barbell_row', '杠铃划船', 'pull', 2.50, false, '0027', 'pull', 'horizontal_pull', false),
+  ('pull_up', '引体向上', 'pull', 2.50, false, '0652', 'pull', 'vertical_pull', true),
+  ('lat_pulldown', '高位下拉', 'pull', 2.50, false, '2330', 'pull', 'vertical_pull', true),
+  ('romanian_deadlift', '罗马尼亚硬拉', 'squat', 5.00, false, '0085', 'squat', 'hip_hinge', true),
+  ('leg_press', '腿举', 'squat', 5.00, false, '0739', 'squat', 'knee_dominant', true),
+  ('leg_curl', '腿弯举', 'squat', 2.50, false, '0599', 'squat', 'knee_flexion', true),
+  ('incline_dumbbell_press', '上斜哑铃卧推', 'push', 2.50, false, '0314', 'push', 'horizontal_press', true),
+  ('lateral_raise', '侧平举', 'push', 1.00, false, '0334', 'push', 'shoulder_abduction', true),
+  ('triceps_pushdown', '绳索下压', 'push', 2.50, false, '0201', 'push', 'elbow_extension', true),
+  ('seated_cable_row', '坐姿划船', 'pull', 2.50, false, '0861', 'pull', 'horizontal_pull', true),
+  ('face_pull', '面拉', 'pull', 1.00, false, '0233', 'pull', 'rear_delt', true),
+  ('dumbbell_curl', '哑铃弯举', 'pull', 1.00, false, '0294', 'pull', 'elbow_flexion', true),
+  ('standing_calf_raise', '站姿提踵', 'squat', 2.50, false, '0605', 'squat', 'calf_raise', true),
+  ('cardio_zone2', 'Zone 2 有氧', 'cardio', 0.00, false, null, 'cardio', 'aerobic_base', false),
+  ('machine_chest_press', '器械推胸', 'push', 2.50, false, '0577', 'push', 'horizontal_press', true),
+  ('machine_shoulder_press', '器械肩推', 'push', 2.50, false, '0603', 'push', 'vertical_press', true),
+  ('cable_lateral_raise', '绳索侧平举', 'push', 1.00, false, '0178', 'push', 'shoulder_abduction', true),
+  ('rope_triceps_pushdown', '绳索把手下压', 'push', 2.50, false, '0200', 'push', 'elbow_extension', true),
+  ('machine_seated_row', '器械坐姿划船', 'pull', 2.50, false, '1350', 'pull', 'horizontal_pull', true),
+  ('neutral_grip_lat_pulldown', '对握高位下拉', 'pull', 2.50, false, '0818', 'pull', 'vertical_pull', true),
+  ('cable_reverse_fly', '绳索反向飞鸟', 'pull', 1.00, false, '0225', 'pull', 'rear_delt', true),
+  ('cable_biceps_curl', '绳索弯举', 'pull', 1.00, false, '0868', 'pull', 'elbow_flexion', true),
+  ('machine_hack_squat', '哈克深蹲', 'squat', 2.50, false, '0743', 'squat', 'knee_dominant', true),
+  ('dumbbell_romanian_deadlift', '哑铃罗马尼亚硬拉', 'squat', 2.50, false, '1459', 'squat', 'hip_hinge', true),
+  ('lying_leg_curl', '俯卧腿弯举', 'squat', 1.00, false, '0586', 'squat', 'knee_flexion', true),
+  ('cable_standing_calf_raise', '绳索站姿提踵', 'squat', 2.50, false, '1375', 'squat', 'calf_raise', true)
 on conflict (slug) do update set
   name = excluded.name,
   category = excluded.category,
   default_increment = excluded.default_increment,
-  is_main_lift = excluded.is_main_lift;
+  is_main_lift = excluded.is_main_lift,
+  catalog_external_id = excluded.catalog_external_id,
+  training_direction = excluded.training_direction,
+  movement_pattern = excluded.movement_pattern,
+  substitution_enabled = excluded.substitution_enabled;
 
 alter table public.athlete_profiles enable row level security;
 alter table public.lift_profiles enable row level security;
@@ -313,3 +344,152 @@ with check (auth.uid() = user_id);
 
 revoke all on public.agent_access_tokens from anon;
 grant select, insert, update, delete on public.agent_access_tokens to authenticated;
+
+create type public.workout_exercise_substitution_scope as enum (
+  'current_workout',
+  'remaining_program'
+);
+
+create or replace function public.substitute_workout_exercise(
+  p_workout_exercise_id uuid,
+  p_target_exercise_id uuid,
+  p_scope workout_exercise_substitution_scope
+)
+returns table (affected_ids uuid[], affected_count integer)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_source record;
+  v_target record;
+  v_affected_ids uuid[];
+  v_affected_count integer;
+begin
+  if v_user_id is null then
+    raise exception 'Authentication required' using errcode = 'P0001';
+  end if;
+
+  select
+    we.id,
+    we.exercise_id,
+    we.order_index,
+    w.id as workout_id,
+    w.program_id,
+    w.scheduled_date,
+    e.training_direction,
+    e.movement_pattern
+  into v_source
+  from public.workout_exercises as we
+  join public.workouts as w on w.id = we.workout_id
+  join public.programs as p on p.id = w.program_id
+  join public.exercises as e on e.id = we.exercise_id
+  where we.id = p_workout_exercise_id
+    and p.user_id = v_user_id
+    and p.status = 'active'
+    and w.status in ('scheduled', 'draft')
+    and we.order_index >= 3
+    and e.catalog_external_id is not null
+    and e.training_direction is not null
+    and e.movement_pattern is not null
+    and e.substitution_enabled
+  for update of we, w;
+
+  if not found then
+    raise exception 'Source exercise is not eligible for substitution' using errcode = 'P0001';
+  end if;
+
+  select e.id, e.training_direction, e.movement_pattern
+  into v_target
+  from public.exercises as e
+  where e.id = p_target_exercise_id
+    and e.catalog_external_id is not null
+    and e.training_direction is not null
+    and e.movement_pattern is not null
+    and e.substitution_enabled
+  for update;
+
+  if not found then
+    raise exception 'Target exercise is not eligible for substitution' using errcode = 'P0001';
+  end if;
+
+  if v_target.id = v_source.exercise_id then
+    raise exception 'Target exercise must differ from the source exercise' using errcode = 'P0001';
+  end if;
+
+  if v_target.training_direction is distinct from v_source.training_direction then
+    raise exception 'Target exercise has an incompatible training direction' using errcode = 'P0001';
+  end if;
+
+  if v_target.movement_pattern is distinct from v_source.movement_pattern then
+    raise exception 'Target exercise has an incompatible movement pattern' using errcode = 'P0001';
+  end if;
+
+  select array_agg(affected.id order by affected.id)
+  into v_affected_ids
+  from (
+    select we.id
+    from public.workout_exercises as we
+    join public.workouts as w on w.id = we.workout_id
+    join public.exercises as e on e.id = we.exercise_id
+    where w.program_id = v_source.program_id
+      and we.exercise_id = v_source.exercise_id
+      and e.training_direction = v_source.training_direction
+      and e.movement_pattern = v_source.movement_pattern
+      and we.order_index = v_source.order_index
+      and w.status in ('scheduled', 'draft')
+      and (
+        (p_scope = 'current_workout' and we.id = v_source.id)
+        or (
+          p_scope = 'remaining_program'
+          and w.scheduled_date >= v_source.scheduled_date
+        )
+      )
+    for update of we, w
+  ) as affected;
+
+  if v_affected_ids is null then
+    raise exception 'No eligible workout exercises were found' using errcode = 'P0001';
+  end if;
+
+  perform 1
+  from public.set_logs as sl
+  where sl.workout_exercise_id = any(v_affected_ids)
+  for update;
+
+  if exists (
+    select 1
+    from public.set_logs as sl
+    where sl.workout_exercise_id = any(v_affected_ids)
+      and sl.completed
+  ) then
+    raise exception 'Completed sets cannot be substituted' using errcode = 'P0001';
+  end if;
+
+  delete from public.set_logs as sl
+  where sl.workout_exercise_id = any(v_affected_ids)
+    and not sl.completed;
+
+  update public.workout_exercises
+  set
+    exercise_id = v_target.id,
+    target_weight = 0,
+    updated_at = now()
+  where id = any(v_affected_ids);
+
+  v_affected_count := cardinality(v_affected_ids);
+  return query select v_affected_ids, v_affected_count;
+end;
+$$;
+
+revoke execute on function public.substitute_workout_exercise(
+  uuid,
+  uuid,
+  workout_exercise_substitution_scope
+) from public, anon;
+grant execute on function public.substitute_workout_exercise(
+  uuid,
+  uuid,
+  workout_exercise_substitution_scope
+) to authenticated;
