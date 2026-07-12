@@ -23,7 +23,10 @@ create table if not exists public.exercises (
   default_increment numeric(5, 2) not null,
   is_main_lift boolean not null default false,
   catalog_external_id text unique,
-  training_direction text,
+  training_direction text constraint exercises_training_direction_check check (
+    training_direction is null
+    or training_direction in ('push', 'pull', 'squat', 'cardio')
+  ),
   movement_pattern text,
   substitution_enabled boolean not null default false,
   created_at timestamptz not null default now()
@@ -345,10 +348,16 @@ with check (auth.uid() = user_id);
 revoke all on public.agent_access_tokens from anon;
 grant select, insert, update, delete on public.agent_access_tokens to authenticated;
 
-create type public.workout_exercise_substitution_scope as enum (
-  'current_workout',
-  'remaining_program'
-);
+do $$
+begin
+  create type public.workout_exercise_substitution_scope as enum (
+    'current_workout',
+    'remaining_program'
+  );
+exception
+  when duplicate_object then null;
+end;
+$$;
 
 create or replace function public.substitute_workout_exercise(
   p_workout_exercise_id uuid,
@@ -362,6 +371,7 @@ set search_path = public
 as $$
 declare
   v_user_id uuid := auth.uid();
+  v_program_id uuid;
   v_source record;
   v_target record;
   v_affected_ids uuid[];
@@ -369,6 +379,31 @@ declare
 begin
   if v_user_id is null then
     raise exception 'Authentication required' using errcode = 'P0001';
+  end if;
+
+  select w.program_id
+  into v_program_id
+  from public.workout_exercises as we
+  join public.workouts as w on w.id = we.workout_id
+  join public.programs as p on p.id = w.program_id
+  where we.id = p_workout_exercise_id
+    and w.user_id = v_user_id
+    and p.user_id = v_user_id
+    and w.user_id = p.user_id;
+
+  if not found then
+    raise exception 'Source exercise is not eligible for substitution' using errcode = 'P0001';
+  end if;
+
+  perform 1
+  from public.programs as p
+  where p.id = v_program_id
+    and p.user_id = v_user_id
+    and p.status = 'active'
+  for update;
+
+  if not found then
+    raise exception 'Source exercise is not eligible for substitution' using errcode = 'P0001';
   end if;
 
   select
@@ -386,7 +421,10 @@ begin
   join public.programs as p on p.id = w.program_id
   join public.exercises as e on e.id = we.exercise_id
   where we.id = p_workout_exercise_id
+    and p.id = v_program_id
     and p.user_id = v_user_id
+    and w.user_id = v_user_id
+    and w.user_id = p.user_id
     and p.status = 'active'
     and w.status in ('scheduled', 'draft')
     and we.order_index >= 3
@@ -426,28 +464,35 @@ begin
     raise exception 'Target exercise has an incompatible movement pattern' using errcode = 'P0001';
   end if;
 
-  select array_agg(affected.id order by affected.id)
+  select array_agg(locked.id order by locked.id)
   into v_affected_ids
   from (
     select we.id
     from public.workout_exercises as we
-    join public.workouts as w on w.id = we.workout_id
+    join public.workouts as w2 on w2.id = we.workout_id
+    join public.programs as p on p.id = w2.program_id
     join public.exercises as e on e.id = we.exercise_id
-    where w.program_id = v_source.program_id
+    where w2.program_id = v_source.program_id
+      and p.id = v_source.program_id
+      and p.user_id = v_user_id
+      and p.status = 'active'
+      and w2.user_id = v_user_id
+      and w2.user_id = p.user_id
       and we.exercise_id = v_source.exercise_id
       and e.training_direction = v_source.training_direction
       and e.movement_pattern = v_source.movement_pattern
       and we.order_index = v_source.order_index
-      and w.status in ('scheduled', 'draft')
+      and w2.status in ('scheduled', 'draft')
       and (
         (p_scope = 'current_workout' and we.id = v_source.id)
         or (
           p_scope = 'remaining_program'
-          and w.scheduled_date >= v_source.scheduled_date
+          and w2.scheduled_date >= v_source.scheduled_date
         )
       )
-    for update of we, w
-  ) as affected;
+    order by we.id
+    for update of we, w2
+  ) as locked;
 
   if v_affected_ids is null then
     raise exception 'No eligible workout exercises were found' using errcode = 'P0001';

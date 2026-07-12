@@ -76,3 +76,69 @@ This is not a production database verification. Run `supabase test db` after ins
 ## Remaining Concern
 
 The local environment cannot execute pgTAP or apply the migration, so SQL syntax and runtime behavior have not been exercised in a real Supabase/PostgreSQL instance here. The static SQL contract and complete pgTAP suite provide coverage, but linked-database execution remains required before production use.
+
+## Review Remediation Evidence
+
+### Scope
+
+Addressed all six review findings in the same Task 4 files. The RPC now derives a program ID through an ownership-safe lookup, locks the active owned program before any mutable workout row, re-reads the source under that lock, and locks affected rows through an ID-ordered, lockable subquery before aggregating the output array.
+
+### RED
+
+Added focused static SQL-contract assertions first for the named direction constraint, source and affected mixed-ownership predicates, program-first serialization lock, ID ordering before `FOR UPDATE`, and guarded `schema.sql` type creation.
+
+Ran:
+
+```powershell
+pnpm vitest run scripts/exercise-catalog-sql-contract.test.mjs
+```
+
+Result: exit code `1`; 1 test file ran, 3 tests ran, 2 failed. The failures were the expected absent `exercises_training_direction_check` and absent `w.user_id = v_user_id` ownership predicate.
+
+### GREEN
+
+After implementing the mirrored SQL changes, ran:
+
+```powershell
+pnpm vitest run src/domain/exercise-substitution.test.ts scripts/exercise-catalog-sql-contract.test.mjs
+pnpm test
+pnpm typecheck
+pnpm release:check
+```
+
+Results:
+
+- Focused suite: 2 files passed, 13 tests passed.
+- Full Vitest suite: 8 files passed, 64 tests passed.
+- Typecheck: passed.
+- Release check: passed typecheck, optimized production build, and all configured local smoke checks.
+- `git diff --check`: passed.
+
+### pgTAP Coverage and Limitation
+
+`supabase/tests/substitute_workout_exercise.test.sql` now has an exact `plan(43)` with 43 pgTAP assertions. It covers exact sorted output arrays for both scopes, the same-date `>=` case, `PUBLIC`/`anon`/`authenticated` execution privileges, valid and invalid training-direction metadata, and exercise/weight/log state assertions for every rejection family.
+
+The suite adds the critical mixed-owner fixture where user B's workout refers to user A's program. Acting as A must reject it, and the follow-up state assertion proves the exercise ID, weight, prescription, and log count are unchanged. A separate remaining-program fixture proves a completed future set rolls back the entire scope unchanged.
+
+Ran:
+
+```powershell
+supabase test db
+```
+
+Result: exit code `1`; PowerShell reported that `supabase` is not recognized. The environment still has neither Supabase CLI nor Docker, so pgTAP and migration syntax have not been executed by PostgreSQL locally. This remains a linked-database verification requirement and is not represented as production verification.
+
+### Remediation Files
+
+- `supabase/migrations/20260711190000_exercise_catalog_bridge.sql`
+- `supabase/schema.sql`
+- `supabase/tests/substitute_workout_exercise.test.sql`
+- `scripts/exercise-catalog-sql-contract.test.mjs`
+- `.superpowers/sdd/task-4-report.md`
+
+### Remediation Self-Review
+
+- Source authorization now requires `w.user_id = auth.uid()`, `p.user_id = auth.uid()`, and `w.user_id = p.user_id`; every affected remaining-program row repeats the corresponding `w2` checks.
+- The active program row is locked first. Source eligibility is re-read after that lock, and affected workout rows are selected in `we.id` order inside a non-aggregate `FOR UPDATE` subquery; only the outer query aggregates sorted IDs.
+- The nullable named direction check allows only `push`, `pull`, `squat`, `cardio`, and `NULL`. The migration safely drops/re-adds it; the bootstrap schema declares it by name. `schema.sql` now uses the same guarded enum creation block as the migration.
+- The SQL contract verifies both mirrors. The pgTAP plan count is mechanically checked against the 43 test assertions, but PostgreSQL execution remains unavailable in this environment.

@@ -28,10 +28,15 @@ describe("exercise catalog bridge SQL contract", () => {
       expect(sql).toMatch(/catalog_external_id\s+text/i);
       expect(sql).toMatch(/catalog_external_id\s+text\s+unique|unique\s*\(catalog_external_id\)/i);
       expect(sql).toMatch(/training_direction\s+text/i);
+      expect(sql).toMatch(/exercises_training_direction_check/i);
+      expect(sql).toMatch(/training_direction\s+is null\s+or\s+training_direction\s+in\s*\(\s*'push',\s*'pull',\s*'squat',\s*'cardio'\s*\)/i);
       expect(sql).toMatch(/movement_pattern\s+text/i);
       expect(sql).toMatch(/substitution_enabled\s+boolean\s+not null\s+default false/i);
       expect(sql).toMatch(/workout_exercises[\s\S]*updated_at\s+timestamptz\s+not null\s+default now\(\)/i);
     }
+
+    expect(migration).toMatch(/drop constraint if exists exercises_training_direction_check/i);
+    expect(migration).toMatch(/add constraint exercises_training_direction_check\s+check/i);
   });
 
   it("contains exactly the reviewed 29-row catalog mapping", async () => {
@@ -99,11 +104,19 @@ describe("exercise catalog bridge SQL contract", () => {
       expect(compact).toMatch(/v_user_id is null/i);
       expect(compact).toMatch(/programs(?: as)? p on p\.id = w\.program_id/i);
       expect(compact).toMatch(/p\.user_id = v_user_id/i);
+      expect(compact).toMatch(/w\.user_id = v_user_id/i);
+      expect(compact).toMatch(/w\.user_id = p\.user_id/i);
       expect(compact).toMatch(/p\.status = 'active'/i);
       expect(compact).toMatch(/w\.status in \('scheduled', 'draft'\)/i);
       expect(compact).toMatch(/we\.order_index >= 3/i);
       expect(compact).toMatch(/e\.training_direction is not null/i);
       expect(compact).toMatch(/e\.movement_pattern is not null/i);
+      expect(compact).toMatch(/select w\.program_id into v_program_id/i);
+      expect(compact).toMatch(/from public\.programs as p where p\.id = v_program_id[\s\S]*for update/i);
+      expect(compact).toMatch(/join public\.workouts as w2 on w2\.id = we\.workout_id/i);
+      expect(compact).toMatch(/w2\.user_id = v_user_id/i);
+      expect(compact).toMatch(/w2\.user_id = p\.user_id/i);
+      expect(compact).toMatch(/select array_agg\(locked\.id order by locked\.id\)[\s\S]*from \([\s\S]*order by we\.id[\s\S]*for update of we, w2/i);
       expect(compact).toMatch(/for update/i);
       expect(compact).toMatch(/sl\.completed/i);
       expect(compact).toMatch(/delete from public\.set_logs/i);
@@ -113,5 +126,7 @@ describe("exercise catalog bridge SQL contract", () => {
       expect(compact).toMatch(/revoke execute on function public\.substitute_workout_exercise\(\s*uuid, uuid, workout_exercise_substitution_scope\s*\) from public, anon/i);
       expect(compact).toMatch(/grant execute on function public\.substitute_workout_exercise\(\s*uuid, uuid, workout_exercise_substitution_scope\s*\) to authenticated/i);
     }
+
+    expect(schema).toMatch(/do \$\$[\s\S]*create type public\.workout_exercise_substitution_scope[\s\S]*when duplicate_object then null[\s\S]*\$\$;/i);
   });
 });
