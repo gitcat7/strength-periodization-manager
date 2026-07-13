@@ -15,7 +15,7 @@ CC 不直接修改 `main`，不推送、不部署、不操作生产数据库。
 打开 PowerShell，执行：
 
 ```powershell
-$env:PATH = 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin;' + $env:PATH
+$env:PATH = 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\fallback;C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin;' + $env:PATH
 Set-Location 'C:\Users\yaokui\Documents\力量训练周期管理\.worktrees\claude-exercise-catalog-today'
 git status --short --branch
 claude

@@ -156,8 +156,8 @@ Codex 对 Claude 的提交进行最终审查，重点检查：
 Claude Code 至少运行任务相关的局部检查。最终集成由 Codex 运行：
 
 ```powershell
-$env:PATH = 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin;' + $env:PATH
-& 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\pnpm.cmd' release:check
+$env:PATH = 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\fallback;C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin;' + $env:PATH
+& 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\fallback\pnpm.cmd' release:check
 ```
 
 生产部署、Supabase 迁移和 GitHub 推送不属于 Claude 默认权限。相关操作必须经过用户明确确认，并由 Codex 统一执行和验证。

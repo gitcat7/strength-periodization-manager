@@ -203,8 +203,8 @@ Expected: 新目录存在，`git worktree list` 显示新分支。
 在新 Worktree 执行：
 
 ```powershell
-$env:PATH = 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin;' + $env:PATH
-& 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\pnpm.cmd' install --frozen-lockfile
+$env:PATH = 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin;C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\fallback;C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin;' + $env:PATH
+& 'C:\Users\yaokui\.cache\codex-runtimes\codex-primary-runtime\dependencies\bin\fallback\pnpm.cmd' install --frozen-lockfile
 ```
 
 Expected: 安装退出码为 0，锁文件无变化。
