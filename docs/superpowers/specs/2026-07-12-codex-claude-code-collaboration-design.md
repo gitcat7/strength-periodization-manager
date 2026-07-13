@@ -50,13 +50,13 @@
 主工作目录保持不变：
 
 ```text
-C:\Users\yaokui\Documents\力量训练周期管理
+C:\Users\yaokui\Documents\strength-periodization-manager
 ```
 
 Claude Code 使用独立的相邻目录，例如：
 
 ```text
-C:\Users\yaokui\Documents\力量训练周期管理-claude-exercise-catalog
+C:\Users\yaokui\Documents\strength-periodization-manager-claude-exercise-catalog
 ```
 
 每项 Claude 任务使用独立分支：
@@ -95,7 +95,7 @@ claude doctor
 ### 进入任务 Worktree
 
 ```powershell
-Set-Location 'C:\Users\yaokui\Documents\力量训练周期管理-claude-exercise-catalog'
+Set-Location 'C:\Users\yaokui\Documents\strength-periodization-manager-claude-exercise-catalog'
 git status --short --branch
 claude
 ```

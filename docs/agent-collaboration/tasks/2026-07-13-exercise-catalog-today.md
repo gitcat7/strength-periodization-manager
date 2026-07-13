@@ -10,7 +10,7 @@
 
 - 基线分支：`codex/exercise-catalog-integration`
 - 当前分支：`claude/exercise-catalog-today`
-- Worktree：`C:\Users\yaokui\Documents\力量训练周期管理\.worktrees\claude-exercise-catalog-today`
+- Worktree：`C:\Users\yaokui\Documents\strength-periodization-manager\.worktrees\claude-exercise-catalog-today`
 
 开始前必须运行：
 

@@ -38,7 +38,7 @@ pnpm smoke
 3. 选择项目目录：
 
 ```text
-C:\Users\yaokui\Documents\力量训练周期管理
+C:\Users\yaokui\Documents\strength-periodization-manager
 ```
 
 4. 如果提示还不是 Git 仓库，选择创建仓库。
