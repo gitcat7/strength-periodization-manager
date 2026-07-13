@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  BookOpen,
   Brain,
   CalendarDays,
   CheckCircle2,
@@ -31,8 +30,15 @@ import { clearTrainingDataCaches, clearWorkoutDrafts, readClientCache, writeClie
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { formatPrescription, getExerciseNote, getWorkoutMeta } from "@/domain/training-format";
 import { ExerciseDetailLauncher } from "@/components/exercises/exercise-detail-launcher";
-import { ExerciseSubstitutionDialog } from "./exercise-substitution-dialog";
-import type { SubstitutionCandidate, ExerciseSubstitutionScope } from "./exercise-substitution-dialog-state";
+import {
+  ExerciseSubstitutionDialog
+} from "./exercise-substitution-dialog";
+import {
+  getSubstitutionErrorMessage,
+  parseSubstitutionRpcResponse,
+  type SubstitutionCandidate,
+  type ExerciseSubstitutionScope
+} from "./exercise-substitution-dialog-state";
 
 type WorkoutRow = {
   id: string;
@@ -179,7 +185,8 @@ function ExerciseSubstitutionButton({
     movementPattern: exerciseData.movement_pattern,
     name: exerciseData.name,
     substitutionEnabled: exerciseData.substitution_enabled,
-    trainingDirection: exerciseData.training_direction
+    trainingDirection: exerciseData.training_direction,
+    workoutExerciseId: exercise.id
   };
 
   const eligible = isExerciseSubstitutionEligible({
@@ -784,8 +791,7 @@ export function TodayWorkout() {
   ) {
     if (!workout || !userId) return;
 
-    const workoutExercise = exercises.find((exercise) => exercise.exercise_id === source.id);
-    if (!workoutExercise) {
+    if (!source.workoutExerciseId) {
       setSubstitutionDialog((current) => ({
         ...current,
         error: "未找到当前训练动作，请刷新后重试。",
@@ -797,32 +803,45 @@ export function TodayWorkout() {
     setSubstitutionDialog((current) => ({ ...current, error: null, saving: true }));
 
     const supabase = createBrowserSupabaseClient();
-    const { data, error } = await supabase.rpc("substitute_workout_exercise", {
-      p_workout_exercise_id: workoutExercise.id,
-      p_target_exercise_id: target.id,
-      p_scope: scope
-    });
+    const { data, error } = await supabase
+      .rpc("substitute_workout_exercise", {
+        p_workout_exercise_id: source.workoutExerciseId,
+        p_target_exercise_id: target.id,
+        p_scope: scope
+      })
+      .single();
 
     if (error || !data) {
       setSubstitutionDialog((current) => ({
         ...current,
-        error: error?.message ?? "替换失败，请重试。",
+        error: getSubstitutionErrorMessage(error),
         saving: false
       }));
       return;
     }
 
-    const result = data as { affected_count: number; affected_ids: string[] };
-    const affectedIds = result.affected_ids ?? [];
-    const workoutIds = await loadWorkoutIdsForExercises(affectedIds);
+    let result: { affectedCount: number; affectedIds: string[] };
+    try {
+      result = parseSubstitutionRpcResponse(data);
+    } catch (parseError) {
+      setSubstitutionDialog((current) => ({
+        ...current,
+        error: getSubstitutionErrorMessage(parseError),
+        saving: false
+      }));
+      return;
+    }
+
+    const workoutIds = await loadWorkoutIdsForExercises(result.affectedIds);
+    const draftWorkoutIds = [...new Set([...workoutIds, workout.id])];
 
     clearTrainingDataCaches();
-    clearWorkoutDrafts(workoutIds);
+    clearWorkoutDrafts(draftWorkoutIds);
 
     await trackEvent({
       eventName: "exercise_substituted",
       properties: {
-        count: result.affected_count,
+        count: result.affectedCount,
         scope,
         source_exercise_id: source.id,
         target_exercise_id: target.id

@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   exerciseSubstitutionDialogReducer,
   getInitialExerciseSubstitutionDialogState,
+  getSubstitutionErrorMessage,
+  parseSubstitutionRpcResponse,
   type SubstitutionCandidate
 } from "./exercise-substitution-dialog-state";
 
@@ -12,7 +14,8 @@ const source: SubstitutionCandidate = {
   movementPattern: "shoulder_abduction",
   name: "侧平举",
   substitutionEnabled: true,
-  trainingDirection: "push"
+  trainingDirection: "push",
+  workoutExerciseId: "we-source"
 };
 
 const compatibleTarget: SubstitutionCandidate = {
@@ -156,5 +159,54 @@ describe("exerciseSubstitutionDialogReducer", () => {
 
     expect(state.error).toBeNull();
     expect(state.targetId).toBe(secondTarget.id);
+  });
+});
+
+describe("parseSubstitutionRpcResponse", () => {
+  it("parses a valid single-row RPC response", () => {
+    const result = parseSubstitutionRpcResponse({
+      affected_count: 2,
+      affected_ids: ["id-1", "id-2"]
+    });
+
+    expect(result).toEqual({
+      affectedCount: 2,
+      affectedIds: ["id-1", "id-2"]
+    });
+  });
+
+  it("throws for an array response", () => {
+    expect(() => parseSubstitutionRpcResponse([{ affected_count: 1, affected_ids: ["id-1"] }])).toThrow(
+      "替换结果异常，请刷新页面后重试。"
+    );
+  });
+
+  it("throws when fields are missing", () => {
+    expect(() => parseSubstitutionRpcResponse({ affected_count: 1 })).toThrow(
+      "替换结果异常，请刷新页面后重试。"
+    );
+  });
+});
+
+describe("getSubstitutionErrorMessage", () => {
+  it("maps RLS violation to a friendly Chinese message", () => {
+    expect(getSubstitutionErrorMessage({ code: "42501", message: "permission denied" })).toBe(
+      "权限不足，无法替换此动作。请确认当前训练属于您本人。"
+    );
+  });
+
+  it("maps single-row mismatch to a friendly Chinese message", () => {
+    expect(getSubstitutionErrorMessage({ code: "PGRST116", message: "no rows" })).toBe(
+      "替换结果异常，请刷新页面后重试。"
+    );
+  });
+
+  it("falls back to the error message for unknown codes", () => {
+    const error = new Error("network failure");
+    expect(getSubstitutionErrorMessage(error)).toBe("network failure");
+  });
+
+  it("falls back to a generic Chinese message for non-errors", () => {
+    expect(getSubstitutionErrorMessage(null)).toBe("替换失败，请重试。");
   });
 });

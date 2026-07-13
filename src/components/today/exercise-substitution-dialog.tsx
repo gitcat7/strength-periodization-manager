@@ -1,35 +1,47 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Loader2, RefreshCcw, X } from "lucide-react";
-import { getInitialExerciseSubstitutionDialogState, type SubstitutionCandidate } from "./exercise-substitution-dialog-state";
+import {
+  isCompatibleCandidate,
+  type ExerciseSubstitutionScope,
+  type SubstitutionCandidate
+} from "./exercise-substitution-dialog-state";
 
 type ExerciseSubstitutionDialogProps = {
+  alternatives: SubstitutionCandidate[];
   error: string | null;
   onClose: () => void;
-  onConfirm: (source: SubstitutionCandidate, target: SubstitutionCandidate, scope: ExerciseSubstitutionScope) => void;
+  onConfirm: (
+    source: SubstitutionCandidate,
+    target: SubstitutionCandidate,
+    scope: ExerciseSubstitutionScope
+  ) => Promise<void>;
   open: boolean;
   saving: boolean;
   source: SubstitutionCandidate;
-  alternatives: SubstitutionCandidate[];
 };
 
-type ExerciseSubstitutionScope = "current_workout" | "remaining_program";
-
 export function ExerciseSubstitutionDialog({
+  alternatives,
   error,
   onClose,
   onConfirm,
   open,
   saving,
-  source,
-  alternatives
+  source
 }: ExerciseSubstitutionDialogProps) {
   const titleId = useId();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const submittingRef = useRef(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [state, dispatch] = useState(() => getInitialExerciseSubstitutionDialogState(source, alternatives));
+  const candidates = useMemo(
+    () => alternatives.filter((candidate) => isCompatibleCandidate(source, candidate)),
+    [alternatives, source]
+  );
+  const [scope, setScope] = useState<ExerciseSubstitutionScope>("current_workout");
+  const [targetId, setTargetId] = useState<string | null>(null);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
@@ -40,10 +52,11 @@ export function ExerciseSubstitutionDialog({
   }, []);
 
   useEffect(() => {
-    if (!open) return;
-
-    dispatch(getInitialExerciseSubstitutionDialogState(source, alternatives));
-  }, [open, source, alternatives]);
+    if (open) {
+      setScope("current_workout");
+      setTargetId(null);
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -68,44 +81,31 @@ export function ExerciseSubstitutionDialog({
     };
   }, [isMobile, open, onClose]);
 
-  useEffect(() => {
-    dispatch((current) => ({ ...current, error: error ?? null }));
-  }, [error]);
+  const selectedTarget = useMemo(
+    () => candidates.find((candidate) => candidate.id === targetId) ?? null,
+    [candidates, targetId]
+  );
 
-  useEffect(() => {
-    dispatch((current) => ({ ...current, saving }));
-  }, [saving]);
-
-  function handleSelectTarget(targetId: string) {
-    dispatch((current) => {
-      const target = current.candidates.find((candidate) => candidate.id === targetId);
-      return {
-        ...current,
-        error: null,
-        targetId: target ? target.id : null
-      };
-    });
+  function handleSelectTarget(nextTargetId: string) {
+    setTargetId(nextTargetId);
   }
 
-  function handleSelectScope(scope: ExerciseSubstitutionScope) {
-    dispatch((current) => ({ ...current, scope }));
+  function handleSelectScope(nextScope: ExerciseSubstitutionScope) {
+    setScope(nextScope);
   }
 
-  function handleConfirm() {
-    dispatch((current) => {
-      if (current.saving || !current.targetId) return current;
+  async function handleConfirm() {
+    if (!selectedTarget || saving || submittingRef.current) return;
 
-      const target = current.candidates.find((candidate) => candidate.id === current.targetId);
-      if (!target) return current;
-
-      onConfirm(current.source, target, current.scope);
-      return current;
-    });
+    submittingRef.current = true;
+    try {
+      await onConfirm(source, selectedTarget, scope);
+    } finally {
+      submittingRef.current = false;
+    }
   }
 
   if (!open) return null;
-
-  const selectedTarget = state.candidates.find((candidate) => candidate.id === state.targetId);
 
   return (
     <div
@@ -142,7 +142,7 @@ export function ExerciseSubstitutionDialog({
           </button>
         </div>
 
-        {state.candidates.length === 0 ? (
+        {candidates.length === 0 ? (
           <div className="space-y-4">
             <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">没有可替换的兼容动作。</p>
             <button
@@ -157,15 +157,15 @@ export function ExerciseSubstitutionDialog({
           <div className="space-y-4">
             <fieldset className="space-y-2">
               <legend className="sr-only">选择替换动作</legend>
-              {state.candidates.map((candidate) => (
+              {candidates.map((candidate) => (
                 <label
                   className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${
-                    state.targetId === candidate.id ? "border-action bg-action/5" : "border-line bg-white"
+                    targetId === candidate.id ? "border-action bg-action/5" : "border-line bg-white"
                   }`}
                   key={candidate.id}
                 >
                   <input
-                    checked={state.targetId === candidate.id}
+                    checked={targetId === candidate.id}
                     className="h-4 w-4 accent-action"
                     name="substitution-target"
                     onChange={() => handleSelectTarget(candidate.id)}
@@ -181,11 +181,11 @@ export function ExerciseSubstitutionDialog({
               <legend className="text-sm font-semibold">应用范围</legend>
               <label
                 className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${
-                  state.scope === "current_workout" ? "border-action bg-action/5" : "border-line bg-white"
+                  scope === "current_workout" ? "border-action bg-action/5" : "border-line bg-white"
                 }`}
               >
                 <input
-                  checked={state.scope === "current_workout"}
+                  checked={scope === "current_workout"}
                   className="h-4 w-4 accent-action"
                   name="substitution-scope"
                   onChange={() => handleSelectScope("current_workout")}
@@ -196,11 +196,11 @@ export function ExerciseSubstitutionDialog({
               </label>
               <label
                 className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${
-                  state.scope === "remaining_program" ? "border-action bg-action/5" : "border-line bg-white"
+                  scope === "remaining_program" ? "border-action bg-action/5" : "border-line bg-white"
                 }`}
               >
                 <input
-                  checked={state.scope === "remaining_program"}
+                  checked={scope === "remaining_program"}
                   className="h-4 w-4 accent-action"
                   name="substitution-scope"
                   onChange={() => handleSelectScope("remaining_program")}
@@ -216,10 +216,10 @@ export function ExerciseSubstitutionDialog({
               <p className="mt-1 text-sm text-amber-900">新动作重量将重置为 0kg，目标组数与次数保持不变。</p>
             </div>
 
-            {state.error ? (
+            {error ? (
               <div className="flex items-start gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">
                 <RefreshCcw className="mt-0.5 shrink-0" size={16} />
-                <span>{state.error}</span>
+                <span>{error}</span>
               </div>
             ) : null}
 

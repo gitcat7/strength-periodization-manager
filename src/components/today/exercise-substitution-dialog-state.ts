@@ -7,6 +7,7 @@ export type SubstitutionCandidate = {
   name: string;
   substitutionEnabled: boolean;
   trainingDirection: string | null;
+  workoutExerciseId?: string;
 };
 
 export type ExerciseSubstitutionDialogState = {
@@ -33,7 +34,7 @@ export type ExerciseSubstitutionDialogResult =
   | { type: "idle"; state: ExerciseSubstitutionDialogState }
   | { type: "state"; state: ExerciseSubstitutionDialogState };
 
-function isCompatibleCandidate(source: SubstitutionCandidate, candidate: SubstitutionCandidate): boolean {
+export function isCompatibleCandidate(source: SubstitutionCandidate, candidate: SubstitutionCandidate): boolean {
   return (
     candidate.id !== source.id &&
     candidate.substitutionEnabled &&
@@ -41,6 +42,55 @@ function isCompatibleCandidate(source: SubstitutionCandidate, candidate: Substit
     candidate.trainingDirection === source.trainingDirection &&
     candidate.movementPattern === source.movementPattern
   );
+}
+
+export function parseSubstitutionRpcResponse(data: unknown): {
+  affectedCount: number;
+  affectedIds: string[];
+} {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("替换结果异常，请刷新页面后重试。");
+  }
+
+  const record = data as Record<string, unknown>;
+  const affectedIds = record.affected_ids;
+  const affectedCount = record.affected_count;
+
+  if (!Array.isArray(affectedIds) || typeof affectedCount !== "number") {
+    throw new Error("替换结果异常，请刷新页面后重试。");
+  }
+
+  return {
+    affectedCount,
+    affectedIds: affectedIds.map((id) => String(id))
+  };
+}
+
+export function getSubstitutionErrorMessage(error: unknown): string {
+  const code =
+    typeof error === "object" && error !== null ? (error as { code?: string }).code : undefined;
+
+  if (code === "42501") {
+    return "权限不足，无法替换此动作。请确认当前训练属于您本人。";
+  }
+
+  if (code === "P0001") {
+    return "当前动作不符合替换条件（训练已开始、不是配件或没有兼容目标）。";
+  }
+
+  if (code === "40P01") {
+    return "系统繁忙，请稍后再试。";
+  }
+
+  if (code === "PGRST116") {
+    return "替换结果异常，请刷新页面后重试。";
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "替换失败，请重试。";
 }
 
 export function getInitialExerciseSubstitutionDialogState(
