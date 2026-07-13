@@ -69,3 +69,26 @@ export function clearTrainingDataCaches() {
     // Cache failures should never block the training workflow.
   }
 }
+
+const draftPrefix = "strength-training-draft:";
+
+export function clearWorkoutDrafts(workoutIds: string[]) {
+  if (typeof window === "undefined" || workoutIds.length === 0) return;
+
+  try {
+    const allKeys: string[] = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key) allKeys.push(key);
+    }
+
+    const keysToRemove = allKeys.filter((key) => {
+      if (!key.startsWith(draftPrefix)) return false;
+      const workoutId = key.slice(draftPrefix.length);
+      return workoutIds.includes(workoutId);
+    });
+    keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+  } catch {
+    // Draft cleanup failures should never block the substitution flow.
+  }
+}

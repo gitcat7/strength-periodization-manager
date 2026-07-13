@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  BookOpen,
   Brain,
   CalendarDays,
   CheckCircle2,
@@ -13,6 +14,7 @@ import {
   Pause,
   Play,
   Plus,
+  RefreshCw,
   RotateCcw,
   Save,
   Timer
@@ -23,10 +25,14 @@ import {
   getWorkoutCoachCue,
   type ExerciseCoachRecommendation
 } from "@/domain/fitness-coach";
+import { isExerciseSubstitutionEligible } from "@/domain/exercise-substitution";
 import { trackEvent } from "@/lib/analytics";
-import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
+import { clearTrainingDataCaches, clearWorkoutDrafts, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { formatPrescription, getExerciseNote, getWorkoutMeta } from "@/domain/training-format";
+import { ExerciseDetailLauncher } from "@/components/exercises/exercise-detail-launcher";
+import { ExerciseSubstitutionDialog } from "./exercise-substitution-dialog";
+import type { SubstitutionCandidate, ExerciseSubstitutionScope } from "./exercise-substitution-dialog-state";
 
 type WorkoutRow = {
   id: string;
@@ -43,10 +49,31 @@ type WorkoutExerciseRow = {
   target_reps: number;
   target_weight: number;
   exercises: {
+    catalog_external_id: string | null;
     default_increment: number;
+    movement_pattern: string | null;
     name: string;
     slug: string;
+    substitution_enabled: boolean;
+    training_direction: string | null;
   } | null;
+};
+
+type CatalogExerciseRow = {
+  id: string;
+  name: string;
+  slug: string;
+  catalog_external_id: string | null;
+  training_direction: string | null;
+  movement_pattern: string | null;
+  substitution_enabled: boolean;
+};
+
+type SubstitutionDialogState = {
+  error: string | null;
+  open: boolean;
+  saving: boolean;
+  source: SubstitutionCandidate | null;
 };
 
 type LastCompletedWorkoutRow = {
@@ -95,6 +122,95 @@ const todayCacheKey = "strength-training-cache:today";
 const restTimerSettingsKey = "strength-training-rest-timer";
 const restTimerOptions = [60, 90, 120, 180];
 
+async function loadCatalogExercises(): Promise<CatalogExerciseRow[]> {
+  const supabase = createBrowserSupabaseClient();
+  const { data, error } = await supabase
+    .from("exercises")
+    .select("id,name,slug,catalog_external_id,training_direction,movement_pattern,substitution_enabled")
+    .eq("substitution_enabled", true)
+    .not("catalog_external_id", "is", null);
+
+  if (error) {
+    console.warn("catalog exercises query failed", error.message);
+    return [];
+  }
+
+  return (data ?? []) as unknown as CatalogExerciseRow[];
+}
+
+async function loadWorkoutIdsForExercises(workoutExerciseIds: string[]): Promise<string[]> {
+  if (workoutExerciseIds.length === 0) return [];
+
+  const supabase = createBrowserSupabaseClient();
+  const { data, error } = await supabase
+    .from("workout_exercises")
+    .select("workout_id")
+    .in("id", workoutExerciseIds);
+
+  if (error) {
+    console.warn("workout id lookup failed", error.message);
+    return [];
+  }
+
+  return [...new Set(((data ?? []) as { workout_id: string }[]).map((row) => row.workout_id))];
+}
+
+type ExerciseSubstitutionButtonProps = {
+  alternatives: CatalogExerciseRow[];
+  exercise: WorkoutExerciseRow;
+  hasCompletedSet: boolean;
+  workoutStatus: string;
+  onOpen: (source: SubstitutionCandidate) => void;
+};
+
+function ExerciseSubstitutionButton({
+  alternatives,
+  exercise,
+  hasCompletedSet,
+  workoutStatus,
+  onOpen
+}: ExerciseSubstitutionButtonProps) {
+  const exerciseData = exercise.exercises;
+  if (!exerciseData) return null;
+
+  const sourceCandidate: SubstitutionCandidate = {
+    catalogExternalId: exerciseData.catalog_external_id,
+    id: exercise.exercise_id,
+    movementPattern: exerciseData.movement_pattern,
+    name: exerciseData.name,
+    substitutionEnabled: exerciseData.substitution_enabled,
+    trainingDirection: exerciseData.training_direction
+  };
+
+  const eligible = isExerciseSubstitutionEligible({
+    alternatives: alternatives.map((row) => ({
+      catalogExternalId: row.catalog_external_id,
+      id: row.id,
+      movementPattern: row.movement_pattern,
+      name: row.name,
+      substitutionEnabled: row.substitution_enabled,
+      trainingDirection: row.training_direction
+    })),
+    hasCompletedSet,
+    orderIndex: exercise.order_index,
+    source: sourceCandidate,
+    workoutStatus: workoutStatus as "scheduled" | "draft" | "completed" | "skipped"
+  });
+
+  if (!eligible) return null;
+
+  return (
+    <button
+      className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink"
+      onClick={() => onOpen(sourceCandidate)}
+      type="button"
+    >
+      <RefreshCw size={16} />
+      替换动作
+    </button>
+  );
+}
+
 export function TodayWorkout() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -110,11 +226,19 @@ export function TodayWorkout() {
   const [message, setMessage] = useState("");
   const [validationIssues, setValidationIssues] = useState<TrainingValidationIssue[]>([]);
   const [workoutSummary, setWorkoutSummary] = useState<WorkoutSummary | null>(null);
+  const [catalogExercises, setCatalogExercises] = useState<CatalogExerciseRow[]>([]);
+  const [substitutionDialog, setSubstitutionDialog] = useState<SubstitutionDialogState>({
+    error: null,
+    open: false,
+    saving: false,
+    source: null
+  });
   const [restTimerEnabled, setRestTimerEnabled] = useState(true);
   const [restSeconds, setRestSeconds] = useState(120);
   const [restRemaining, setRestRemaining] = useState(0);
   const [restRunning, setRestRunning] = useState(false);
   const [restContext, setRestContext] = useState("完成一组后自动开始休息");
+  const [reloadTrigger, setReloadTrigger] = useState(0);
 
   useEffect(() => {
     const settings = readRestTimerSettings();
@@ -238,7 +362,7 @@ export function TodayWorkout() {
           supabase
             .from("workout_exercises")
             .select(
-              "id,exercise_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug,default_increment)"
+              "id,exercise_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug,default_increment,catalog_external_id,training_direction,movement_pattern,substitution_enabled)"
             )
             .eq("workout_id", workoutData.id)
             .order("order_index", { ascending: true }),
@@ -254,10 +378,15 @@ export function TodayWorkout() {
         const exerciseRows = (exerciseData ?? []) as unknown as WorkoutExerciseRow[];
         setWorkout(workoutData as WorkoutRow);
         setExercises(exerciseRows);
+
         const [lastWorkout, groupedLogs] = await Promise.all([
           loadLastCompletedWorkout(program.id, workoutData.scheduled_date),
           ensureSetLogs(exerciseRows, workoutData.id)
         ]);
+
+        loadCatalogExercises().then((rows) => setCatalogExercises(rows)).catch(() => {
+          // Catalog availability must not block training execution.
+        });
         writeClientCache<TodayCache>(todayCacheKey, {
           coachRecommendations: [],
           exercises: exerciseRows,
@@ -286,7 +415,7 @@ export function TodayWorkout() {
 
     loadTodayWorkout();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router]);
+  }, [router, reloadTrigger]);
 
   async function loadLastCompletedWorkout(programId: string, scheduledDate: string) {
     const supabase = createBrowserSupabaseClient();
@@ -648,6 +777,65 @@ export function TodayWorkout() {
     });
   }
 
+  async function handleSubstitute(
+    source: SubstitutionCandidate,
+    target: SubstitutionCandidate,
+    scope: ExerciseSubstitutionScope
+  ) {
+    if (!workout || !userId) return;
+
+    const workoutExercise = exercises.find((exercise) => exercise.exercise_id === source.id);
+    if (!workoutExercise) {
+      setSubstitutionDialog((current) => ({
+        ...current,
+        error: "未找到当前训练动作，请刷新后重试。",
+        saving: false
+      }));
+      return;
+    }
+
+    setSubstitutionDialog((current) => ({ ...current, error: null, saving: true }));
+
+    const supabase = createBrowserSupabaseClient();
+    const { data, error } = await supabase.rpc("substitute_workout_exercise", {
+      p_workout_exercise_id: workoutExercise.id,
+      p_target_exercise_id: target.id,
+      p_scope: scope
+    });
+
+    if (error || !data) {
+      setSubstitutionDialog((current) => ({
+        ...current,
+        error: error?.message ?? "替换失败，请重试。",
+        saving: false
+      }));
+      return;
+    }
+
+    const result = data as { affected_count: number; affected_ids: string[] };
+    const affectedIds = result.affected_ids ?? [];
+    const workoutIds = await loadWorkoutIdsForExercises(affectedIds);
+
+    clearTrainingDataCaches();
+    clearWorkoutDrafts(workoutIds);
+
+    await trackEvent({
+      eventName: "exercise_substituted",
+      properties: {
+        count: result.affected_count,
+        scope,
+        source_exercise_id: source.id,
+        target_exercise_id: target.id
+      },
+      supabase,
+      userId
+    });
+
+    setSubstitutionDialog({ error: null, open: false, saving: false, source: null });
+    setMessage(`已替换为 ${target.name}。新动作重量已重置为 0kg。`);
+    setReloadTrigger((current) => current + 1);
+  }
+
   if (status === "loading") {
     return (
       <div className="flex items-center gap-3 rounded-xl border border-line p-4 text-muted">
@@ -877,6 +1065,27 @@ export function TodayWorkout() {
                     </div>
                   </div>
                   <p className="mt-2 text-sm text-muted">{getExerciseNote(exercise.exercises?.slug, index)}</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <ExerciseDetailLauncher
+                      catalogExternalId={exercise.exercises?.catalog_external_id}
+                      exerciseName={exercise.exercises?.name}
+                      exerciseSlug={exercise.exercises?.slug ?? "unknown"}
+                    />
+                    <ExerciseSubstitutionButton
+                      alternatives={catalogExercises}
+                      exercise={exercise}
+                      hasCompletedSet={completedExerciseSets > 0}
+                      workoutStatus={workout.status}
+                      onOpen={(sourceCandidate) =>
+                        setSubstitutionDialog({
+                          error: null,
+                          open: true,
+                          saving: false,
+                          source: sourceCandidate
+                        })
+                      }
+                    />
+                  </div>
                   <div className="mt-4 space-y-2">
                     {exerciseLogs.map((log) => (
                       <div
@@ -927,6 +1136,25 @@ export function TodayWorkout() {
           );
         })}
       </div>
+
+      {substitutionDialog.source ? (
+        <ExerciseSubstitutionDialog
+          alternatives={catalogExercises.map((row) => ({
+            catalogExternalId: row.catalog_external_id,
+            id: row.id,
+            movementPattern: row.movement_pattern,
+            name: row.name,
+            substitutionEnabled: row.substitution_enabled,
+            trainingDirection: row.training_direction
+          }))}
+          error={substitutionDialog.error}
+          onClose={() => setSubstitutionDialog({ error: null, open: false, saving: false, source: null })}
+          onConfirm={handleSubstitute}
+          open={substitutionDialog.open}
+          saving={substitutionDialog.saving}
+          source={substitutionDialog.source}
+        />
+      ) : null}
 
       <div className="sticky bottom-3 z-20 grid gap-2 rounded-xl border border-line bg-white/95 p-3 shadow-lg backdrop-blur">
         <div className="flex items-center justify-between gap-3 text-xs text-muted">
