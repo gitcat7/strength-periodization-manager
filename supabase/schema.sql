@@ -49,6 +49,7 @@ create table if not exists public.programs (
   user_id uuid not null references auth.users(id) on delete cascade,
   name text not null,
   template_type text not null check (template_type in ('three_day_full_body', 'four_day_upper_lower', 'push_pull_squat')),
+  schedule_mode text not null default 'fixed_weekdays' check (schedule_mode in ('fixed_weekdays', 'cadence', 'flexible')),
   status text not null default 'active' check (status in ('draft', 'active', 'completed', 'archived')),
   start_date date not null,
   end_date date not null,
@@ -61,11 +62,13 @@ create table if not exists public.workouts (
   program_id uuid not null references public.programs(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
   scheduled_date date not null,
+  sequence_index integer not null,
   name text not null,
   status text not null default 'scheduled' check (status in ('scheduled', 'draft', 'completed', 'skipped')),
   completed_at timestamptz,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (program_id, sequence_index)
 );
 
 create table if not exists public.workout_exercises (
