@@ -69,3 +69,77 @@ export function clearTrainingDataCaches() {
     // Cache failures should never block the training workflow.
   }
 }
+
+const draftPrefix = "strength-training-draft:";
+
+export function clearWorkoutDrafts(workoutIds: string[]): boolean {
+  if (workoutIds.length === 0) return true;
+  if (typeof window === "undefined") return false;
+
+  try {
+    const allKeys: string[] = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key) allKeys.push(key);
+    }
+
+    const keysToRemove = allKeys.filter((key) => {
+      if (!key.startsWith(draftPrefix)) return false;
+      const workoutId = key.slice(draftPrefix.length);
+      return workoutIds.includes(workoutId);
+    });
+    keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+    return true;
+  } catch {
+    // Draft cleanup failures should never block the substitution flow.
+    return false;
+  }
+}
+
+export function clearWorkoutDraftsByExerciseIds(workoutExerciseIds: string[]): boolean {
+  if (workoutExerciseIds.length === 0) return true;
+  if (typeof window === "undefined") return false;
+
+  try {
+    const allKeys: string[] = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key) allKeys.push(key);
+    }
+
+    const draftKeys = allKeys.filter((key) => key.startsWith(draftPrefix));
+    const keysToRemove: string[] = [];
+    let cleanupConfirmed = true;
+
+    for (const key of draftKeys) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
+      try {
+        const draft = JSON.parse(raw) as Record<string, unknown>;
+        const draftKeys = Object.keys(draft);
+        const hasMatch = draftKeys.some((draftKey) => {
+          const exerciseLogs = draft[draftKey];
+          if (!Array.isArray(exerciseLogs)) return false;
+          return exerciseLogs.some(
+            (log: unknown) =>
+              log &&
+              typeof log === "object" &&
+              workoutExerciseIds.includes((log as { workout_exercise_id?: string }).workout_exercise_id ?? "")
+          );
+        });
+        if (hasMatch) {
+          keysToRemove.push(key);
+        }
+      } catch {
+        // If we can't parse the draft, be conservative and leave it.
+        cleanupConfirmed = false;
+      }
+    }
+
+    keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+    return cleanupConfirmed;
+  } catch {
+    // Draft cleanup failures should never block the substitution flow.
+    return false;
+  }
+}

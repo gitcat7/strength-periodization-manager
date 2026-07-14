@@ -27,6 +27,7 @@
 - [数据库发布与备份手册](docs/12_database_release_runbook.md)
 - [Vercel 上线交接清单](docs/13_vercel_deployment_handoff.md)
 - [Agent Skill、中文命令与用户隔离](docs/14_agent_skill.md)
+- [第三方许可声明](THIRD_PARTY_NOTICES.md)
 - [Codex 与 CC 协作指南](docs/15_codex_cc_collaboration.md)
 
 ## 可分发 Agent Skill

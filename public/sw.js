@@ -1,6 +1,7 @@
-const CACHE_VERSION = "strength-periodization-v4";
+const CACHE_VERSION = "strength-periodization-v5";
 const SHELL_CACHE = `${CACHE_VERSION}:shell`;
 const STATIC_CACHE = `${CACHE_VERSION}:static`;
+const CATALOG_CACHE = "strength-periodization-catalog-v1";
 
 const PRECACHE_URLS = [
   "/manifest.webmanifest",
@@ -23,7 +24,12 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((key) => key.startsWith("strength-periodization-") && !key.startsWith(CACHE_VERSION))
+            .filter(
+              (key) =>
+                key !== CATALOG_CACHE &&
+                key.startsWith("strength-periodization-") &&
+                !key.startsWith(CACHE_VERSION)
+            )
             .map((key) => caches.delete(key))
         )
       )
@@ -41,6 +47,19 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith(networkFirst(request, SHELL_CACHE));
+    return;
+  }
+
+  if (url.pathname === "/exercise-catalog/manifest.json") {
+    event.respondWith(networkFirst(request, CATALOG_CACHE));
+    return;
+  }
+
+  if (
+    url.pathname.startsWith("/exercise-catalog/exercises.") &&
+    url.pathname.endsWith(".json")
+  ) {
+    event.respondWith(cacheFirst(request, CATALOG_CACHE));
     return;
   }
 
@@ -79,7 +98,7 @@ async function cacheFirst(request, cacheName) {
 
   const response = await fetch(request);
   if (response.ok) {
-    cache.put(request, response.clone());
+    await cache.put(request, response.clone());
   }
   return response;
 }

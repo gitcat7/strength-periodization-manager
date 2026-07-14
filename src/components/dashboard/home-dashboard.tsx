@@ -6,6 +6,7 @@ import {
   Activity,
   ArrowRight,
   Brain,
+  BookOpen,
   CalendarDays,
   CheckCircle2,
   Dumbbell,
@@ -398,6 +399,14 @@ export function HomeDashboard() {
           <Metric icon={<Activity size={16} />} label="训练量" value={`${Math.round(summary.volume).toLocaleString()} kg`} />
           <Metric icon={<Trophy size={16} />} label="PR 目标" value={`${prGoals.length} 个`} />
         </section>
+
+        <Link
+          className="inline-flex h-10 w-fit items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink"
+          href="/exercises"
+        >
+          <BookOpen size={17} />
+          动作库
+        </Link>
 
         <section className="rounded-xl border border-line bg-white p-4">
           <div className="mb-4 flex items-center justify-between gap-3">

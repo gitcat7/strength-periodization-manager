@@ -69,7 +69,7 @@ The migration and reviewed-name map use this exact initial allowlist:
 **Files:**
 - Modify: `package.json`
 - Modify: `pnpm-lock.yaml`
-- Create: `vitest.config.ts`
+- Create: `vitest.config.mts`
 - Create: `scripts/exercise-catalog-core.mjs`
 - Create: `scripts/exercise-catalog-core.test.mjs`
 - Create: `scripts/sync-exercise-catalog.mjs`
@@ -166,7 +166,7 @@ Expected: no matches.
 - [ ] **Step 6: Commit the independently reproducible catalog foundation**
 
 ```powershell
-git add package.json pnpm-lock.yaml vitest.config.ts scripts public/exercise-catalog THIRD_PARTY_NOTICES.md README.md
+git add package.json pnpm-lock.yaml vitest.config.mts scripts public/exercise-catalog THIRD_PARTY_NOTICES.md README.md
 git commit -m "feat: add verified static exercise catalog"
 ```
 

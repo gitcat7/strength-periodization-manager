@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Copy, Download, KeyRound, Loader2, LogOut, RefreshCcw, ShieldAlert, Trash2, UserRound } from "lucide-react";
+import { BookOpen, Copy, Download, KeyRound, Loader2, LogOut, RefreshCcw, ShieldAlert, Trash2, UserRound } from "lucide-react";
 import { trackEvent } from "@/lib/analytics";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
+import { clearExerciseCatalogVerificationState } from "@/lib/exercise-catalog-client";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type WorkoutRow = {
@@ -191,6 +192,7 @@ export function SettingsPanel() {
 
     try {
       clearTrainingDataCaches();
+      clearExerciseCatalogVerificationState();
       if ("caches" in window) {
         const cacheKeys = await window.caches.keys();
         await Promise.all(
@@ -313,6 +315,22 @@ export function SettingsPanel() {
         </div>
         <Link className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink" href="/onboarding">
           修改训练画像
+        </Link>
+      </section>
+
+      <section className="rounded-xl border border-line bg-white p-4">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
+            <BookOpen size={20} />
+          </span>
+          <div>
+            <h2 className="font-semibold">动作库</h2>
+            <p className="text-sm text-muted">查看已审核的动作要点和器械信息。</p>
+          </div>
+        </div>
+        <Link className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-field px-4 font-semibold text-ink" href="/exercises">
+          <BookOpen size={18} />
+          打开动作库
         </Link>
       </section>
 
