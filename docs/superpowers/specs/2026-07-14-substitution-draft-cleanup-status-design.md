@@ -31,4 +31,3 @@ When an exercise substitution succeeds in the database, the Today workflow must 
 - Verify unavailable storage and storage removal failure return `false` without throwing.
 - Verify an unparseable draft encountered during exercise-ID scanning returns `false` and remains untouched.
 - Verify the existing substitution success path uses an unconfirmed result to preserve the warning.
-
