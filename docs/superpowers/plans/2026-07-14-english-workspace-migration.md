@@ -4,7 +4,7 @@
 
 **Goal:** 将本地仓库根目录迁移到全英文路径，修复 Git Worktree 元数据并消除 Vitest/Vite 对中文文件 URL 的解析失败。
 
-**Architecture:** 主仓库从 `C:\Users\yaokui\Documents\力量训练周期管理` 原地重命名为 `C:\Users\yaokui\Documents\strength-periodization-manager`。外部 Codex Worktree 保持原路径，嵌套 CC Worktree 随主仓库移动；迁移后使用 `git worktree repair` 修复两个 linked worktree 的双向管理路径。
+**Architecture:** 主仓库从 `C:\Users\yaokui\Documents\力量训练周期管理` 原地重命名为 `C:\Users\yaokui\Documents\strength-periodization-manager`。Codex 与 CC Worktree 均放在外部 `strength-periodization-worktrees` 目录；迁移后使用 `git worktree repair` 或 `git worktree move` 修复 linked worktree 的双向管理路径，并避免父仓库配置被嵌套 Worktree 重复加载。
 
 **Tech Stack:** PowerShell、Git Worktree、pnpm、Vitest、Next.js 14。
 
@@ -62,7 +62,7 @@ Move-Item -LiteralPath 'C:\Users\yaokui\Documents\力量训练周期管理' -Des
 ```powershell
 git worktree repair `
   'C:\Users\yaokui\Documents\strength-periodization-worktrees\exercise-catalog-integration' `
-  'C:\Users\yaokui\Documents\strength-periodization-manager\.worktrees\claude-exercise-catalog-today'
+  'C:\Users\yaokui\Documents\strength-periodization-worktrees\claude-exercise-catalog-today'
 git worktree list --porcelain
 ```
 
