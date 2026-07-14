@@ -15,6 +15,7 @@ import {
   Trophy
 } from "lucide-react";
 import { getDaysUntilTarget } from "@/domain/pr-planner";
+import { getNextWorkoutState } from "@/domain/next-workout";
 import { formatPrescription, getWorkoutMeta } from "@/domain/training-format";
 import { readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
@@ -22,6 +23,7 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 type WorkoutRow = {
   id: string;
   scheduled_date: string;
+  sequence_index: number;
   name: string;
   status: string;
 };
@@ -148,16 +150,14 @@ export function HomeDashboard() {
 
       setEmail(user.email ?? "");
 
-      const today = formatDate(new Date());
       const [nextWorkoutResult, completedResult] = await Promise.all([
         withTimeout(
           supabase
             .from("workouts")
-            .select("id,scheduled_date,name,status")
+            .select("id,scheduled_date,sequence_index,name,status")
             .eq("user_id", user.id)
-            .neq("status", "completed")
-            .gte("scheduled_date", today)
-            .order("scheduled_date", { ascending: true })
+            .in("status", ["scheduled", "draft"])
+            .order("sequence_index", { ascending: true })
             .limit(1)
             .maybeSingle(),
           "训练计划读取超时，请刷新页面后重试。"
@@ -377,7 +377,7 @@ export function HomeDashboard() {
   }
 
   const nextWorkoutMeta = nextWorkout ? getWorkoutMeta(nextWorkout.name) : null;
-  const nextWorkoutDistance = nextWorkout ? getDaysUntilDate(nextWorkout.scheduled_date) : null;
+  const nextWorkoutState = nextWorkout ? getNextWorkoutState(nextWorkout.scheduled_date) : null;
 
   return (
     <main className="min-h-screen px-4 py-6">
@@ -425,7 +425,7 @@ export function HomeDashboard() {
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 font-semibold text-ink">
                     <CalendarDays size={14} />
-                    {formatWorkoutDistance(nextWorkoutDistance)}
+                    {formatWorkoutState(nextWorkoutState)}
                   </span>
                   <span className="rounded-full bg-white px-2 py-1 font-semibold text-action">
                     {nextWorkoutMeta?.label} · {nextWorkoutMeta?.intent}
@@ -567,18 +567,12 @@ function formatDate(date: Date) {
   return `${year}-${month}-${day}`;
 }
 
-function getDaysUntilDate(dateText: string) {
-  const today = new Date(formatDate(new Date()));
-  const target = new Date(dateText);
-  const diffMs = target.getTime() - today.getTime();
-  return Math.round(diffMs / 86400000);
-}
-
-function formatWorkoutDistance(days: number | null) {
-  if (days === null) return "待安排";
-  if (days <= 0) return "今天训练";
-  if (days === 1) return "明天训练";
-  return `${days} 天后`;
+function formatWorkoutState(state: ReturnType<typeof getNextWorkoutState> | null) {
+  if (!state) return "待安排";
+  if (state.kind === "today") return "今天训练";
+  if (state.kind === "overdue") return `待继续 · 已顺延 ${state.overdueDays} 天`;
+  if (state.daysUntil === 1) return "明天训练";
+  return `${state.daysUntil} 天后`;
 }
 
 function withTimeout<T>(promise: PromiseLike<T>, message: string, timeoutMs = 10000) {
