@@ -37,6 +37,11 @@ export type ExerciseSubstitutionDialogResult =
   | { type: "state"; state: ExerciseSubstitutionDialogState }
   | { type: "reject"; reason: "saving" };
 
+export type SubstitutionOutcome =
+  | { type: "retryable_failure"; error: string }
+  | { type: "committed_success"; affectedCount: number; affectedIds: string[] }
+  | { type: "committed_unverified"; warning: string };
+
 export function isCompatibleCandidate(source: SubstitutionCandidate, candidate: SubstitutionCandidate): boolean {
   return (
     candidate.id !== source.id &&
@@ -84,6 +89,28 @@ export function parseSubstitutionRpcResponse(data: unknown): {
     affectedCount,
     affectedIds: idStrings
   };
+}
+
+export function getSubstitutionOutcome(data: unknown, error: unknown): SubstitutionOutcome {
+  if (error || !data) {
+    return {
+      type: "retryable_failure",
+      error: getSubstitutionErrorMessage(error)
+    };
+  }
+
+  try {
+    const result = parseSubstitutionRpcResponse(data);
+    return {
+      type: "committed_success",
+      ...result
+    };
+  } catch {
+    return {
+      type: "committed_unverified",
+      warning: "替换已提交，但返回结果异常，本地草稿清理未完全确认，请刷新后核对。"
+    };
+  }
 }
 
 export function getSubstitutionErrorMessage(error: unknown): string {

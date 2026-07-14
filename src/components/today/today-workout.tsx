@@ -34,10 +34,10 @@ import {
   ExerciseSubstitutionDialog
 } from "./exercise-substitution-dialog";
 import {
-  getSubstitutionErrorMessage,
+  getSubstitutionOutcome,
   getUnknownErrorMessage,
-  parseSubstitutionRpcResponse,
   type SubstitutionCandidate,
+  type SubstitutionOutcome,
   type ExerciseSubstitutionScope
 } from "./exercise-substitution-dialog-state";
 
@@ -813,8 +813,7 @@ export function TodayWorkout() {
       saving: true
     }));
 
-    let rpcSucceeded = false;
-    let result: { affectedCount: number; affectedIds: string[] } | null = null;
+    let outcome: SubstitutionOutcome | null = null;
 
     try {
       const supabase = createBrowserSupabaseClient();
@@ -826,18 +825,7 @@ export function TodayWorkout() {
         })
         .single();
 
-      if (error || !data) {
-        if (requestId !== substitutionRequestIdRef.current) return;
-        setSubstitutionDialog((current) => ({
-          ...current,
-          error: getSubstitutionErrorMessage(error),
-          saving: false
-        }));
-        return;
-      }
-
-      result = parseSubstitutionRpcResponse(data);
-      rpcSucceeded = true;
+      outcome = getSubstitutionOutcome(data, error);
     } catch (unexpectedError) {
       if (requestId !== substitutionRequestIdRef.current) return;
       console.warn("substitution rpc unexpected error", unexpectedError);
@@ -849,7 +837,28 @@ export function TodayWorkout() {
       return;
     }
 
-    if (!result || requestId !== substitutionRequestIdRef.current) return;
+    if (!outcome || requestId !== substitutionRequestIdRef.current) return;
+
+    if (outcome.type === "retryable_failure") {
+      setSubstitutionDialog((current) => ({
+        ...current,
+        error: outcome.error,
+        saving: false
+      }));
+      return;
+    }
+
+    if (outcome.type === "committed_unverified") {
+      console.warn("substitution RPC committed but returned an invalid response");
+      clearTrainingDataCaches();
+      clearWorkoutDrafts([workout.id]);
+      setSubstitutionDialog({ error: null, open: false, saving: false, source: null });
+      setMessage(outcome.warning);
+      setReloadTrigger((current) => current + 1);
+      return;
+    }
+
+    const result = outcome;
 
     // Post-RPC sync: always clear current workout draft and attempt to clear affected drafts
     let draftCleanupWarning: string | null = null;

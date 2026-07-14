@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   exerciseSubstitutionDialogReducer,
   getInitialExerciseSubstitutionDialogState,
+  getSubstitutionOutcome,
   getSubstitutionConfirmResult,
   getSubstitutionErrorMessage,
   getUnknownErrorMessage,
@@ -265,6 +266,35 @@ describe("parseSubstitutionRpcResponse", () => {
     expect(() =>
       parseSubstitutionRpcResponse({ affected_count: 0, affected_ids: ["id-1"] })
     ).toThrow("替换结果异常，请刷新页面后重试。");
+  });
+});
+
+describe("getSubstitutionOutcome", () => {
+  it("keeps an RPC error retryable", () => {
+    expect(getSubstitutionOutcome(null, { code: "40P01" })).toEqual({
+      type: "retryable_failure",
+      error: "系统繁忙，请稍后再试。"
+    });
+  });
+
+  it("returns committed_success for a valid response", () => {
+    expect(
+      getSubstitutionOutcome(
+        { affected_count: 2, affected_ids: ["id-1", "id-2"] },
+        null
+      )
+    ).toEqual({
+      type: "committed_success",
+      affectedCount: 2,
+      affectedIds: ["id-1", "id-2"]
+    });
+  });
+
+  it("does not make an invalid response retryable after the RPC committed", () => {
+    expect(getSubstitutionOutcome({ affected_count: 1 }, null)).toEqual({
+      type: "committed_unverified",
+      warning: "替换已提交，但返回结果异常，本地草稿清理未完全确认，请刷新后核对。"
+    });
   });
 });
 
