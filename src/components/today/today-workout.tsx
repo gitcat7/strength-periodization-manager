@@ -45,6 +45,7 @@ import {
 type WorkoutRow = {
   id: string;
   scheduled_date: string;
+  sequence_index: number;
   name: string;
   status: string;
 };
@@ -332,15 +333,13 @@ export function TodayWorkout() {
           return;
         }
 
-        const today = formatDate(new Date());
         const { data: workoutData, error: workoutError } = await withTimeout(
           supabase
             .from("workouts")
-            .select("id,scheduled_date,name,status")
+            .select("id,scheduled_date,sequence_index,name,status")
             .eq("program_id", program.id)
-            .neq("status", "completed")
-            .gte("scheduled_date", today)
-            .order("scheduled_date", { ascending: true })
+            .in("status", ["scheduled", "draft"])
+            .order("sequence_index", { ascending: true })
             .limit(1)
             .maybeSingle(),
           "今日训练读取超时，请刷新页面后重试。"
