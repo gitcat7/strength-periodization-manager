@@ -43,7 +43,7 @@ describe("clearWorkoutDrafts", () => {
     localStorage.setItem("strength-training-cache:today", "{}");
     localStorage.setItem("strength-training-rest-timer", "{}");
 
-    clearWorkoutDrafts(["workout-a", "workout-c"]);
+    expect(clearWorkoutDrafts(["workout-a", "workout-c"])).toBe(true);
 
     expect(localStorage.getItem("strength-training-draft:workout-a")).toBeNull();
     expect(localStorage.getItem("strength-training-draft:workout-b")).not.toBeNull();
@@ -59,7 +59,7 @@ describe("clearWorkoutDrafts", () => {
     localStorage.setItem("strength-training-draft:workout-a", "{}");
     localStorage.setItem("strength-training-cache:today", "{}");
 
-    clearWorkoutDrafts([]);
+    expect(clearWorkoutDrafts([])).toBe(true);
 
     expect(localStorage.getItem("strength-training-draft:workout-a")).not.toBeNull();
     expect(localStorage.getItem("strength-training-cache:today")).not.toBeNull();
@@ -71,15 +71,29 @@ describe("clearWorkoutDrafts", () => {
 
     localStorage.setItem("other-prefix:workout-a", "{}");
 
-    clearWorkoutDrafts(["workout-a"]);
+    expect(clearWorkoutDrafts(["workout-a"])).toBe(true);
 
     expect(localStorage.getItem("other-prefix:workout-a")).not.toBeNull();
   });
 
-  it("does not throw when localStorage is unavailable", () => {
+  it("reports false when localStorage is unavailable", () => {
     setMockLocalStorage(undefined);
 
-    expect(() => clearWorkoutDrafts(["workout-a"])).not.toThrow();
+    expect(clearWorkoutDrafts(["workout-a"])).toBe(false);
+  });
+
+  it("reports false when a targeted draft cannot be removed", () => {
+    const localStorage = createMockStorage();
+    const removeItem = localStorage.removeItem.bind(localStorage);
+    localStorage.removeItem = (key) => {
+      if (key === "strength-training-draft:workout-a") throw new Error("storage denied");
+      removeItem(key);
+    };
+    setMockLocalStorage(localStorage);
+    localStorage.setItem("strength-training-draft:workout-a", "{}");
+
+    expect(clearWorkoutDrafts(["workout-a"])).toBe(false);
+    expect(localStorage.getItem("strength-training-draft:workout-a")).toBe("{}");
   });
 });
 
@@ -108,7 +122,7 @@ describe("clearWorkoutDraftsByExerciseIds", () => {
     localStorage.setItem("strength-training-draft:workout-b", JSON.stringify(draftWithoutMatch));
     localStorage.setItem("strength-training-cache:today", "{}");
 
-    clearWorkoutDraftsByExerciseIds(["we-1"]);
+    expect(clearWorkoutDraftsByExerciseIds(["we-1"])).toBe(true);
 
     expect(localStorage.getItem("strength-training-draft:workout-a")).toBeNull();
     expect(localStorage.getItem("strength-training-draft:workout-b")).not.toBeNull();
@@ -128,7 +142,7 @@ describe("clearWorkoutDraftsByExerciseIds", () => {
 
     localStorage.setItem("strength-training-draft:workout-x", JSON.stringify(draft));
 
-    clearWorkoutDraftsByExerciseIds(["we-b"]);
+    expect(clearWorkoutDraftsByExerciseIds(["we-b"])).toBe(true);
 
     expect(localStorage.getItem("strength-training-draft:workout-x")).toBeNull();
   });
@@ -143,7 +157,7 @@ describe("clearWorkoutDraftsByExerciseIds", () => {
 
     localStorage.setItem("strength-training-draft:workout-x", JSON.stringify(draft));
 
-    clearWorkoutDraftsByExerciseIds(["we-z"]);
+    expect(clearWorkoutDraftsByExerciseIds(["we-z"])).toBe(true);
 
     expect(localStorage.getItem("strength-training-draft:workout-x")).not.toBeNull();
   });
@@ -154,7 +168,7 @@ describe("clearWorkoutDraftsByExerciseIds", () => {
 
     localStorage.setItem("strength-training-draft:workout-a", "not-valid-json");
 
-    clearWorkoutDraftsByExerciseIds(["we-1"]);
+    expect(clearWorkoutDraftsByExerciseIds(["we-1"])).toBe(false);
 
     expect(localStorage.getItem("strength-training-draft:workout-a")).not.toBeNull();
   });
@@ -165,15 +179,15 @@ describe("clearWorkoutDraftsByExerciseIds", () => {
 
     localStorage.setItem("strength-training-draft:workout-a", "{}");
 
-    clearWorkoutDraftsByExerciseIds([]);
+    expect(clearWorkoutDraftsByExerciseIds([])).toBe(true);
 
     expect(localStorage.getItem("strength-training-draft:workout-a")).not.toBeNull();
   });
 
-  it("does not throw when localStorage is unavailable", () => {
+  it("reports false when localStorage is unavailable", () => {
     setMockLocalStorage(undefined);
 
-    expect(() => clearWorkoutDraftsByExerciseIds(["we-1"])).not.toThrow();
+    expect(clearWorkoutDraftsByExerciseIds(["we-1"])).toBe(false);
   });
 
   it("does not remove non-draft keys", () => {
@@ -182,7 +196,7 @@ describe("clearWorkoutDraftsByExerciseIds", () => {
 
     localStorage.setItem("other-key", JSON.stringify({ "we-1": [{ workout_exercise_id: "we-1" }] }));
 
-    clearWorkoutDraftsByExerciseIds(["we-1"]);
+    expect(clearWorkoutDraftsByExerciseIds(["we-1"])).toBe(true);
 
     expect(localStorage.getItem("other-key")).not.toBeNull();
   });

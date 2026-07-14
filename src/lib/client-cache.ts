@@ -72,8 +72,9 @@ export function clearTrainingDataCaches() {
 
 const draftPrefix = "strength-training-draft:";
 
-export function clearWorkoutDrafts(workoutIds: string[]) {
-  if (typeof window === "undefined" || workoutIds.length === 0) return;
+export function clearWorkoutDrafts(workoutIds: string[]): boolean {
+  if (workoutIds.length === 0) return true;
+  if (typeof window === "undefined") return false;
 
   try {
     const allKeys: string[] = [];
@@ -88,13 +89,16 @@ export function clearWorkoutDrafts(workoutIds: string[]) {
       return workoutIds.includes(workoutId);
     });
     keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+    return true;
   } catch {
     // Draft cleanup failures should never block the substitution flow.
+    return false;
   }
 }
 
-export function clearWorkoutDraftsByExerciseIds(workoutExerciseIds: string[]) {
-  if (typeof window === "undefined" || workoutExerciseIds.length === 0) return;
+export function clearWorkoutDraftsByExerciseIds(workoutExerciseIds: string[]): boolean {
+  if (workoutExerciseIds.length === 0) return true;
+  if (typeof window === "undefined") return false;
 
   try {
     const allKeys: string[] = [];
@@ -105,6 +109,7 @@ export function clearWorkoutDraftsByExerciseIds(workoutExerciseIds: string[]) {
 
     const draftKeys = allKeys.filter((key) => key.startsWith(draftPrefix));
     const keysToRemove: string[] = [];
+    let cleanupConfirmed = true;
 
     for (const key of draftKeys) {
       const raw = window.localStorage.getItem(key);
@@ -127,12 +132,14 @@ export function clearWorkoutDraftsByExerciseIds(workoutExerciseIds: string[]) {
         }
       } catch {
         // If we can't parse the draft, be conservative and leave it.
-        // The caller should separately clear the current workout draft.
+        cleanupConfirmed = false;
       }
     }
 
     keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+    return cleanupConfirmed;
   } catch {
     // Draft cleanup failures should never block the substitution flow.
+    return false;
   }
 }
