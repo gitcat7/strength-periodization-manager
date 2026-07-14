@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useReducer, useRef, useState } from "react";
 import { Loader2, RefreshCcw, X } from "lucide-react";
 import {
+  exerciseSubstitutionDialogReducer,
+  getInitialExerciseSubstitutionDialogState,
   isCompatibleCandidate,
   type ExerciseSubstitutionScope,
   type SubstitutionCandidate
@@ -40,8 +42,32 @@ export function ExerciseSubstitutionDialog({
     () => alternatives.filter((candidate) => isCompatibleCandidate(source, candidate)),
     [alternatives, source]
   );
-  const [scope, setScope] = useState<ExerciseSubstitutionScope>("current_workout");
-  const [targetId, setTargetId] = useState<string | null>(null);
+
+  const [state, dispatch] = useReducer(
+    exerciseSubstitutionDialogReducer,
+    getInitialExerciseSubstitutionDialogState(source, candidates)
+  );
+
+  // Sync external open/close and error with internal reducer state
+  useEffect(() => {
+    if (open && !state.open) {
+      dispatch({ type: "open", source, alternatives: candidates });
+    } else if (!open && state.open) {
+      dispatch({ type: "reset" });
+    }
+  }, [open, state.open, source, candidates]);
+
+  useEffect(() => {
+    if (error !== state.error) {
+      dispatch({ type: "setError", error });
+    }
+  }, [error, state.error]);
+
+  useEffect(() => {
+    if (saving !== state.saving) {
+      dispatch({ type: "setSaving", saving });
+    }
+  }, [saving, state.saving]);
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
@@ -52,14 +78,7 @@ export function ExerciseSubstitutionDialog({
   }, []);
 
   useEffect(() => {
-    if (open) {
-      setScope("current_workout");
-      setTargetId(null);
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
+    if (!state.open) return;
 
     const previousOverflow = document.body.style.overflow;
     if (isMobile) {
@@ -70,7 +89,9 @@ export function ExerciseSubstitutionDialog({
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        if (!state.saving) {
+          onClose();
+        }
       }
     }
 
@@ -79,33 +100,39 @@ export function ExerciseSubstitutionDialog({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isMobile, open, onClose]);
+  }, [isMobile, state.open, state.saving, onClose]);
 
   const selectedTarget = useMemo(
-    () => candidates.find((candidate) => candidate.id === targetId) ?? null,
-    [candidates, targetId]
+    () => candidates.find((candidate) => candidate.id === state.targetId) ?? null,
+    [candidates, state.targetId]
   );
 
   function handleSelectTarget(nextTargetId: string) {
-    setTargetId(nextTargetId);
+    dispatch({ type: "selectTarget", targetId: nextTargetId });
   }
 
   function handleSelectScope(nextScope: ExerciseSubstitutionScope) {
-    setScope(nextScope);
+    dispatch({ type: "selectScope", scope: nextScope });
   }
 
   async function handleConfirm() {
-    if (!selectedTarget || saving || submittingRef.current) return;
+    if (!selectedTarget || state.saving || submittingRef.current) return;
 
     submittingRef.current = true;
     try {
-      await onConfirm(source, selectedTarget, scope);
+      await onConfirm(source, selectedTarget, state.scope);
     } finally {
       submittingRef.current = false;
     }
   }
 
-  if (!open) return null;
+  function handleClose() {
+    if (!state.saving) {
+      onClose();
+    }
+  }
+
+  if (!state.open) return null;
 
   return (
     <div
@@ -113,7 +140,9 @@ export function ExerciseSubstitutionDialog({
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-end bg-black/40 md:items-center md:justify-center"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        if (event.target === event.currentTarget && !state.saving) {
+          onClose();
+        }
       }}
       role="dialog"
     >
@@ -133,8 +162,8 @@ export function ExerciseSubstitutionDialog({
           <button
             aria-label="关闭替换对话框"
             className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-line text-ink hover:bg-field focus-visible:outline focus-visible:outline-2 focus-visible:outline-action"
-            disabled={saving}
-            onClick={onClose}
+            disabled={state.saving}
+            onClick={handleClose}
             ref={closeButtonRef}
             type="button"
           >
@@ -147,7 +176,7 @@ export function ExerciseSubstitutionDialog({
             <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">没有可替换的兼容动作。</p>
             <button
               className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line px-4 font-semibold text-ink"
-              onClick={onClose}
+              onClick={handleClose}
               type="button"
             >
               关闭
@@ -160,12 +189,12 @@ export function ExerciseSubstitutionDialog({
               {candidates.map((candidate) => (
                 <label
                   className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${
-                    targetId === candidate.id ? "border-action bg-action/5" : "border-line bg-white"
+                    state.targetId === candidate.id ? "border-action bg-action/5" : "border-line bg-white"
                   }`}
                   key={candidate.id}
                 >
                   <input
-                    checked={targetId === candidate.id}
+                    checked={state.targetId === candidate.id}
                     className="h-4 w-4 accent-action"
                     name="substitution-target"
                     onChange={() => handleSelectTarget(candidate.id)}
@@ -181,11 +210,11 @@ export function ExerciseSubstitutionDialog({
               <legend className="text-sm font-semibold">应用范围</legend>
               <label
                 className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${
-                  scope === "current_workout" ? "border-action bg-action/5" : "border-line bg-white"
+                  state.scope === "current_workout" ? "border-action bg-action/5" : "border-line bg-white"
                 }`}
               >
                 <input
-                  checked={scope === "current_workout"}
+                  checked={state.scope === "current_workout"}
                   className="h-4 w-4 accent-action"
                   name="substitution-scope"
                   onChange={() => handleSelectScope("current_workout")}
@@ -196,11 +225,11 @@ export function ExerciseSubstitutionDialog({
               </label>
               <label
                 className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 ${
-                  scope === "remaining_program" ? "border-action bg-action/5" : "border-line bg-white"
+                  state.scope === "remaining_program" ? "border-action bg-action/5" : "border-line bg-white"
                 }`}
               >
                 <input
-                  checked={scope === "remaining_program"}
+                  checked={state.scope === "remaining_program"}
                   className="h-4 w-4 accent-action"
                   name="substitution-scope"
                   onChange={() => handleSelectScope("remaining_program")}
@@ -216,29 +245,29 @@ export function ExerciseSubstitutionDialog({
               <p className="mt-1 text-sm text-amber-900">新动作重量将重置为 0kg，目标组数与次数保持不变。</p>
             </div>
 
-            {error ? (
+            {state.error ? (
               <div className="flex items-start gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-700">
                 <RefreshCcw className="mt-0.5 shrink-0" size={16} />
-                <span>{error}</span>
+                <span>{state.error}</span>
               </div>
             ) : null}
 
             <div className="grid grid-cols-2 gap-2">
               <button
                 className="inline-flex h-11 items-center justify-center rounded-lg border border-line px-4 font-semibold text-ink disabled:opacity-60"
-                disabled={saving}
-                onClick={onClose}
+                disabled={state.saving}
+                onClick={handleClose}
                 type="button"
               >
                 取消
               </button>
               <button
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={!selectedTarget || saving}
+                disabled={!selectedTarget || state.saving}
                 onClick={handleConfirm}
                 type="button"
               >
-                {saving ? <Loader2 className="animate-spin" size={17} /> : null}
+                {state.saving ? <Loader2 className="animate-spin" size={17} /> : null}
                 确认替换
               </button>
             </div>

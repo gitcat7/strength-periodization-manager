@@ -92,3 +92,47 @@ export function clearWorkoutDrafts(workoutIds: string[]) {
     // Draft cleanup failures should never block the substitution flow.
   }
 }
+
+export function clearWorkoutDraftsByExerciseIds(workoutExerciseIds: string[]) {
+  if (typeof window === "undefined" || workoutExerciseIds.length === 0) return;
+
+  try {
+    const allKeys: string[] = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const key = window.localStorage.key(index);
+      if (key) allKeys.push(key);
+    }
+
+    const draftKeys = allKeys.filter((key) => key.startsWith(draftPrefix));
+    const keysToRemove: string[] = [];
+
+    for (const key of draftKeys) {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
+      try {
+        const draft = JSON.parse(raw) as Record<string, unknown>;
+        const draftKeys = Object.keys(draft);
+        const hasMatch = draftKeys.some((draftKey) => {
+          const exerciseLogs = draft[draftKey];
+          if (!Array.isArray(exerciseLogs)) return false;
+          return exerciseLogs.some(
+            (log: unknown) =>
+              log &&
+              typeof log === "object" &&
+              workoutExerciseIds.includes((log as { workout_exercise_id?: string }).workout_exercise_id ?? "")
+          );
+        });
+        if (hasMatch) {
+          keysToRemove.push(key);
+        }
+      } catch {
+        // If we can't parse the draft, be conservative and leave it.
+        // The caller should separately clear the current workout draft.
+      }
+    }
+
+    keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+  } catch {
+    // Draft cleanup failures should never block the substitution flow.
+  }
+}

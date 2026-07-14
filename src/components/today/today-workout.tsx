@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -26,7 +26,7 @@ import {
 } from "@/domain/fitness-coach";
 import { isExerciseSubstitutionEligible } from "@/domain/exercise-substitution";
 import { trackEvent } from "@/lib/analytics";
-import { clearTrainingDataCaches, clearWorkoutDrafts, readClientCache, writeClientCache } from "@/lib/client-cache";
+import { clearTrainingDataCaches, clearWorkoutDrafts, clearWorkoutDraftsByExerciseIds, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { formatPrescription, getExerciseNote, getWorkoutMeta } from "@/domain/training-format";
 import { ExerciseDetailLauncher } from "@/components/exercises/exercise-detail-launcher";
@@ -35,6 +35,7 @@ import {
 } from "./exercise-substitution-dialog";
 import {
   getSubstitutionErrorMessage,
+  getUnknownErrorMessage,
   parseSubstitutionRpcResponse,
   type SubstitutionCandidate,
   type ExerciseSubstitutionScope
@@ -144,8 +145,8 @@ async function loadCatalogExercises(): Promise<CatalogExerciseRow[]> {
   return (data ?? []) as unknown as CatalogExerciseRow[];
 }
 
-async function loadWorkoutIdsForExercises(workoutExerciseIds: string[]): Promise<string[]> {
-  if (workoutExerciseIds.length === 0) return [];
+async function loadWorkoutIdsForExercises(workoutExerciseIds: string[]): Promise<{ workoutIds: string[]; error: string | null }> {
+  if (workoutExerciseIds.length === 0) return { workoutIds: [], error: null };
 
   const supabase = createBrowserSupabaseClient();
   const { data, error } = await supabase
@@ -155,10 +156,13 @@ async function loadWorkoutIdsForExercises(workoutExerciseIds: string[]): Promise
 
   if (error) {
     console.warn("workout id lookup failed", error.message);
-    return [];
+    return { workoutIds: [], error: "查找关联训练草稿失败。" };
   }
 
-  return [...new Set(((data ?? []) as { workout_id: string }[]).map((row) => row.workout_id))];
+  return {
+    workoutIds: [...new Set(((data ?? []) as { workout_id: string }[]).map((row) => row.workout_id))],
+    error: null
+  };
 }
 
 type ExerciseSubstitutionButtonProps = {
@@ -240,6 +244,7 @@ export function TodayWorkout() {
     saving: false,
     source: null
   });
+  const substitutionRequestIdRef = useRef<number>(0);
   const [restTimerEnabled, setRestTimerEnabled] = useState(true);
   const [restSeconds, setRestSeconds] = useState(120);
   const [restRemaining, setRestRemaining] = useState(0);
@@ -800,58 +805,107 @@ export function TodayWorkout() {
       return;
     }
 
-    setSubstitutionDialog((current) => ({ ...current, error: null, saving: true }));
+    const requestId = ++substitutionRequestIdRef.current;
 
-    const supabase = createBrowserSupabaseClient();
-    const { data, error } = await supabase
-      .rpc("substitute_workout_exercise", {
-        p_workout_exercise_id: source.workoutExerciseId,
-        p_target_exercise_id: target.id,
-        p_scope: scope
-      })
-      .single();
+    setSubstitutionDialog((current) => ({
+      ...current,
+      error: null,
+      saving: true
+    }));
 
-    if (error || !data) {
-      setSubstitutionDialog((current) => ({
-        ...current,
-        error: getSubstitutionErrorMessage(error),
-        saving: false
-      }));
-      return;
-    }
+    let rpcSucceeded = false;
+    let result: { affectedCount: number; affectedIds: string[] } | null = null;
 
-    let result: { affectedCount: number; affectedIds: string[] };
     try {
+      const supabase = createBrowserSupabaseClient();
+      const { data, error } = await supabase
+        .rpc("substitute_workout_exercise", {
+          p_workout_exercise_id: source.workoutExerciseId,
+          p_target_exercise_id: target.id,
+          p_scope: scope
+        })
+        .single();
+
+      if (error || !data) {
+        if (requestId !== substitutionRequestIdRef.current) return;
+        setSubstitutionDialog((current) => ({
+          ...current,
+          error: getSubstitutionErrorMessage(error),
+          saving: false
+        }));
+        return;
+      }
+
       result = parseSubstitutionRpcResponse(data);
-    } catch (parseError) {
+      rpcSucceeded = true;
+    } catch (unexpectedError) {
+      if (requestId !== substitutionRequestIdRef.current) return;
+      console.warn("substitution rpc unexpected error", unexpectedError);
       setSubstitutionDialog((current) => ({
         ...current,
-        error: getSubstitutionErrorMessage(parseError),
+        error: getUnknownErrorMessage(),
         saving: false
       }));
       return;
     }
 
-    const workoutIds = await loadWorkoutIdsForExercises(result.affectedIds);
-    const draftWorkoutIds = [...new Set([...workoutIds, workout.id])];
+    if (!result || requestId !== substitutionRequestIdRef.current) return;
 
-    clearTrainingDataCaches();
-    clearWorkoutDrafts(draftWorkoutIds);
+    // Post-RPC sync: always clear current workout draft and attempt to clear affected drafts
+    let draftCleanupWarning: string | null = null;
 
-    await trackEvent({
-      eventName: "exercise_substituted",
-      properties: {
-        count: result.affectedCount,
-        scope,
-        source_exercise_id: source.id,
-        target_exercise_id: target.id
-      },
-      supabase,
-      userId
-    });
+    try {
+      clearTrainingDataCaches();
+
+      // Always clear the current workout draft regardless of DB lookup success
+      const currentDraftWorkoutIds = workout.id ? [workout.id] : [];
+
+      // Try to look up workout IDs from affected IDs; if it fails, still clear current draft
+      const { workoutIds: dbWorkoutIds, error: lookupError } = await loadWorkoutIdsForExercises(
+        result.affectedIds
+      );
+
+      const allWorkoutIds = [...new Set([...dbWorkoutIds, ...currentDraftWorkoutIds])];
+      clearWorkoutDrafts(allWorkoutIds);
+
+      // Also scan local drafts by exercise IDs to catch any drafts the DB lookup might have missed
+      clearWorkoutDraftsByExerciseIds(result.affectedIds);
+
+      if (lookupError) {
+        draftCleanupWarning = "替换已成功，但本地草稿清理未完全确认。";
+      }
+    } catch (syncError) {
+      console.warn("post-substitution sync error", syncError);
+      draftCleanupWarning = "替换已成功，但本地草稿清理未完全确认。";
+    }
+
+    if (requestId !== substitutionRequestIdRef.current) return;
+
+    try {
+      const supabase = createBrowserSupabaseClient();
+      await trackEvent({
+        eventName: "exercise_substituted",
+        properties: {
+          count: result.affectedCount,
+          scope,
+          source_exercise_id: source.id,
+          target_exercise_id: target.id
+        },
+        supabase,
+        userId
+      });
+    } catch {
+      // Analytics failure must not block the user flow.
+    }
+
+    if (requestId !== substitutionRequestIdRef.current) return;
 
     setSubstitutionDialog({ error: null, open: false, saving: false, source: null });
-    setMessage(`已替换为 ${target.name}。新动作重量已重置为 0kg。`);
+    setMessage(
+      draftCleanupWarning
+        ? `${draftCleanupWarning}已替换为 ${target.name}。新动作重量已重置为 0kg。`
+        : `已替换为 ${target.name}。新动作重量已重置为 0kg。`
+    );
     setReloadTrigger((current) => current + 1);
   }
 
@@ -1095,14 +1149,15 @@ export function TodayWorkout() {
                       exercise={exercise}
                       hasCompletedSet={completedExerciseSets > 0}
                       workoutStatus={workout.status}
-                      onOpen={(sourceCandidate) =>
+                      onOpen={(sourceCandidate) => {
+                        substitutionRequestIdRef.current += 1;
                         setSubstitutionDialog({
                           error: null,
                           open: true,
                           saving: false,
                           source: sourceCandidate
-                        })
-                      }
+                        });
+                      }}
                     />
                   </div>
                   <div className="mt-4 space-y-2">
@@ -1167,7 +1222,11 @@ export function TodayWorkout() {
             trainingDirection: row.training_direction
           }))}
           error={substitutionDialog.error}
-          onClose={() => setSubstitutionDialog({ error: null, open: false, saving: false, source: null })}
+          onClose={() => {
+            if (!substitutionDialog.saving) {
+              setSubstitutionDialog({ error: null, open: false, saving: false, source: null });
+            }
+          }}
           onConfirm={handleSubstitute}
           open={substitutionDialog.open}
           saving={substitutionDialog.saving}

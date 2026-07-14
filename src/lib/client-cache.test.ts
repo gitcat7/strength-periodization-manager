@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { clearWorkoutDrafts } from "./client-cache";
+import { clearWorkoutDrafts, clearWorkoutDraftsByExerciseIds } from "./client-cache";
 
 function createMockStorage(): Storage {
   const store = new Map<string, string>();
@@ -80,5 +80,110 @@ describe("clearWorkoutDrafts", () => {
     setMockLocalStorage(undefined);
 
     expect(() => clearWorkoutDrafts(["workout-a"])).not.toThrow();
+  });
+});
+
+describe("clearWorkoutDraftsByExerciseIds", () => {
+  it("removes drafts that contain matching workout_exercise_id in their logs", () => {
+    const localStorage = createMockStorage();
+    setMockLocalStorage(localStorage);
+
+    const draftWithMatch = {
+      "we-1": [
+        { workout_exercise_id: "we-1", set_index: 1, actual_weight: 10 },
+        { workout_exercise_id: "we-1", set_index: 2, actual_weight: 12 }
+      ],
+      "we-2": [
+        { workout_exercise_id: "we-2", set_index: 1, actual_weight: 15 }
+      ]
+    };
+
+    const draftWithoutMatch = {
+      "we-3": [
+        { workout_exercise_id: "we-3", set_index: 1, actual_weight: 20 }
+      ]
+    };
+
+    localStorage.setItem("strength-training-draft:workout-a", JSON.stringify(draftWithMatch));
+    localStorage.setItem("strength-training-draft:workout-b", JSON.stringify(draftWithoutMatch));
+    localStorage.setItem("strength-training-cache:today", "{}");
+
+    clearWorkoutDraftsByExerciseIds(["we-1"]);
+
+    expect(localStorage.getItem("strength-training-draft:workout-a")).toBeNull();
+    expect(localStorage.getItem("strength-training-draft:workout-b")).not.toBeNull();
+    expect(localStorage.getItem("strength-training-cache:today")).not.toBeNull();
+  });
+
+  it("removes a draft when any nested log matches the exercise ID", () => {
+    const localStorage = createMockStorage();
+    setMockLocalStorage(localStorage);
+
+    const draft = {
+      "we-a": [
+        { workout_exercise_id: "we-a", set_index: 1 },
+        { workout_exercise_id: "we-b", set_index: 1 }
+      ]
+    };
+
+    localStorage.setItem("strength-training-draft:workout-x", JSON.stringify(draft));
+
+    clearWorkoutDraftsByExerciseIds(["we-b"]);
+
+    expect(localStorage.getItem("strength-training-draft:workout-x")).toBeNull();
+  });
+
+  it("does not remove drafts with no matching exercise IDs", () => {
+    const localStorage = createMockStorage();
+    setMockLocalStorage(localStorage);
+
+    const draft = {
+      "we-a": [{ workout_exercise_id: "we-a", set_index: 1 }]
+    };
+
+    localStorage.setItem("strength-training-draft:workout-x", JSON.stringify(draft));
+
+    clearWorkoutDraftsByExerciseIds(["we-z"]);
+
+    expect(localStorage.getItem("strength-training-draft:workout-x")).not.toBeNull();
+  });
+
+  it("does not remove unparseable drafts", () => {
+    const localStorage = createMockStorage();
+    setMockLocalStorage(localStorage);
+
+    localStorage.setItem("strength-training-draft:workout-a", "not-valid-json");
+
+    clearWorkoutDraftsByExerciseIds(["we-1"]);
+
+    expect(localStorage.getItem("strength-training-draft:workout-a")).not.toBeNull();
+  });
+
+  it("does nothing when no exercise IDs are provided", () => {
+    const localStorage = createMockStorage();
+    setMockLocalStorage(localStorage);
+
+    localStorage.setItem("strength-training-draft:workout-a", "{}");
+
+    clearWorkoutDraftsByExerciseIds([]);
+
+    expect(localStorage.getItem("strength-training-draft:workout-a")).not.toBeNull();
+  });
+
+  it("does not throw when localStorage is unavailable", () => {
+    setMockLocalStorage(undefined);
+
+    expect(() => clearWorkoutDraftsByExerciseIds(["we-1"])).not.toThrow();
+  });
+
+  it("does not remove non-draft keys", () => {
+    const localStorage = createMockStorage();
+    setMockLocalStorage(localStorage);
+
+    localStorage.setItem("other-key", JSON.stringify({ "we-1": [{ workout_exercise_id: "we-1" }] }));
+
+    clearWorkoutDraftsByExerciseIds(["we-1"]);
+
+    expect(localStorage.getItem("other-key")).not.toBeNull();
   });
 });

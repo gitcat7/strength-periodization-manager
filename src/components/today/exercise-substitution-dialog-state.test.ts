@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   exerciseSubstitutionDialogReducer,
   getInitialExerciseSubstitutionDialogState,
+  getSubstitutionConfirmResult,
   getSubstitutionErrorMessage,
+  getUnknownErrorMessage,
   parseSubstitutionRpcResponse,
   type SubstitutionCandidate
 } from "./exercise-substitution-dialog-state";
@@ -67,11 +69,7 @@ function applyState(
   state: ReturnType<typeof getInitialExerciseSubstitutionDialogState>,
   action: Parameters<typeof exerciseSubstitutionDialogReducer>[1]
 ): ReturnType<typeof getInitialExerciseSubstitutionDialogState> {
-  const result = exerciseSubstitutionDialogReducer(state, action);
-  if (result.type === "state" || result.type === "cancel") {
-    return result.state;
-  }
-  return state;
+  return exerciseSubstitutionDialogReducer(state, action);
 }
 
 describe("exerciseSubstitutionDialogReducer", () => {
@@ -98,20 +96,18 @@ describe("exerciseSubstitutionDialogReducer", () => {
     state = applyState(state, { type: "selectTarget", targetId: compatibleTarget.id });
     const result = exerciseSubstitutionDialogReducer(state, { type: "cancel" });
 
-    expect(result.type).toBe("cancel");
-    if (result.type !== "cancel") throw new Error("expected cancel result");
-    expect(result.state.open).toBe(false);
-    expect(result.state.targetId).toBeNull();
-    expect(result.state.scope).toBe("current_workout");
-    expect(result.state.saving).toBe(false);
-    expect(result.state.error).toBeNull();
+    expect(result.open).toBe(false);
+    expect(result.targetId).toBeNull();
+    expect(result.scope).toBe("current_workout");
+    expect(result.saving).toBe(false);
+    expect(result.error).toBeNull();
   });
 
-  it("confirm returns precise source, target and scope", () => {
+  it("confirm returns precise source, target and scope via getSubstitutionConfirmResult", () => {
     let state = getInitialExerciseSubstitutionDialogState(source, [compatibleTarget]);
     state = applyState(state, { type: "selectTarget", targetId: compatibleTarget.id });
     state = applyState(state, { type: "selectScope", scope: "remaining_program" });
-    const result = exerciseSubstitutionDialogReducer(state, { type: "confirm" });
+    const result = getSubstitutionConfirmResult(state);
 
     expect(result).toEqual({
       scope: "remaining_program",
@@ -125,16 +121,16 @@ describe("exerciseSubstitutionDialogReducer", () => {
     let state = getInitialExerciseSubstitutionDialogState(source, [compatibleTarget]);
     state = applyState(state, { type: "selectTarget", targetId: compatibleTarget.id });
     state = applyState(state, { type: "setSaving", saving: true });
-    const result = exerciseSubstitutionDialogReducer(state, { type: "confirm" });
+    const result = getSubstitutionConfirmResult(state);
 
-    expect(result).toEqual({ type: "idle", state });
+    expect(result).toBeNull();
   });
 
   it("prevents confirm without a selected target", () => {
     const state = getInitialExerciseSubstitutionDialogState(source, [compatibleTarget]);
-    const result = exerciseSubstitutionDialogReducer(state, { type: "confirm" });
+    const result = getSubstitutionConfirmResult(state);
 
-    expect(result).toEqual({ type: "idle", state });
+    expect(result).toBeNull();
   });
 
   it("preserves selection and scope when an error is set", () => {
@@ -159,6 +155,42 @@ describe("exerciseSubstitutionDialogReducer", () => {
 
     expect(state.error).toBeNull();
     expect(state.targetId).toBe(secondTarget.id);
+  });
+
+  it("rejects cancel while saving", () => {
+    let state = getInitialExerciseSubstitutionDialogState(source, [compatibleTarget]);
+    state = applyState(state, { type: "setSaving", saving: true });
+    const result = exerciseSubstitutionDialogReducer(state, { type: "cancel" });
+
+    expect(result.open).toBe(true);
+    expect(result.saving).toBe(true);
+  });
+
+  it("open resets state for a new source", () => {
+    const newSource: SubstitutionCandidate = { ...source, id: "new-source", name: "新动作" };
+    let state = getInitialExerciseSubstitutionDialogState(source, [compatibleTarget]);
+    state = applyState(state, { type: "selectTarget", targetId: compatibleTarget.id });
+    state = applyState(state, { type: "selectScope", scope: "remaining_program" });
+    state = applyState(state, { type: "setError", error: "some error" });
+    state = applyState(state, { type: "open", source: newSource, alternatives: [compatibleTarget] });
+
+    expect(state.open).toBe(true);
+    expect(state.source).toEqual(newSource);
+    expect(state.targetId).toBeNull();
+    expect(state.scope).toBe("current_workout");
+    expect(state.error).toBeNull();
+    expect(state.saving).toBe(false);
+  });
+
+  it("reset closes dialog and clears selection", () => {
+    let state = getInitialExerciseSubstitutionDialogState(source, [compatibleTarget]);
+    state = applyState(state, { type: "selectTarget", targetId: compatibleTarget.id });
+    state = applyState(state, { type: "selectScope", scope: "remaining_program" });
+    const result = exerciseSubstitutionDialogReducer(state, { type: "reset" });
+
+    expect(result.open).toBe(false);
+    expect(result.targetId).toBeNull();
+    expect(result.scope).toBe("current_workout");
   });
 });
 
@@ -186,6 +218,54 @@ describe("parseSubstitutionRpcResponse", () => {
       "替换结果异常，请刷新页面后重试。"
     );
   });
+
+  it("throws when affected_count is negative", () => {
+    expect(() =>
+      parseSubstitutionRpcResponse({ affected_count: -1, affected_ids: ["id-1"] })
+    ).toThrow("替换结果异常，请刷新页面后重试。");
+  });
+
+  it("throws when affected_count is not an integer", () => {
+    expect(() =>
+      parseSubstitutionRpcResponse({ affected_count: 1.5, affected_ids: ["id-1"] })
+    ).toThrow("替换结果异常，请刷新页面后重试。");
+  });
+
+  it("throws when affected_count is not finite", () => {
+    expect(() =>
+      parseSubstitutionRpcResponse({ affected_count: Infinity, affected_ids: ["id-1"] })
+    ).toThrow("替换结果异常，请刷新页面后重试。");
+  });
+
+  it("throws when affected_ids is empty", () => {
+    expect(() =>
+      parseSubstitutionRpcResponse({ affected_count: 0, affected_ids: [] })
+    ).toThrow("替换结果异常，请刷新页面后重试。");
+  });
+
+  it("throws when affected_ids contains non-string values", () => {
+    expect(() =>
+      parseSubstitutionRpcResponse({ affected_count: 2, affected_ids: ["id-1", 123] })
+    ).toThrow("替换结果异常，请刷新页面后重试。");
+  });
+
+  it("throws when affected_ids contains empty strings", () => {
+    expect(() =>
+      parseSubstitutionRpcResponse({ affected_count: 2, affected_ids: ["id-1", ""] })
+    ).toThrow("替换结果异常，请刷新页面后重试。");
+  });
+
+  it("throws when count does not match ids length", () => {
+    expect(() =>
+      parseSubstitutionRpcResponse({ affected_count: 3, affected_ids: ["id-1", "id-2"] })
+    ).toThrow("替换结果异常，请刷新页面后重试。");
+  });
+
+  it("throws when affected_count is zero but ids is non-empty", () => {
+    expect(() =>
+      parseSubstitutionRpcResponse({ affected_count: 0, affected_ids: ["id-1"] })
+    ).toThrow("替换结果异常，请刷新页面后重试。");
+  });
 });
 
 describe("getSubstitutionErrorMessage", () => {
@@ -208,5 +288,11 @@ describe("getSubstitutionErrorMessage", () => {
 
   it("falls back to a generic Chinese message for non-errors", () => {
     expect(getSubstitutionErrorMessage(null)).toBe("替换失败，请重试。");
+  });
+});
+
+describe("getUnknownErrorMessage", () => {
+  it("returns a stable Chinese message", () => {
+    expect(getUnknownErrorMessage()).toBe("替换失败，请重试。");
   });
 });

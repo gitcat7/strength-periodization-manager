@@ -26,13 +26,16 @@ export type ExerciseSubstitutionDialogAction =
   | { type: "selectScope"; scope: ExerciseSubstitutionScope }
   | { type: "selectTarget"; targetId: string }
   | { type: "setError"; error: string | null }
-  | { type: "setSaving"; saving: boolean };
+  | { type: "setSaving"; saving: boolean }
+  | { type: "open"; source: SubstitutionCandidate; alternatives: SubstitutionCandidate[] }
+  | { type: "reset" };
 
 export type ExerciseSubstitutionDialogResult =
   | { type: "cancel"; state: ExerciseSubstitutionDialogState }
   | { type: "confirm"; scope: ExerciseSubstitutionScope; source: SubstitutionCandidate; target: SubstitutionCandidate }
   | { type: "idle"; state: ExerciseSubstitutionDialogState }
-  | { type: "state"; state: ExerciseSubstitutionDialogState };
+  | { type: "state"; state: ExerciseSubstitutionDialogState }
+  | { type: "reject"; reason: "saving" };
 
 export function isCompatibleCandidate(source: SubstitutionCandidate, candidate: SubstitutionCandidate): boolean {
   return (
@@ -56,13 +59,30 @@ export function parseSubstitutionRpcResponse(data: unknown): {
   const affectedIds = record.affected_ids;
   const affectedCount = record.affected_count;
 
-  if (!Array.isArray(affectedIds) || typeof affectedCount !== "number") {
+  if (!Array.isArray(affectedIds) || affectedIds.some((id) => typeof id !== "string") || typeof affectedCount !== "number") {
+    throw new Error("替换结果异常，请刷新页面后重试。");
+  }
+
+  if (!Number.isFinite(affectedCount) || affectedCount < 0 || !Number.isInteger(affectedCount)) {
+    throw new Error("替换结果异常，请刷新页面后重试。");
+  }
+
+  const idStrings = affectedIds.map((id) => String(id));
+  if (idStrings.length === 0 || idStrings.some((id) => id.length === 0)) {
+    throw new Error("替换结果异常，请刷新页面后重试。");
+  }
+
+  if (affectedCount !== idStrings.length) {
+    throw new Error("替换结果异常，请刷新页面后重试。");
+  }
+
+  if (affectedCount === 0) {
     throw new Error("替换结果异常，请刷新页面后重试。");
   }
 
   return {
     affectedCount,
-    affectedIds: affectedIds.map((id) => String(id))
+    affectedIds: idStrings
   };
 }
 
@@ -93,6 +113,10 @@ export function getSubstitutionErrorMessage(error: unknown): string {
   return "替换失败，请重试。";
 }
 
+export function getUnknownErrorMessage(): string {
+  return "替换失败，请重试。";
+}
+
 export function getInitialExerciseSubstitutionDialogState(
   source: SubstitutionCandidate,
   alternatives: SubstitutionCandidate[]
@@ -111,65 +135,72 @@ export function getInitialExerciseSubstitutionDialogState(
 export function exerciseSubstitutionDialogReducer(
   state: ExerciseSubstitutionDialogState,
   action: ExerciseSubstitutionDialogAction
-): ExerciseSubstitutionDialogResult {
+): ExerciseSubstitutionDialogState {
   switch (action.type) {
+    case "open": {
+      return getInitialExerciseSubstitutionDialogState(action.source, action.alternatives);
+    }
+    case "reset": {
+      return {
+        candidates: state.candidates,
+        error: null,
+        open: false,
+        saving: false,
+        scope: "current_workout",
+        source: state.source,
+        targetId: null
+      };
+    }
     case "selectTarget": {
       const target = state.candidates.find((candidate) => candidate.id === action.targetId);
       return {
-        state: {
-          ...state,
-          error: null,
-          targetId: target ? target.id : null
-        },
-        type: "state"
+        ...state,
+        error: null,
+        targetId: target ? target.id : null
       };
     }
     case "selectScope":
-      return {
-        state: { ...state, scope: action.scope },
-        type: "state"
-      };
+      return { ...state, scope: action.scope };
     case "setSaving":
-      return {
-        state: { ...state, saving: action.saving },
-        type: "state"
-      };
+      return { ...state, saving: action.saving };
     case "setError":
-      return {
-        state: { ...state, error: action.error },
-        type: "state"
-      };
+      return { ...state, error: action.error };
     case "confirm": {
-      if (state.saving || !state.targetId) return { type: "idle", state };
-
-      const target = state.candidates.find((candidate) => candidate.id === state.targetId);
-      if (!target) return { type: "idle", state };
-
-      return {
-        scope: state.scope,
-        source: state.source,
-        target,
-        type: "confirm"
-      };
+      return state;
     }
     case "cancel": {
+      if (state.saving) return state;
+
       return {
-        state: {
-          ...state,
-          error: null,
-          open: false,
-          saving: false,
-          scope: "current_workout",
-          targetId: null
-        },
-        type: "cancel"
+        ...state,
+        error: null,
+        open: false,
+        saving: false,
+        scope: "current_workout",
+        targetId: null
       };
     }
     default:
-      return { type: "idle", state };
+      return state;
   }
 }
 
 export function getSelectedTarget(state: ExerciseSubstitutionDialogState): SubstitutionCandidate | null {
   return state.candidates.find((candidate) => candidate.id === state.targetId) ?? null;
+}
+
+export function getSubstitutionConfirmResult(
+  state: ExerciseSubstitutionDialogState
+): { type: "confirm"; scope: ExerciseSubstitutionScope; source: SubstitutionCandidate; target: SubstitutionCandidate } | null {
+  if (state.saving || !state.targetId) return null;
+
+  const target = state.candidates.find((candidate) => candidate.id === state.targetId);
+  if (!target) return null;
+
+  return {
+    scope: state.scope,
+    source: state.source,
+    target,
+    type: "confirm"
+  };
 }
