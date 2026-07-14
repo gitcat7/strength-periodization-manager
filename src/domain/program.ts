@@ -1,6 +1,27 @@
 import { roundToNearestPlate } from "@/domain/strength";
 
-export type TemplateType = "three_day_full_body" | "four_day_upper_lower" | "push_pull_squat";
+export type LegacyTemplateType = "three_day_full_body" | "four_day_upper_lower";
+export type TemplateType =
+  | LegacyTemplateType
+  | "one_split"
+  | "three_split"
+  | "five_split"
+  | "push_pull_squat";
+export type ProgramTemplateType = TemplateType | "custom";
+
+export type ScheduleMode = "fixed_weekdays" | "cadence" | "flexible";
+
+export type ScheduleConfig =
+  | { mode: "fixed_weekdays"; weekdays: number[] }
+  | { mode: "cadence"; restDays: number }
+  | { mode: "flexible" };
+
+export const templateOptions: Array<{ description: string; label: string; value: TemplateType }> = [
+  { value: "one_split", label: "一分化", description: "全身训练，适合每周 2-3 次稳定入门。" },
+  { value: "three_split", label: "三分化", description: "胸肩三头 / 背二头 / 腿，按顺序循环。" },
+  { value: "five_split", label: "五分化", description: "胸 / 背 / 腿 / 肩 / 手臂，单日更聚焦。" },
+  { value: "push_pull_squat", label: "推拉蹲", description: "推 / 拉 / 蹲 A/B，交替强度与容量。" }
+];
 
 export type ExerciseProfile = {
   slug: string;
@@ -69,12 +90,6 @@ const pushPullSquatTemplate: TemplateWorkout[] = [
     ]
   },
   {
-    name: "有氧日 · 恢复",
-    exercises: [
-      { slug: "cardio_zone2", sets: 1, reps: 35, intensity: 0 }
-    ]
-  },
-  {
     name: "推 B · 容量",
     exercises: [
       { slug: "bench_press", sets: 3, reps: 8, intensity: 0.78 },
@@ -106,40 +121,78 @@ const pushPullSquatTemplate: TemplateWorkout[] = [
   }
 ];
 
-const threeDayTemplate: TemplateWorkout[] = [
-  pushPullSquatTemplate[0],
-  pushPullSquatTemplate[1],
-  pushPullSquatTemplate[2]
+const oneSplitTemplate: TemplateWorkout[] = [
+  {
+    name: "全身训练",
+    exercises: [
+      { slug: "bench_press", sets: 3, reps: 8, intensity: 0.75 },
+      { slug: "barbell_row", sets: 3, reps: 8, intensity: 0.75 },
+      { slug: "leg_press", sets: 3, reps: 10, intensity: 0.8 },
+      { slug: "leg_curl", sets: 3, reps: 12, intensity: 0.42 },
+      { slug: "lateral_raise", sets: 3, reps: 15, intensity: 0.3 }
+    ]
+  }
 ];
 
-const fourDayTemplate: TemplateWorkout[] = [
-  pushPullSquatTemplate[0],
-  pushPullSquatTemplate[1],
-  pushPullSquatTemplate[2],
-  pushPullSquatTemplate[4]
+const threeSplitTemplate: TemplateWorkout[] = [
+  { ...pushPullSquatTemplate[0], name: "胸肩三头" },
+  { ...pushPullSquatTemplate[1], name: "背二头" },
+  { ...pushPullSquatTemplate[2], name: "腿" }
+];
+
+const fiveSplitTemplate: TemplateWorkout[] = [
+  { ...pushPullSquatTemplate[0], name: "胸" },
+  { ...pushPullSquatTemplate[1], name: "背" },
+  { ...pushPullSquatTemplate[2], name: "腿" },
+  {
+    name: "肩",
+    exercises: [
+      { slug: "overhead_press", sets: 4, reps: 8, intensity: 0.75 },
+      { slug: "lateral_raise", sets: 4, reps: 15, intensity: 0.3 },
+      { slug: "face_pull", sets: 3, reps: 15, intensity: 0.25 },
+      { slug: "incline_dumbbell_press", sets: 3, reps: 10, intensity: 0.7 }
+    ]
+  },
+  {
+    name: "手臂",
+    exercises: [
+      { slug: "dumbbell_curl", sets: 4, reps: 12, intensity: 0.35 },
+      { slug: "triceps_pushdown", sets: 4, reps: 12, intensity: 0.45 },
+      { slug: "lateral_raise", sets: 3, reps: 15, intensity: 0.3 },
+      { slug: "face_pull", sets: 3, reps: 15, intensity: 0.25 }
+    ]
+  }
 ];
 
 const weekIntensityBumps = [0, 0.025, 0.05, -0.075];
 
 export function chooseTemplate(type: TemplateType) {
   if (type === "push_pull_squat") return pushPullSquatTemplate;
-  return type === "four_day_upper_lower" ? fourDayTemplate : threeDayTemplate;
+  if (type === "one_split") return oneSplitTemplate;
+  if (type === "three_split" || type === "three_day_full_body") return threeSplitTemplate;
+  return type === "five_split" ? fiveSplitTemplate : pushPullSquatTemplate.slice(0, 4);
 }
 
 export function buildFourWeekProgram({
   templateType,
   availableWeekdays,
+  schedule,
   exerciseProfiles,
   startDate = new Date()
 }: {
   templateType: TemplateType;
-  availableWeekdays: number[];
+  availableWeekdays?: number[];
+  schedule?: ScheduleConfig;
   exerciseProfiles: ExerciseProfile[];
   startDate?: Date;
 }) {
   const template = chooseTemplate(templateType);
   const profileBySlug = new Map(exerciseProfiles.map((profile) => [profile.slug, profile]));
-  const workoutDates = buildWorkoutDates(startDate, availableWeekdays, template.length * 4);
+  const workoutDates = buildWorkoutDates(
+    startDate,
+    schedule ?? { mode: "fixed_weekdays", weekdays: availableWeekdays ?? [1, 3, 5] },
+    template.length * 4
+  );
 
   return workoutDates.map((date, index) => {
     const weekIndex = Math.floor(index / template.length);
@@ -170,14 +223,33 @@ export function buildFourWeekProgram({
 
 export function getTemplateType(trainingDaysPerWeek: number): TemplateType {
   if (trainingDaysPerWeek === 7) return "push_pull_squat";
-  return trainingDaysPerWeek === 4 ? "four_day_upper_lower" : "three_day_full_body";
+  return trainingDaysPerWeek === 4 ? "five_split" : "three_split";
 }
 
-function buildWorkoutDates(startDate: Date, availableWeekdays: number[], count: number) {
-  const sortedWeekdays = [...availableWeekdays].sort((a, b) => a - b);
+function buildWorkoutDates(startDate: Date, schedule: ScheduleConfig, count: number) {
   const dates: Date[] = [];
   const cursor = new Date(startDate);
   cursor.setHours(0, 0, 0, 0);
+
+  if (schedule.mode === "flexible") {
+    while (dates.length < count) {
+      dates.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    return dates;
+  }
+
+  if (schedule.mode === "cadence") {
+    const restDays = Math.max(0, Math.floor(schedule.restDays));
+    while (dates.length < count) {
+      dates.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + restDays + 1);
+    }
+    return dates;
+  }
+
+  const sortedWeekdays = [...schedule.weekdays].sort((a, b) => a - b);
+  if (sortedWeekdays.length === 0) return dates;
 
   while (dates.length < count) {
     if (sortedWeekdays.includes(cursor.getDay())) {

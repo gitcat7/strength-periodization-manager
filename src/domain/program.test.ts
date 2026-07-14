@@ -26,4 +26,40 @@ describe("buildFourWeekProgram", () => {
       "2026-07-17"
     ]);
   });
+
+  it("builds a cadence plan from the selected template instead of weekdays", () => {
+    const workouts = buildFourWeekProgram({
+      templateType: "three_split",
+      schedule: { mode: "cadence", restDays: 1 },
+      exerciseProfiles: profiles,
+      startDate: new Date("2026-07-13T00:00:00")
+    });
+
+    expect(workouts.slice(0, 3).map((workout) => workout.scheduledDate)).toEqual([
+      "2026-07-13",
+      "2026-07-15",
+      "2026-07-17"
+    ]);
+    expect(workouts.slice(0, 3).map((workout) => workout.name)).toEqual([
+      "第 1 周 · 胸肩三头",
+      "第 1 周 · 背二头",
+      "第 1 周 · 腿"
+    ]);
+  });
+
+  it("keeps sequence order when flexible scheduling only supplies suggested dates", () => {
+    const workouts = buildFourWeekProgram({
+      templateType: "one_split",
+      schedule: { mode: "flexible" },
+      exerciseProfiles: profiles,
+      startDate: new Date("2026-07-13T00:00:00")
+    });
+
+    expect(workouts.slice(0, 3).map((workout) => workout.sequenceIndex)).toEqual([0, 1, 2]);
+    expect(workouts.slice(0, 3).map((workout) => workout.scheduledDate)).toEqual([
+      "2026-07-13",
+      "2026-07-14",
+      "2026-07-15"
+    ]);
+  });
 });

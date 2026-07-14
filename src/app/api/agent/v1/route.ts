@@ -90,12 +90,12 @@ async function loadToday(userId: string, requestedDate?: string) {
 
   const { data: workout, error: workoutError } = await supabase
     .from("workouts")
-    .select("id,scheduled_date,name,status,completed_at")
+    .select("id,scheduled_date,sequence_index,name,status,completed_at")
     .eq("user_id", userId)
     .eq("program_id", program.id)
     .neq("status", "completed")
-    .gte("scheduled_date", date)
-    .order("scheduled_date", { ascending: true })
+    .in("status", ["scheduled", "draft"])
+    .order("sequence_index", { ascending: true })
     .limit(1)
     .maybeSingle();
 
@@ -103,7 +103,7 @@ async function loadToday(userId: string, requestedDate?: string) {
   if (!workout) return { message: "当前计划没有待完成训练。", program, workout: null };
 
   return {
-    message: workout.scheduled_date === date ? "这是今天的训练。" : "今天没有训练，返回下一次待完成训练。",
+    message: workout.scheduled_date === date ? "这是今天的训练。" : "返回训练序列中的下一次待完成训练。",
     program,
     workout: await loadWorkoutDetail(userId, workout)
   };
@@ -125,10 +125,10 @@ async function loadPlan(userId: string) {
 
   const { data: workouts, error: workoutsError } = await supabase
     .from("workouts")
-    .select("id,scheduled_date,name,status,completed_at")
+    .select("id,scheduled_date,sequence_index,name,status,completed_at")
     .eq("user_id", userId)
     .eq("program_id", program.id)
-    .order("scheduled_date", { ascending: true });
+    .order("sequence_index", { ascending: true });
 
   if (workoutsError) throw new Error(workoutsError.message);
 
@@ -259,7 +259,7 @@ async function completeWorkout(userId: string, workoutId?: string) {
 
 async function loadWorkoutDetail(
   userId: string,
-  workout: { completed_at: string | null; id: string; name: string; scheduled_date: string; status: string }
+  workout: { completed_at: string | null; id: string; name: string; scheduled_date: string; sequence_index?: number; status: string }
 ) {
   await assertWorkoutOwnership(userId, workout.id);
   const supabase = createAdminSupabaseClient();

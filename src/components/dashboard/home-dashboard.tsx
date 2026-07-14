@@ -452,9 +452,9 @@ export function HomeDashboard() {
             </>
           ) : (
             <div className="rounded-lg bg-field p-4">
-              <p className="text-sm text-muted">先创建训练画像并生成计划，工作台会显示下一次训练。</p>
-              <Link className="mt-3 inline-flex rounded-lg border border-action px-3 py-2 text-sm font-semibold text-action" href="/onboarding">
-                创建训练画像
+              <p className="text-sm text-muted">从一分化、三分化、五分化或推拉蹲开始，也可命名自己的训练循环。</p>
+              <Link className="mt-3 inline-flex rounded-lg border border-action px-3 py-2 text-sm font-semibold text-action" href="/plan">
+                创建训练模板
               </Link>
             </div>
           )}

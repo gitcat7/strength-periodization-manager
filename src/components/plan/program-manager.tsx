@@ -5,26 +5,32 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Brain, CheckCircle2, Loader2, PlusCircle, XCircle } from "lucide-react";
 import type { RecommendationType } from "@/domain/fitness-coach";
+import { getNextWorkoutState } from "@/domain/next-workout";
 import { trackEvent } from "@/lib/analytics";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import {
   formatPrescription,
-  getWorkoutMeta,
-  pushPullSquatSchedule
+  getWorkoutMeta
 } from "@/domain/training-format";
 import {
   buildFourWeekProgram,
-  getTemplateType,
   type ExerciseProfile,
   type PlannedWorkout,
+  templateOptions,
+  type ProgramTemplateType,
+  type ScheduleConfig,
+  type ScheduleMode,
   type TemplateType
 } from "@/domain/program";
 
 type ProgramRow = {
   id: string;
   name: string;
-  template_type: TemplateType;
+  template_type: ProgramTemplateType;
+  schedule_mode: ScheduleMode;
+  schedule_config: Record<string, unknown>;
+  custom_template_name: string | null;
   status: string;
   start_date: string;
   end_date: string;
@@ -33,6 +39,7 @@ type ProgramRow = {
 type WorkoutRow = {
   id: string;
   scheduled_date: string;
+  sequence_index: number;
   name: string;
   status: string;
 };
@@ -65,6 +72,7 @@ type RecommendationRow = {
   } | null;
   workouts: {
     scheduled_date: string;
+    sequence_index: number;
     name: string;
   } | null;
 };
@@ -82,10 +90,15 @@ type LiftProfileRow = {
   training_max: number;
 };
 
-type AthleteProfileRow = {
-  training_days_per_week: number;
-  available_weekdays: number[];
-};
+const weekdayOptions = [
+  { value: 1, label: "周一" },
+  { value: 2, label: "周二" },
+  { value: 3, label: "周三" },
+  { value: 4, label: "周四" },
+  { value: 5, label: "周五" },
+  { value: 6, label: "周六" },
+  { value: 0, label: "周日" }
+];
 
 type PlanCache = {
   program: ProgramRow | null;
@@ -108,6 +121,12 @@ export function ProgramManager() {
   const [recommendationWeights, setRecommendationWeights] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<"loading" | "ready" | "generating" | "error">("loading");
   const [message, setMessage] = useState("");
+  const [templateType, setTemplateType] = useState<TemplateType>("push_pull_squat");
+  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("fixed_weekdays");
+  const [selectedWeekdays, setSelectedWeekdays] = useState<number[]>([1, 3, 5]);
+  const [cadenceRestDays, setCadenceRestDays] = useState(1);
+  const [customTemplateName, setCustomTemplateName] = useState("");
+  const [useCustomName, setUseCustomName] = useState(false);
 
   useEffect(() => {
     const cached = readClientCache<PlanCache>(planCacheKey);
@@ -154,7 +173,7 @@ export function ProgramManager() {
       fetchRecommendations(userData.user.id),
       supabase
         .from("programs")
-        .select("id,name,template_type,status,start_date,end_date")
+        .select("id,name,template_type,schedule_mode,schedule_config,custom_template_name,status,start_date,end_date")
         .eq("user_id", userData.user.id)
         .eq("status", "active")
         .order("created_at", { ascending: false })
@@ -253,7 +272,7 @@ export function ProgramManager() {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await supabase
       .from("recommendations")
-      .select("id,exercise_id,workout_id,recommendation_type,previous_weight,suggested_weight,reason,status,exercises(name,slug),workouts(scheduled_date,name)")
+      .select("id,exercise_id,workout_id,recommendation_type,previous_weight,suggested_weight,reason,status,exercises(name,slug),workouts(scheduled_date,sequence_index,name)")
       .eq("user_id", targetUserId)
       .eq("status", "pending")
       .order("created_at", { ascending: false })
@@ -273,9 +292,9 @@ export function ProgramManager() {
     const supabase = createBrowserSupabaseClient();
     const { data: workoutData, error: workoutError } = await supabase
       .from("workouts")
-      .select("id,scheduled_date,name,status")
+      .select("id,scheduled_date,sequence_index,name,status")
       .eq("program_id", programId)
-      .order("scheduled_date", { ascending: true });
+      .order("sequence_index", { ascending: true });
 
     if (workoutError) {
       setStatus("error");
@@ -327,13 +346,19 @@ export function ProgramManager() {
     setMessage("");
 
     const supabase = createBrowserSupabaseClient();
-    const sourceDate = recommendation.workouts?.scheduled_date ?? formatDate(new Date());
-    const { data: futureWorkouts, error: futureWorkoutError } = await supabase
+    let futureWorkoutsQuery = supabase
       .from("workouts")
       .select("id")
       .eq("program_id", program.id)
-      .gt("scheduled_date", sourceDate)
       .neq("status", "completed");
+
+    if (typeof recommendation.workouts?.sequence_index === "number") {
+      futureWorkoutsQuery = futureWorkoutsQuery.gt("sequence_index", recommendation.workouts.sequence_index);
+    } else {
+      futureWorkoutsQuery = futureWorkoutsQuery.gte("scheduled_date", formatDate(new Date()));
+    }
+
+    const { data: futureWorkouts, error: futureWorkoutError } = await futureWorkoutsQuery;
 
     if (futureWorkoutError) {
       setStatus("error");
@@ -437,6 +462,18 @@ export function ProgramManager() {
   async function generateProgram() {
     if (!userId) return;
 
+    if (scheduleMode === "fixed_weekdays" && selectedWeekdays.length === 0) {
+      setStatus("error");
+      setMessage("固定星期模式至少选择一个训练日。");
+      return;
+    }
+
+    if (useCustomName && !customTemplateName.trim()) {
+      setStatus("error");
+      setMessage("请为自定义模板填写名称。");
+      return;
+    }
+
     setStatus("generating");
     setMessage("");
 
@@ -453,8 +490,12 @@ export function ProgramManager() {
       return;
     }
 
-    const athleteProfile = profile as AthleteProfileRow;
-    const templateType = getTemplateType(athleteProfile.training_days_per_week);
+    const schedule: ScheduleConfig =
+      scheduleMode === "fixed_weekdays"
+        ? { mode: "fixed_weekdays", weekdays: selectedWeekdays }
+        : scheduleMode === "cadence"
+          ? { mode: "cadence", restDays: cadenceRestDays }
+          : { mode: "flexible" };
 
     const { data: exercises, error: exercisesError } = await supabase
       .from("exercises")
@@ -500,7 +541,7 @@ export function ProgramManager() {
     const accessoryProfiles: ExerciseProfile[] = deriveAccessoryProfiles(exerciseRows, exerciseProfiles);
     const plannedWorkouts = buildFourWeekProgram({
       templateType,
-      availableWeekdays: athleteProfile.available_weekdays,
+      schedule,
       exerciseProfiles: [...exerciseProfiles, ...accessoryProfiles]
     });
 
@@ -522,6 +563,9 @@ export function ProgramManager() {
     const createdProgram = await createProgramWithWorkouts({
       userId,
       templateType,
+      programTemplateType: useCustomName ? "custom" : templateType,
+      customTemplateName: useCustomName ? customTemplateName.trim() : null,
+      schedule,
       plannedWorkouts,
       exerciseRows
     });
@@ -537,6 +581,8 @@ export function ProgramManager() {
       eventName: "program_generated",
       properties: {
         template_type: templateType,
+        schedule_mode: scheduleMode,
+        custom_template: useCustomName,
         workouts: plannedWorkouts.length
       },
       supabase,
@@ -550,11 +596,17 @@ export function ProgramManager() {
   async function createProgramWithWorkouts({
     userId,
     templateType,
+    programTemplateType,
+    customTemplateName,
+    schedule,
     plannedWorkouts,
     exerciseRows
   }: {
     userId: string;
     templateType: TemplateType;
+    programTemplateType: ProgramTemplateType;
+    customTemplateName: string | null;
+    schedule: ScheduleConfig;
     plannedWorkouts: PlannedWorkout[];
     exerciseRows: ExerciseRow[];
   }) {
@@ -571,13 +623,16 @@ export function ProgramManager() {
       .from("programs")
       .insert({
         user_id: userId,
-        name: getProgramName(templateType),
-        template_type: templateType,
+        name: customTemplateName || getProgramName(templateType),
+        template_type: programTemplateType,
+        custom_template_name: customTemplateName,
+        schedule_mode: schedule.mode,
+        schedule_config: getScheduleConfig(schedule),
         status: "active",
         start_date: startDate,
         end_date: endDate
       })
-      .select("id,name,template_type,status,start_date,end_date")
+      .select("id,name,template_type,schedule_mode,schedule_config,custom_template_name,status,start_date,end_date")
       .single();
 
     if (programError || !programData) {
@@ -641,15 +696,20 @@ export function ProgramManager() {
 
   return (
     <div className="space-y-5">
-      <section className="grid gap-3 md:grid-cols-7">
-        {pushPullSquatSchedule.map((day) => (
-          <article className="rounded-xl border border-line bg-white p-4" key={day.key}>
-            <p className="text-xs text-muted">{day.intent}</p>
-            <h2 className="mt-1 text-xl font-semibold">{day.label}</h2>
-            <p className="mt-3 text-xs leading-5 text-muted">{day.focus}</p>
-          </article>
-        ))}
-      </section>
+      <PlanBuilder
+        cadenceRestDays={cadenceRestDays}
+        customTemplateName={customTemplateName}
+        scheduleMode={scheduleMode}
+        selectedWeekdays={selectedWeekdays}
+        setCadenceRestDays={setCadenceRestDays}
+        setCustomTemplateName={setCustomTemplateName}
+        setScheduleMode={setScheduleMode}
+        setSelectedWeekdays={setSelectedWeekdays}
+        setTemplateType={setTemplateType}
+        setUseCustomName={setUseCustomName}
+        templateType={templateType}
+        useCustomName={useCustomName}
+      />
 
       {message ? (
         <p className={`rounded-lg border px-3 py-2 text-sm ${status === "error" ? "border-red-200 text-red-600" : "border-line text-muted"}`}>
@@ -665,7 +725,7 @@ export function ProgramManager() {
             </span>
             <div>
               <h2 className="font-semibold">还没有当前训练计划</h2>
-              <p className="text-sm text-muted">基于推/拉/蹲 + A/B 格式生成 4 周训练计划。</p>
+              <p className="text-sm text-muted">选择训练结构和安排方式后，按你的训练顺序生成 4 周计划。</p>
             </div>
           </div>
           <button
@@ -804,7 +864,7 @@ export function ProgramManager() {
             >
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm text-muted">{workout.scheduled_date}</p>
+                  <p className="text-sm text-muted">第 {workout.sequence_index + 1} 节 · 建议 {workout.scheduled_date}</p>
                   <h3 className="font-semibold">{workout.name}</h3>
                   <p className="mt-1 text-sm text-muted">{workoutMeta.focus}</p>
                 </div>
@@ -845,16 +905,153 @@ export function ProgramManager() {
   );
 }
 
+function PlanBuilder({
+  cadenceRestDays,
+  customTemplateName,
+  scheduleMode,
+  selectedWeekdays,
+  setCadenceRestDays,
+  setCustomTemplateName,
+  setScheduleMode,
+  setSelectedWeekdays,
+  setTemplateType,
+  setUseCustomName,
+  templateType,
+  useCustomName
+}: {
+  cadenceRestDays: number;
+  customTemplateName: string;
+  scheduleMode: ScheduleMode;
+  selectedWeekdays: number[];
+  setCadenceRestDays: (value: number) => void;
+  setCustomTemplateName: (value: string) => void;
+  setScheduleMode: (value: ScheduleMode) => void;
+  setSelectedWeekdays: (value: number[]) => void;
+  setTemplateType: (value: TemplateType) => void;
+  setUseCustomName: (value: boolean) => void;
+  templateType: TemplateType;
+  useCustomName: boolean;
+}) {
+  return (
+    <section className="rounded-xl border border-line bg-white p-4">
+      <div className="mb-4">
+        <p className="text-sm text-muted">计划设置</p>
+        <h2 className="text-xl font-semibold">先选训练结构，再选安排方式</h2>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {templateOptions.map((option) => (
+          <button
+            className={`rounded-xl border p-3 text-left transition ${templateType === option.value ? "border-action bg-action/5" : "border-line bg-field"}`}
+            key={option.value}
+            onClick={() => setTemplateType(option.value)}
+            type="button"
+          >
+            <p className="font-semibold">{option.label}</p>
+            <p className="mt-1 text-xs leading-5 text-muted">{option.description}</p>
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">安排方式</span>
+          <select
+            className="h-11 w-full rounded-lg border border-line bg-field px-3 text-sm"
+            onChange={(event) => setScheduleMode(event.target.value as ScheduleMode)}
+            value={scheduleMode}
+          >
+            <option value="fixed_weekdays">固定星期</option>
+            <option value="cadence">练休循环</option>
+            <option value="flexible">自由安排</option>
+          </select>
+        </label>
+        {scheduleMode === "cadence" ? (
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">每次训练后休息</span>
+            <select
+              className="h-11 w-full rounded-lg border border-line bg-field px-3 text-sm"
+              onChange={(event) => setCadenceRestDays(Number(event.target.value))}
+              value={cadenceRestDays}
+            >
+              <option value={0}>不休息</option>
+              <option value={1}>1 天（练一休一）</option>
+              <option value={2}>2 天</option>
+            </select>
+          </label>
+        ) : null}
+        {scheduleMode === "flexible" ? (
+          <p className="rounded-lg bg-field px-3 py-2 text-sm leading-5 text-muted">
+            计划按训练序列继续；日期只是建议，可在有空时完成下一节。
+          </p>
+        ) : null}
+      </div>
+
+      {scheduleMode === "fixed_weekdays" ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {weekdayOptions.map((weekday) => {
+            const active = selectedWeekdays.includes(weekday.value);
+            return (
+              <button
+                className={`rounded-full px-3 py-2 text-sm font-semibold ${active ? "bg-action text-white" : "border border-line bg-field text-ink"}`}
+                key={weekday.value}
+                onClick={() =>
+                  setSelectedWeekdays(
+                    active
+                      ? selectedWeekdays.filter((value) => value !== weekday.value)
+                      : [...selectedWeekdays, weekday.value].sort((a, b) => a - b)
+                  )
+                }
+                type="button"
+              >
+                {weekday.label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      <label className="mt-4 flex items-start gap-3 rounded-lg bg-field p-3 text-sm">
+        <input
+          checked={useCustomName}
+          className="mt-1 h-4 w-4"
+          onChange={(event) => setUseCustomName(event.target.checked)}
+          type="checkbox"
+        />
+        <span>
+          <span className="block font-semibold">保存为自定义模板</span>
+          <span className="text-muted">使用当前选中的训练结构作为起点，并为这套循环命名。</span>
+        </span>
+      </label>
+      {useCustomName ? (
+        <label className="mt-3 block max-w-md">
+          <span className="mb-1 block text-sm font-medium">自定义模板名称</span>
+          <input
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            maxLength={40}
+            onChange={(event) => setCustomTemplateName(event.target.value)}
+            placeholder="例如：练一休一增肌循环"
+            value={customTemplateName}
+          />
+        </label>
+      ) : null}
+    </section>
+  );
+}
+
 function getProgramName(templateType: TemplateType) {
   if (templateType === "push_pull_squat") {
     return "推/拉/蹲 A-B 周期";
   }
+  if (templateType === "one_split") return "一分化全身循环";
+  if (templateType === "three_split" || templateType === "three_day_full_body") return "三分化训练循环";
+  if (templateType === "five_split" || templateType === "four_day_upper_lower") return "五分化训练循环";
+  return "训练循环";
+}
 
-  if (templateType === "four_day_upper_lower") {
-    return "4 天推/拉/蹲过渡计划";
-  }
-
-  return "3 天推/拉/蹲基础计划";
+function getScheduleConfig(schedule: ScheduleConfig) {
+  if (schedule.mode === "fixed_weekdays") return { weekdays: schedule.weekdays };
+  if (schedule.mode === "cadence") return { rest_days: schedule.restDays };
+  return {};
 }
 
 function deriveAccessoryProfiles(exercises: ExerciseRow[], mainProfiles: ExerciseProfile[]) {
@@ -915,23 +1112,17 @@ function getPlanWorkoutState(workout: WorkoutRow, isNextWorkout: boolean) {
     };
   }
 
-  const days = getDaysFromToday(workout.scheduled_date);
+  const nextState = getNextWorkoutState(workout.scheduled_date);
   return {
     isNext: isNextWorkout,
-    label: formatPlanWorkoutDistance(days)
+    label: isNextWorkout
+      ? nextState.kind === "overdue"
+        ? `待继续 · 已顺延 ${nextState.overdueDays} 天`
+        : nextState.kind === "today"
+          ? "下一节训练"
+          : `${nextState.daysUntil} 天后建议训练`
+      : `第 ${workout.sequence_index + 1} 节`
   };
-}
-
-function getDaysFromToday(dateText: string) {
-  const today = new Date(formatDate(new Date()));
-  const target = new Date(dateText);
-  return Math.round((target.getTime() - today.getTime()) / 86400000);
-}
-
-function formatPlanWorkoutDistance(days: number) {
-  if (days <= 0) return "今天训练";
-  if (days === 1) return "明天训练";
-  return `${days} 天后`;
 }
 
 function formatDate(date: Date) {
