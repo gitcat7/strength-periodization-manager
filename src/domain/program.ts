@@ -19,6 +19,7 @@ export type PlannedWorkoutExercise = {
 export type PlannedWorkout = {
   name: string;
   scheduledDate: string;
+  sequenceIndex: number;
   exercises: PlannedWorkoutExercise[];
 };
 
@@ -148,6 +149,7 @@ export function buildFourWeekProgram({
     return {
       name: `第 ${weekIndex + 1} 周 · ${templateWorkout.name}`,
       scheduledDate: formatDate(date),
+      sequenceIndex: index,
       exercises: templateWorkout.exercises.map((item) => {
         const profile = profileBySlug.get(item.slug);
         const targetWeight =

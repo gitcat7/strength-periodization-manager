@@ -591,6 +591,7 @@ export function ProgramManager() {
           program_id: programData.id,
           user_id: userId,
           scheduled_date: plannedWorkout.scheduledDate,
+          sequence_index: plannedWorkout.sequenceIndex,
           name: plannedWorkout.name,
           status: "scheduled"
         })
