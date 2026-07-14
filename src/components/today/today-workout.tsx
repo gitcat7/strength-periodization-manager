@@ -34,6 +34,7 @@ import {
   ExerciseSubstitutionDialog
 } from "./exercise-substitution-dialog";
 import {
+  getSubstitutionDraftCleanupWarning,
   getSubstitutionOutcome,
   getUnknownErrorMessage,
   type SubstitutionCandidate,
@@ -875,14 +876,15 @@ export function TodayWorkout() {
       );
 
       const allWorkoutIds = [...new Set([...dbWorkoutIds, ...currentDraftWorkoutIds])];
-      clearWorkoutDrafts(allWorkoutIds);
+      const currentDraftsCleared = clearWorkoutDrafts(allWorkoutIds);
 
       // Also scan local drafts by exercise IDs to catch any drafts the DB lookup might have missed
-      clearWorkoutDraftsByExerciseIds(result.affectedIds);
-
-      if (lookupError) {
-        draftCleanupWarning = "替换已成功，但本地草稿清理未完全确认。";
-      }
+      const affectedDraftsCleared = clearWorkoutDraftsByExerciseIds(result.affectedIds);
+      draftCleanupWarning = getSubstitutionDraftCleanupWarning(
+        Boolean(lookupError),
+        currentDraftsCleared,
+        affectedDraftsCleared
+      );
     } catch (syncError) {
       console.warn("post-substitution sync error", syncError);
       draftCleanupWarning = "替换已成功，但本地草稿清理未完全确认。";

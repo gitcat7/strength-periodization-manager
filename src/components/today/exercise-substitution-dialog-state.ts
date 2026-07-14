@@ -113,6 +113,18 @@ export function getSubstitutionOutcome(data: unknown, error: unknown): Substitut
   }
 }
 
+export function getSubstitutionDraftCleanupWarning(
+  lookupFailed: boolean,
+  currentDraftsCleared: boolean,
+  affectedDraftsCleared: boolean
+): string | null {
+  if (lookupFailed || !currentDraftsCleared || !affectedDraftsCleared) {
+    return "替换已成功，但本地草稿清理未完全确认。";
+  }
+
+  return null;
+}
+
 export function getSubstitutionErrorMessage(error: unknown): string {
   const code =
     typeof error === "object" && error !== null ? (error as { code?: string }).code : undefined;

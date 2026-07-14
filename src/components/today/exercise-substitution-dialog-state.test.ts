@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   exerciseSubstitutionDialogReducer,
   getInitialExerciseSubstitutionDialogState,
+  getSubstitutionDraftCleanupWarning,
   getSubstitutionOutcome,
   getSubstitutionConfirmResult,
   getSubstitutionErrorMessage,
@@ -295,6 +296,27 @@ describe("getSubstitutionOutcome", () => {
       type: "committed_unverified",
       warning: "替换已提交，但返回结果异常，本地草稿清理未完全确认，请刷新后核对。"
     });
+  });
+});
+
+describe("getSubstitutionDraftCleanupWarning", () => {
+  it("warns when either draft cleanup is unconfirmed", () => {
+    expect(getSubstitutionDraftCleanupWarning(false, false, true)).toBe(
+      "替换已成功，但本地草稿清理未完全确认。"
+    );
+    expect(getSubstitutionDraftCleanupWarning(false, true, false)).toBe(
+      "替换已成功，但本地草稿清理未完全确认。"
+    );
+  });
+
+  it("warns when the affected-workout lookup fails", () => {
+    expect(getSubstitutionDraftCleanupWarning(true, true, true)).toBe(
+      "替换已成功，但本地草稿清理未完全确认。"
+    );
+  });
+
+  it("does not warn after fully confirmed cleanup", () => {
+    expect(getSubstitutionDraftCleanupWarning(false, true, true)).toBeNull();
   });
 });
 
