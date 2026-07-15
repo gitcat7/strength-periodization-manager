@@ -51,12 +51,12 @@ import {
 import { shouldRetryWithBaseExerciseSchema } from "./today-workout-schema-fallback";
 import { RestDayCard } from "./rest-day-card";
 import {
-  canCompleteRestDay,
   reportRestCompletionFailure,
   resolveTodayScheduleState,
   type RestScheduleItem,
   type TrainingScheduleItem
 } from "./rest-day-state";
+import { completeRestDayCheckIn, getCurrentRestItem } from "./rest-day-actions";
 
 type WorkoutRow = {
   id: string;
@@ -549,10 +549,11 @@ export function TodayWorkout() {
 
     const cached = readClientCache<TodayCache>(todayCacheKey);
     if (cached) {
+      const cachedRestItem = getCurrentRestItem(cached.restItem, formatDate(new Date()));
       setUserId(cached.userId);
-      setRestItem(cached.restItem ?? null);
+      setRestItem(cachedRestItem);
       setNextTraining(cached.nextTraining ?? null);
-      if (cached.restItem) {
+      if (cachedRestItem) {
         setWorkout(null);
         setExercises([]);
         setSetLogs({});
@@ -1063,23 +1064,20 @@ export function TodayWorkout() {
   }
 
   async function completeRestDay() {
-    if (!restItem || !userId || !canCompleteRestDay(restItem)) return;
+    const today = formatDate(new Date());
+    if (!restItem || !userId || !getCurrentRestItem(restItem, today)) return;
 
     setRestSaveStatus("saving");
     setMessage("");
 
     try {
       const supabase = createBrowserSupabaseClient();
-      const completedAt = new Date().toISOString();
-      const { data, error } = await supabase
-        .from("workouts")
-        .update({ completed_at: completedAt, status: "completed", updated_at: completedAt })
-        .eq("id", restItem.id)
-        .eq("user_id", userId)
-        .eq("day_type", "rest")
-        .in("status", ["scheduled", "draft"])
-        .select("id")
-        .maybeSingle();
+      const { data, error } = await completeRestDayCheckIn({
+        from: (table) => supabase.from(table),
+        item: restItem,
+        today,
+        userId
+      });
 
       if (error || !data) {
         setRestSaveStatus("error");
@@ -1116,13 +1114,15 @@ export function TodayWorkout() {
     return <p className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600">{message}</p>;
   }
 
-  if (restItem) {
+  const currentRestItem = getCurrentRestItem(restItem, formatDate(new Date()));
+
+  if (currentRestItem) {
     return (
       <div>
         <RestDayCard
           nextTraining={nextTraining}
           onComplete={completeRestDay}
-          restItem={restItem}
+          restItem={currentRestItem}
           saving={restSaveStatus === "saving"}
         />
         {message ? (
