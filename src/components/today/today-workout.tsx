@@ -586,6 +586,7 @@ export function TodayWorkout() {
       .select("scheduled_date,name")
       .eq("program_id", programId)
       .eq("status", "completed")
+      .eq("day_type", "training")
       .lt("scheduled_date", scheduledDate)
       .order("scheduled_date", { ascending: false })
       .limit(1)
