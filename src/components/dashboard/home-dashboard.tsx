@@ -410,11 +410,16 @@ export function HomeDashboard() {
 
         <section className="rounded-xl border border-line bg-white p-4">
           <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm text-muted">下一次训练</p>
-              <h2 className="text-xl font-semibold">{nextWorkout ? nextWorkout.name : "暂无训练计划"}</h2>
+            <div className="flex items-center gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-action text-white">
+                <Dumbbell size={20} />
+              </span>
+              <div>
+                <p className="text-sm text-muted">{nextWorkout ? "下一次训练" : "当前状态"}</p>
+                <h2 className="text-xl font-semibold">{nextWorkout ? nextWorkout.name : "暂无训练计划"}</h2>
+              </div>
             </div>
-            <Link className="inline-flex items-center gap-1 rounded-lg bg-action px-3 py-2 text-sm font-semibold text-white" href="/today">
+            <Link className="inline-flex items-center gap-1 rounded-lg bg-action px-3 py-2 text-sm font-semibold text-white transition active:scale-[0.98]" href="/today">
               开始
               <ArrowRight size={16} />
             </Link>

@@ -50,8 +50,8 @@ export function BottomNav() {
 
           return (
             <Link
-              className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg px-1 transition ${
-                active ? "bg-action/10 text-action" : "hover:bg-field"
+              className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg px-1 transition active:scale-[0.97] ${
+                active ? "bg-action/10 text-action" : "text-muted hover:bg-field"
               }`}
               href={item.href}
               key={item.href}
@@ -59,8 +59,10 @@ export function BottomNav() {
               onTouchStart={() => router.prefetch(item.href)}
               prefetch
             >
-              <Icon size={18} />
-              <span>{item.label}</span>
+              <span className={`${active ? "text-action" : "text-muted"}`}>
+                <Icon size={18} />
+              </span>
+              <span className={`text-xs font-medium ${active ? "text-action" : "text-muted"}`}>{item.label}</span>
             </Link>
           );
         })}

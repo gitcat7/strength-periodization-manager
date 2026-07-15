@@ -10,6 +10,7 @@ import {
   Dumbbell,
   Loader2,
   Minus,
+  Moon,
   Pause,
   Play,
   Plus,
@@ -18,6 +19,7 @@ import {
   Save,
   Timer
 } from "lucide-react";
+import { buildTodayHeaderView } from "@/domain/workout-presentation";
 import {
   buildExerciseCoachRecommendation,
   getInterruptionAdvice,
@@ -1003,23 +1005,46 @@ export function TodayWorkout() {
     scheduledDate: workout.scheduled_date
   });
   const coachCue = getWorkoutCoachCue(workout.name);
+  const headerView = buildTodayHeaderView({ completedSets, totalSets, workoutName: workout.name });
 
   return (
     <section className="space-y-4">
-      <div className="rounded-xl border border-line bg-field p-4">
+      <div className="rounded-xl border border-line bg-white p-4">
         <div className="flex items-start gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-full bg-action text-white">
+          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-white transition ${headerView.tone === "completed" ? "bg-action" : "bg-action"}`}>
             <Dumbbell size={20} />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm text-muted">{workout.scheduled_date}</p>
-            <h2 className="text-xl font-semibold">{workout.name}</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm text-muted">{workout.scheduled_date}</p>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${headerView.tone === "completed" ? "bg-action/10 text-action" : "bg-field text-muted"}`}>
+                {headerView.progressLabel}
+              </span>
+            </div>
+            <h2 className="mt-0.5 text-xl font-semibold">{workout.name}</h2>
             <p className="mt-1 text-sm text-muted">{workoutMeta.focus}</p>
-            <p className="mt-2 text-sm text-muted">{workoutMeta.note}</p>
+            <p className="mt-1 text-sm text-muted">{workoutMeta.note}</p>
           </div>
-          <span className="shrink-0 rounded-full bg-white px-3 py-1 text-xs font-semibold text-action">
-            {workout.status === "completed" ? "已完成" : `${completedSets}/${totalSets} 组`}
-          </span>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line px-3 text-sm font-semibold text-ink transition active:scale-[0.98]"
+            onClick={fillByPlan}
+            type="button"
+          >
+            <CheckCircle2 size={17} />
+            按计划填入
+          </button>
+          <button
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-action px-3 text-sm font-semibold text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={saveStatus === "saving"}
+            onClick={() => saveLogs()}
+            type="button"
+          >
+            {saveStatus === "saving" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
+            保存记录
+          </button>
         </div>
       </div>
 
@@ -1117,26 +1142,6 @@ export function TodayWorkout() {
           </div>
         </div>
       ) : null}
-
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line px-3 text-sm font-semibold text-ink"
-          onClick={fillByPlan}
-          type="button"
-        >
-          <CheckCircle2 size={17} />
-          按计划填入
-        </button>
-        <button
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-action px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={saveStatus === "saving"}
-          onClick={() => saveLogs()}
-          type="button"
-        >
-          {saveStatus === "saving" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
-          保存记录
-        </button>
-      </div>
 
       <div className="rounded-xl border border-line bg-white p-4">
         <h3 className="font-semibold">执行记录</h3>
@@ -1297,7 +1302,7 @@ export function TodayWorkout() {
           />
         </div>
         <button
-          className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-12 items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
           disabled={saveStatus === "saving" || workout.status === "completed"}
           onClick={() => saveLogs({ completeWorkout: true })}
           type="button"
@@ -1305,7 +1310,7 @@ export function TodayWorkout() {
           {saveStatus === "saving" ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
           {workout.status === "completed" ? "训练已完成" : "保存并完成训练"}
         </button>
-        <Link className="inline-flex h-11 items-center justify-center rounded-lg border border-line px-4 font-semibold text-ink" href="/plan">
+        <Link className="inline-flex h-11 items-center justify-center rounded-lg border border-line px-4 font-semibold text-ink transition active:scale-[0.98]" href="/plan">
           查看完整计划
         </Link>
       </div>
@@ -1358,7 +1363,7 @@ function RestTimerPanel({
               <p className="mt-1 text-sm text-muted">{enabled ? context : "已关闭自动休息倒计时"}</p>
             </div>
             <button
-              className={`h-9 rounded-lg px-3 text-sm font-semibold ${
+              className={`h-9 rounded-lg px-3 text-sm font-semibold transition active:scale-[0.98] ${
                 enabled ? "bg-action text-white" : "border border-line text-muted"
               }`}
               onClick={() => onToggle(!enabled)}
@@ -1378,7 +1383,7 @@ function RestTimerPanel({
             <div className="flex gap-2">
               <button
                 aria-label={isRunning ? "暂停休息倒计时" : "继续休息倒计时"}
-                className="grid h-10 w-10 place-items-center rounded-lg border border-line text-ink disabled:opacity-50"
+                className="grid h-10 w-10 place-items-center rounded-lg border border-line text-ink transition active:scale-[0.98] disabled:opacity-50"
                 disabled={!enabled || !hasActiveTimer}
                 onClick={isRunning ? onPause : onResume}
                 type="button"
@@ -1387,7 +1392,7 @@ function RestTimerPanel({
               </button>
               <button
                 aria-label="重置休息倒计时"
-                className="grid h-10 w-10 place-items-center rounded-lg border border-line text-ink disabled:opacity-50"
+                className="grid h-10 w-10 place-items-center rounded-lg border border-line text-ink transition active:scale-[0.98] disabled:opacity-50"
                 disabled={!enabled}
                 onClick={onReset}
                 type="button"

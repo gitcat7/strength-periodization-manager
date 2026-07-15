@@ -63,3 +63,59 @@ export function getWorkoutPresentation(input: {
     tone: "upcoming"
   };
 }
+
+export interface TodayHeaderView {
+  primaryActionLabel: string;
+  progressLabel: string;
+  tone: WorkoutPresentationTone;
+}
+
+export function buildTodayHeaderView({
+  completedSets,
+  totalSets,
+  workoutName
+}: {
+  completedSets: number;
+  totalSets: number;
+  workoutName: string;
+}): TodayHeaderView {
+  const isCompleted = completedSets >= totalSets && totalSets > 0;
+  const progressLabel = `${completedSets}/${totalSets} 组`;
+
+  let primaryActionLabel: string;
+  if (isCompleted) {
+    primaryActionLabel = "训练已完成";
+  } else if (completedSets === 0) {
+    primaryActionLabel = "开始训练";
+  } else {
+    primaryActionLabel = "继续完成训练";
+  }
+
+  return {
+    primaryActionLabel,
+    progressLabel,
+    tone: isCompleted ? "completed" : "upcoming"
+  };
+}
+
+export interface RestDayView {
+  icon: WorkoutPresentationIcon;
+  primaryActionLabel: string;
+  secondaryActionLabel: string;
+  tone: WorkoutPresentationTone;
+}
+
+export function buildRestDayView({
+  scheduledDate,
+  workoutName
+}: {
+  scheduledDate: string;
+  workoutName: string;
+}): RestDayView {
+  return {
+    icon: "moon",
+    primaryActionLabel: "完成休息",
+    secondaryActionLabel: "查看下一节训练",
+    tone: "recovery"
+  };
+}
