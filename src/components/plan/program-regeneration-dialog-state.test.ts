@@ -88,5 +88,6 @@ describe("regeneration dialog state", () => {
     expect(state).toMatchObject({ open: true, phase: "reloadFailed", preview, selection });
     expect(buildConfirmationPayload(state)).toBeNull();
     expect(reduceRegenerationDialog(state, { type: "confirm" })).toBe(state);
+    expect(reduceRegenerationDialog(state, { type: "close" })).toBe(state);
   });
 });

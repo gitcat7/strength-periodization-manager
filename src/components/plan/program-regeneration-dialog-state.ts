@@ -44,7 +44,7 @@ export function reduceRegenerationDialog(
     return { error: "", open: true, phase: "preview", preview: action.preview, selection: action.selection };
   }
   if (action.type === "close") {
-    return state.phase === "submitting" || state.phase === "replacementCommitted"
+    return state.phase === "submitting" || state.phase === "replacementCommitted" || state.phase === "reloadFailed"
       ? state
       : createRegenerationDialogState();
   }

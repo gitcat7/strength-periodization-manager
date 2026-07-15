@@ -35,9 +35,10 @@ export function ProgramRegenerationDialog({
   const isSubmitting = state.phase === "submitting" || state.phase === "replacementCommitted";
   const canConfirm = state.phase === "preview";
   const reloadFailed = state.phase === "reloadFailed";
+  const isLocked = isSubmitting || reloadFailed;
 
   onCloseRef.current = onClose;
-  submittingRef.current = isSubmitting;
+  submittingRef.current = isLocked;
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -91,7 +92,7 @@ export function ProgramRegenerationDialog({
   }, [returnFocusRef]);
 
   function closeFromBackdrop(event: React.MouseEvent<HTMLDivElement>) {
-    if (!isSubmitting && event.target === event.currentTarget) onClose();
+    if (!isLocked && event.target === event.currentTarget) onClose();
   }
 
   return (
@@ -141,7 +142,7 @@ export function ProgramRegenerationDialog({
         <div className="mt-5 grid grid-cols-2 gap-3">
           <button
             className="h-11 rounded-lg border border-line px-4 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isSubmitting}
+            disabled={isLocked}
             onClick={onClose}
             type="button"
           >

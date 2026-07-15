@@ -913,7 +913,13 @@ export function ProgramManager() {
       {regenerationDialog.open ? (
         <ProgramRegenerationDialog
           onClose={() => {
-            if (regenerationDialog.phase === "submitting" || regenerationDialog.phase === "replacementCommitted") return;
+            if (
+              regenerationDialog.phase === "submitting" ||
+              regenerationDialog.phase === "replacementCommitted" ||
+              regenerationDialog.phase === "reloadFailed"
+            ) {
+              return;
+            }
             pendingReplacementPayload.current = null;
             setRegenerationDialog((current) => reduceRegenerationDialog(current, { type: "close" }));
           }}

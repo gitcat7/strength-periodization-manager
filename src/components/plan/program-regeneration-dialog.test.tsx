@@ -188,5 +188,8 @@ describe("ProgramRegenerationDialog", () => {
     act(() => buttons.find((button) => button.textContent === "重新加载页面")?.click());
     expect(onReload).toHaveBeenCalledOnce();
     expect(onConfirm).not.toHaveBeenCalled();
+    expect(buttons.find((button) => button.textContent === "取消")?.disabled).toBe(true);
+    act(() => document.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })));
+    expect(view.container.querySelector("[role='dialog']")).not.toBeNull();
   });
 });
