@@ -3,7 +3,17 @@
 import { useEffect, useRef, type RefObject } from "react";
 import { Loader2 } from "lucide-react";
 
+import { getFocusTrapTarget } from "./program-regeneration-dialog-focus";
 import type { RegenerationDialogState } from "./program-regeneration-dialog-state";
+
+const focusableSelector = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "[tabindex]:not([tabindex='-1'])"
+].join(",");
 
 export function ProgramRegenerationDialog({
   onClose,
@@ -16,6 +26,7 @@ export function ProgramRegenerationDialog({
   returnFocusRef: RefObject<HTMLButtonElement | null>;
   state: Extract<RegenerationDialogState, { open: true }>;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const onCloseRef = useRef(onClose);
   const submittingRef = useRef(false);
@@ -26,12 +37,51 @@ export function ProgramRegenerationDialog({
 
   useEffect(() => {
     headingRef.current?.focus();
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !submittingRef.current) onCloseRef.current();
+      if (event.key !== "Tab") return;
+
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+
+      const focusableElements = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+        (element) => !element.hasAttribute("disabled") && element.tabIndex >= 0
+      );
+      const target = getFocusTrapTarget(focusableElements, document.activeElement, event.shiftKey);
+      if (target) {
+        event.preventDefault();
+        target.focus();
+        return;
+      }
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        dialog.focus();
+      }
     };
+
     document.addEventListener("keydown", handleKeyDown);
+
+    const previouslyInert: Array<{ element: HTMLElement; inert: boolean }> = [];
+    let current: HTMLElement | null = dialogRef.current;
+    while (current && current !== document.body) {
+      const parent = current.parentElement;
+      if (!parent) break;
+
+      for (const sibling of Array.from(parent.children)) {
+        if (!(sibling instanceof HTMLElement) || sibling === current) continue;
+        previouslyInert.push({ element: sibling, inert: sibling.inert });
+        sibling.inert = true;
+      }
+      current = parent;
+    }
+
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
+      for (const { element, inert } of previouslyInert) {
+        element.inert = inert;
+      }
       returnFocusRef.current?.focus();
     };
   }, [returnFocusRef]);
@@ -46,7 +96,9 @@ export function ProgramRegenerationDialog({
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-end bg-ink/40 md:items-center md:justify-center md:p-6"
       onMouseDown={closeFromBackdrop}
+      ref={dialogRef}
       role="dialog"
+      tabIndex={-1}
     >
       <section className="w-full rounded-t-2xl bg-white p-5 shadow-xl md:max-w-lg md:rounded-2xl" aria-busy={isSubmitting}>
         <h2 className="text-lg font-semibold" id="program-regeneration-heading" ref={headingRef} tabIndex={-1}>

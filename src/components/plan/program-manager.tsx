@@ -176,8 +176,14 @@ export function ProgramManager() {
     }, {});
   }, [workoutExercises]);
 
-  async function loadCurrentProgram() {
-    if (!readClientCache<PlanCache>(planCacheKey)) {
+  async function loadCurrentProgram({
+    requireActiveProgram = false,
+    showLoading = !readClientCache<PlanCache>(planCacheKey)
+  }: {
+    requireActiveProgram?: boolean;
+    showLoading?: boolean;
+  } = {}): Promise<boolean> {
+    if (showLoading) {
       setStatus("loading");
     }
     setMessage("");
@@ -187,7 +193,7 @@ export function ProgramManager() {
 
     if (userError || !userData.user) {
       router.replace("/login?next=/plan");
-      return;
+      return false;
     }
 
     setUserId(userData.user.id);
@@ -207,7 +213,7 @@ export function ProgramManager() {
     if (!recommendationsResult.ok) {
       setStatus("error");
       setMessage(recommendationsResult.message);
-      return;
+      return false;
     }
 
     setRecommendations(recommendationsResult.rows);
@@ -225,7 +231,7 @@ export function ProgramManager() {
     if (programError) {
       setStatus("error");
       setMessage(programError.message);
-      return;
+      return false;
     }
 
     if (!programData) {
@@ -247,13 +253,13 @@ export function ProgramManager() {
         workouts: []
       });
       setStatus("ready");
-      return;
+      return !requireActiveProgram;
     }
 
     setProgram(programData as ProgramRow);
     const loadedWorkouts = await loadWorkouts(programData.id);
     if (!loadedWorkouts.ok) {
-      return;
+      return false;
     }
 
     writePlanCache({
@@ -270,6 +276,7 @@ export function ProgramManager() {
       workouts: loadedWorkouts.value.workouts
     });
     setStatus("ready");
+    return true;
   }
 
   async function loadRecommendations(targetUserId: string) {
@@ -638,11 +645,29 @@ export function ProgramManager() {
       supabase,
       userId
     });
+    const reloaded = await loadCurrentProgram({ requireActiveProgram: true, showLoading: false });
     confirmationInFlight.current = false;
+
+    if (!reloaded) {
+      setProgram(null);
+      setWorkouts([]);
+      setWorkoutExercises([]);
+      setRecommendations([]);
+      setRecommendationWeights({});
+      setStatus("error");
+      setMessage("新计划已生成，但无法加载最新日程。请刷新页面后再继续训练，当前显示的旧日程已不再有效。");
+      setRegenerationDialog((current) =>
+        reduceRegenerationDialog(current, {
+          type: "requestFailed",
+          message: "新计划已生成，但无法加载最新日程。请刷新页面后再继续训练。"
+        })
+      );
+      return;
+    }
+
     pendingReplacementPayload.current = null;
     setRegenerationDialog((current) => reduceRegenerationDialog(current, { type: "requestSucceeded" }));
     setMessage("新训练计划已生成。");
-    await loadCurrentProgram();
     requestAnimationFrame(() => firstScheduleItemRef.current?.focus());
   }
 
