@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Brain, CheckCircle2, Loader2, PlusCircle, XCircle } from "lucide-react";
+import { Brain, CheckCircle2, Dumbbell, Loader2, Moon, PlusCircle, XCircle } from "lucide-react";
 import type { RecommendationType } from "@/domain/fitness-coach";
 import { getNextWorkoutState } from "@/domain/next-workout";
+import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
 import { trackEvent } from "@/lib/analytics";
 import {
   clearProgramRegenerationCaches,
@@ -333,8 +334,8 @@ export function ProgramManager() {
       return { ok: false };
     }
 
-    const workoutIds = (workoutData ?? []).map((workout) => workout.id);
-    const workoutRows = (workoutData ?? []) as WorkoutRow[];
+    const workoutRows = ((workoutData ?? []) as WorkoutRow[]).sort((a, b) => a.schedule_index - b.schedule_index);
+    const workoutIds = workoutRows.map((workout) => workout.id);
     setWorkouts(workoutRows);
 
     if (workoutIds.length === 0) {
@@ -849,6 +850,7 @@ export function ProgramManager() {
         <section className="space-y-3">
           {workouts.map((workout, index) => {
             const isRestDay = workout.day_type === "rest";
+            const presentation = getScheduleItemPresentation({ dayType: workout.day_type, status: workout.status });
             const workoutMeta = isRestDay ? null : getWorkoutMeta(workout.name);
             const workoutState = getPlanWorkoutState(workout, workout.id === nextPlanWorkoutId);
 
@@ -868,15 +870,18 @@ export function ProgramManager() {
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm text-muted">
-                    {isRestDay ? `休息/恢复日 · 建议 ${workout.scheduled_date}` : `第 ${(workout.sequence_index ?? 0) + 1} 节 · 建议 ${workout.scheduled_date}`}
+                    <span className="inline-flex items-center gap-1">
+                      {presentation.icon === "moon" ? <Moon size={14} /> : <Dumbbell size={14} />}
+                      {isRestDay ? `恢复安排 · ${workout.scheduled_date}` : `第 ${(workout.sequence_index ?? 0) + 1} 节 · 建议 ${workout.scheduled_date}`}
+                    </span>
                   </p>
-                  <h3 className="font-semibold">{isRestDay ? "休息/恢复日" : workout.name}</h3>
+                  <h3 className="font-semibold">{isRestDay ? presentation.title : workout.name}</h3>
                   {workoutMeta ? <p className="mt-1 text-sm text-muted">{workoutMeta.focus}</p> : null}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
                   <span
                     className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                      workoutState.isNext ? "bg-action text-white" : "bg-action/10 text-action"
+                      workoutState.isNext ? "bg-action text-white" : isRestDay ? "bg-slate-100 text-slate-500" : "bg-action/10 text-action"
                     }`}
                   >
                     {workoutState.label}

@@ -9,6 +9,7 @@ import { clearExerciseCatalogVerificationState } from "@/lib/exercise-catalog-cl
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type WorkoutRow = {
+  day_type: "training" | "rest";
   id: string;
   scheduled_date: string;
   name: string;
@@ -127,7 +128,7 @@ export function SettingsPanel() {
       const { data: workoutData, error: workoutError } = await withTimeout(
         supabase
           .from("workouts")
-          .select("id,scheduled_date,name,status")
+          .select("id,scheduled_date,name,status,day_type")
           .eq("user_id", user.id)
           .eq("status", "completed")
           .order("scheduled_date", { ascending: true }),
@@ -521,6 +522,7 @@ function buildTrainingCsv({
     "workout_day",
     "workout_name",
     "workout_status",
+    "day_type",
     "exercise_name",
     "exercise_slug",
     "exercise_order",
@@ -533,8 +535,8 @@ function buildTrainingCsv({
     "completed"
   ];
 
-  const rows = setLogs
-    .map((log) => {
+  const rows = [
+    ...setLogs.map((log) => {
       const exercise = exerciseById.get(log.workout_exercise_id);
       const workout = exercise ? workoutById.get(exercise.workout_id) : null;
       const workoutMeta = getWorkoutNameParts(workout?.name ?? "");
@@ -547,6 +549,7 @@ function buildTrainingCsv({
           workoutMeta.day,
           workout?.name ?? "",
           workout?.status ?? "",
+          workout?.day_type ?? "",
           exercise?.exercises?.name ?? "",
           exercise?.exercises?.slug ?? "",
           exercise?.order_index ?? "",
@@ -561,7 +564,26 @@ function buildTrainingCsv({
         setIndex: Number(log.set_index),
         workoutDate: workout?.scheduled_date ?? ""
       };
+    }),
+    ...workouts.filter((workout) => workout.day_type === "rest").map((workout) => {
+      const workoutMeta = getWorkoutNameParts(workout.name);
+
+      return {
+        exerciseOrder: 0,
+        row: [
+          workout.scheduled_date,
+          workoutMeta.week,
+          workoutMeta.day,
+          workout.name,
+          workout.status,
+          workout.day_type,
+          "", "", "", "", "", "", "", "", "", ""
+        ],
+        setIndex: 0,
+        workoutDate: workout.scheduled_date
+      };
     })
+  ]
     .sort((a, b) => {
       const dateOrder = a.workoutDate.localeCompare(b.workoutDate);
       if (dateOrder !== 0) return dateOrder;
