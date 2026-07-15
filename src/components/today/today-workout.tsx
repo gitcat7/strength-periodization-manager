@@ -41,6 +41,7 @@ import {
   type SubstitutionOutcome,
   type ExerciseSubstitutionScope
 } from "./exercise-substitution-dialog-state";
+import { shouldRetryWithBaseExerciseSchema } from "./today-workout-schema-fallback";
 
 type WorkoutRow = {
   id: string;
@@ -67,6 +68,30 @@ type WorkoutExerciseRow = {
     training_direction: string | null;
   } | null;
 };
+
+const workoutExerciseSelect =
+  "id,exercise_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug,default_increment,catalog_external_id,training_direction,movement_pattern,substitution_enabled)";
+const baseWorkoutExerciseSelect =
+  "id,exercise_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug,default_increment)";
+
+function normalizeWorkoutExerciseRows(rows: unknown[], hasCatalogBridge: boolean): WorkoutExerciseRow[] {
+  return (rows as Array<Omit<WorkoutExerciseRow, "exercises"> & { exercises: Partial<WorkoutExerciseRow["exercises"]> | null }>).map(
+    (row) => ({
+      ...row,
+      exercises: row.exercises
+        ? {
+            catalog_external_id: hasCatalogBridge ? row.exercises.catalog_external_id ?? null : null,
+            default_increment: row.exercises.default_increment ?? 2.5,
+            movement_pattern: hasCatalogBridge ? row.exercises.movement_pattern ?? null : null,
+            name: row.exercises.name ?? "动作",
+            slug: row.exercises.slug ?? "",
+            substitution_enabled: hasCatalogBridge ? row.exercises.substitution_enabled ?? false : false,
+            training_direction: hasCatalogBridge ? row.exercises.training_direction ?? null : null
+          }
+        : null
+    })
+  );
+}
 
 type CatalogExerciseRow = {
   id: string;
@@ -370,24 +395,38 @@ export function TodayWorkout() {
           return;
         }
 
-        const { data: exerciseData, error: exerciseError } = await withTimeout(
+        const catalogExerciseResult = await withTimeout(
           supabase
             .from("workout_exercises")
-            .select(
-              "id,exercise_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug,default_increment,catalog_external_id,training_direction,movement_pattern,substitution_enabled)"
-            )
+            .select(workoutExerciseSelect)
             .eq("workout_id", workoutData.id)
             .order("order_index", { ascending: true }),
           "训练动作读取超时，请刷新页面后重试。"
         );
+        let exerciseData: unknown = catalogExerciseResult.data;
+        let exerciseError: { code?: string | null; message?: string | null } | null = catalogExerciseResult.error;
+
+        const hasCatalogBridge = !shouldRetryWithBaseExerciseSchema(exerciseError);
+        if (!hasCatalogBridge) {
+          const fallback = await withTimeout(
+            supabase
+              .from("workout_exercises")
+              .select(baseWorkoutExerciseSelect)
+              .eq("workout_id", workoutData.id)
+              .order("order_index", { ascending: true }),
+            "训练动作读取超时，请刷新页面后重试。"
+          );
+          exerciseData = fallback.data;
+          exerciseError = fallback.error;
+        }
 
         if (exerciseError) {
           setStatus("error");
-          setMessage(exerciseError.message);
+          setMessage(exerciseError.message ?? "训练动作读取失败，请刷新页面后重试。");
           return;
         }
 
-        const exerciseRows = (exerciseData ?? []) as unknown as WorkoutExerciseRow[];
+        const exerciseRows = normalizeWorkoutExerciseRows(Array.isArray(exerciseData) ? exerciseData : [], hasCatalogBridge);
         setWorkout(workoutData as WorkoutRow);
         setExercises(exerciseRows);
 
