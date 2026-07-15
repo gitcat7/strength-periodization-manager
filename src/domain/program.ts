@@ -38,11 +38,84 @@ export type PlannedWorkoutExercise = {
 };
 
 export type PlannedWorkout = {
+  dayType: "training";
+  exercises: PlannedWorkoutExercise[];
   name: string;
   scheduledDate: string;
+  scheduleIndex: number;
   sequenceIndex: number;
-  exercises: PlannedWorkoutExercise[];
 };
+
+export type PlannedRestDay = {
+  dayType: "rest";
+  exercises: [];
+  name: "休息/恢复日";
+  scheduledDate: string;
+  scheduleIndex: number;
+  sequenceIndex: null;
+};
+
+export type PlannedScheduleItem = PlannedWorkout | PlannedRestDay;
+
+type PlannedTrainingWorkout = Omit<PlannedWorkout, "dayType" | "scheduleIndex">;
+
+export function buildSchedulePreview(items: PlannedScheduleItem[]): {
+  endDate: string;
+  restDays: number;
+  trainingDays: number;
+} {
+  return items.reduce(
+    (preview, item) => ({
+      endDate: item.scheduledDate,
+      restDays: preview.restDays + (item.dayType === "rest" ? 1 : 0),
+      trainingDays: preview.trainingDays + (item.dayType === "training" ? 1 : 0)
+    }),
+    { endDate: "", restDays: 0, trainingDays: 0 }
+  );
+}
+
+function expandScheduleItems(
+  trainingWorkouts: PlannedTrainingWorkout[],
+  schedule: ScheduleConfig
+): PlannedScheduleItem[] {
+  if (schedule.mode === "flexible") {
+    return trainingWorkouts.map((workout, scheduleIndex) => ({
+      ...workout,
+      dayType: "training",
+      scheduleIndex
+    }));
+  }
+
+  const workoutsByDate = new Map(trainingWorkouts.map((workout) => [workout.scheduledDate, workout]));
+  const firstWorkout = trainingWorkouts[0];
+  const lastWorkout = trainingWorkouts.at(-1);
+  if (!firstWorkout || !lastWorkout) return [];
+
+  const cursor = new Date(`${firstWorkout.scheduledDate}T00:00:00`);
+  const lastDate = lastWorkout.scheduledDate;
+  const items: PlannedScheduleItem[] = [];
+
+  while (formatDate(cursor) <= lastDate) {
+    const scheduledDate = formatDate(cursor);
+    const workout = workoutsByDate.get(scheduledDate);
+
+    items.push(
+      workout
+        ? { ...workout, dayType: "training", scheduleIndex: items.length }
+        : {
+            dayType: "rest",
+            exercises: [],
+            name: "休息/恢复日",
+            scheduledDate,
+            scheduleIndex: items.length,
+            sequenceIndex: null
+          }
+    );
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return items;
+}
 
 type TemplateExercise = {
   slug: string;
@@ -194,7 +267,7 @@ export function buildFourWeekProgram({
     template.length * 4
   );
 
-  return workoutDates.map((date, index) => {
+  const trainingWorkouts: PlannedTrainingWorkout[] = workoutDates.map((date, index) => {
     const weekIndex = Math.floor(index / template.length);
     const templateWorkout = template[index % template.length];
     const bump = weekIntensityBumps[weekIndex] ?? 0;
@@ -219,6 +292,11 @@ export function buildFourWeekProgram({
       })
     };
   });
+
+  return expandScheduleItems(
+    trainingWorkouts,
+    schedule ?? { mode: "fixed_weekdays", weekdays: availableWeekdays ?? [1, 3, 5] }
+  );
 }
 
 export function getTemplateType(trainingDaysPerWeek: number): TemplateType {
