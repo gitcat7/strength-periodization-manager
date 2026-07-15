@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  clearTodayAndPlanCaches,
   clearProgramRegenerationCaches,
   clearWorkoutDrafts,
   clearWorkoutDraftsByExerciseIds
@@ -122,6 +123,30 @@ describe("clearProgramRegenerationCaches", () => {
     expect(sessionStorage.getItem("strength-training-cache:plan")).toBeNull();
     expect(sessionStorage.getItem("strength-training-draft:workout-a")).toBeNull();
     expect(localStorage.getItem("strength-training-rest-timer")).toBe("{}");
+  });
+});
+
+describe("clearTodayAndPlanCaches", () => {
+  it("clears only today and plan caches in local and session storage", () => {
+    const localStorage = createMockStorage();
+    const sessionStorage = createMockStorage();
+    vi.stubGlobal("window", { localStorage, sessionStorage });
+
+    for (const storage of [localStorage, sessionStorage]) {
+      storage.setItem("strength-training-cache:today", "{}");
+      storage.setItem("strength-training-cache:plan", "{}");
+      storage.setItem("strength-training-cache:progress", "{}");
+      storage.setItem("strength-training-draft:workout-a", "{}");
+    }
+
+    clearTodayAndPlanCaches();
+
+    for (const storage of [localStorage, sessionStorage]) {
+      expect(storage.getItem("strength-training-cache:today")).toBeNull();
+      expect(storage.getItem("strength-training-cache:plan")).toBeNull();
+      expect(storage.getItem("strength-training-cache:progress")).toBe("{}");
+      expect(storage.getItem("strength-training-draft:workout-a")).toBe("{}");
+    }
   });
 });
 

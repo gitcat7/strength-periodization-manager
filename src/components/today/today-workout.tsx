@@ -26,7 +26,14 @@ import {
 } from "@/domain/fitness-coach";
 import { isExerciseSubstitutionEligible } from "@/domain/exercise-substitution";
 import { trackEvent } from "@/lib/analytics";
-import { clearTrainingDataCaches, clearWorkoutDrafts, clearWorkoutDraftsByExerciseIds, readClientCache, writeClientCache } from "@/lib/client-cache";
+import {
+  clearTodayAndPlanCaches,
+  clearTrainingDataCaches,
+  clearWorkoutDrafts,
+  clearWorkoutDraftsByExerciseIds,
+  readClientCache,
+  writeClientCache
+} from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { formatPrescription, getExerciseNote, getWorkoutMeta } from "@/domain/training-format";
 import { ExerciseDetailLauncher } from "@/components/exercises/exercise-detail-launcher";
@@ -42,6 +49,13 @@ import {
   type ExerciseSubstitutionScope
 } from "./exercise-substitution-dialog-state";
 import { shouldRetryWithBaseExerciseSchema } from "./today-workout-schema-fallback";
+import { RestDayCard } from "./rest-day-card";
+import {
+  canCompleteRestDay,
+  getTodayScheduleState,
+  type RestScheduleItem,
+  type TrainingScheduleItem
+} from "./rest-day-state";
 
 type WorkoutRow = {
   id: string;
@@ -131,6 +145,8 @@ type TodayCache = {
   coachRecommendations: Array<ExerciseCoachRecommendation & { exerciseName: string }>;
   exercises: WorkoutExerciseRow[];
   lastCompletedWorkout: LastCompletedWorkoutRow | null;
+  nextTraining: TrainingScheduleItem | null;
+  restItem: RestScheduleItem | null;
   setLogs: Record<string, SetLogRow[]>;
   userId: string;
   workout: WorkoutRow | null;
@@ -252,6 +268,9 @@ function ExerciseSubstitutionButton({
 export function TodayWorkout() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
+  const [restItem, setRestItem] = useState<RestScheduleItem | null>(null);
+  const [nextTraining, setNextTraining] = useState<TrainingScheduleItem | null>(null);
+  const [restSaveStatus, setRestSaveStatus] = useState<"idle" | "saving" | "error">("idle");
   const [workout, setWorkout] = useState<WorkoutRow | null>(null);
   const [exercises, setExercises] = useState<WorkoutExerciseRow[]>([]);
   const [setLogs, setSetLogs] = useState<Record<string, SetLogRow[]>>({});
@@ -350,6 +369,8 @@ export function TodayWorkout() {
             coachRecommendations: [],
             exercises: [],
             lastCompletedWorkout: null,
+            nextTraining: null,
+            restItem: null,
             setLogs: {},
             userId: user.id,
             workout: null
@@ -358,33 +379,90 @@ export function TodayWorkout() {
           return;
         }
 
-        const { data: workoutData, error: workoutError } = await withTimeout(
+        const today = formatDate(new Date());
+        const { data: restData, error: restError } = await withTimeout(
           supabase
             .from("workouts")
-            .select("id,scheduled_date,sequence_index,name,status")
+            .select("id,scheduled_date,status,day_type")
             .eq("program_id", program.id)
+            .eq("day_type", "rest")
+            .eq("scheduled_date", today)
+            .in("status", ["scheduled", "draft"])
+            .limit(1)
+            .maybeSingle(),
+          "今日恢复日读取超时，请刷新页面后重试。"
+        );
+
+        if (restError) {
+          setStatus("error");
+          setMessage("今日恢复读取失败，请刷新页面后重试。");
+          return;
+        }
+
+        const { data: trainingData, error: trainingError } = await withTimeout(
+          supabase
+            .from("workouts")
+            .select("id,scheduled_date,sequence_index,name,status,day_type")
+            .eq("program_id", program.id)
+            .eq("day_type", "training")
             .in("status", ["scheduled", "draft"])
             .order("sequence_index", { ascending: true })
             .limit(1)
             .maybeSingle(),
-          "今日训练读取超时，请刷新页面后重试。"
+          "下一节训练读取超时，请刷新页面后重试。"
         );
 
-        if (workoutError) {
+        if (trainingError) {
           setStatus("error");
-          setMessage(workoutError.message);
+          setMessage("下一节训练读取失败，请刷新页面后重试。");
           return;
         }
 
-        if (!workoutData) {
+        const scheduleState = getTodayScheduleState({
+          now: today,
+          restItems: restData
+            ? [{ dayType: restData.day_type, id: restData.id, scheduledDate: restData.scheduled_date, status: restData.status }]
+            : [],
+          trainingItems: trainingData
+            ? [{ dayType: trainingData.day_type, id: trainingData.id, name: trainingData.name, scheduledDate: trainingData.scheduled_date, sequenceIndex: trainingData.sequence_index, status: trainingData.status }]
+            : []
+        });
+
+        if (scheduleState.kind === "rest") {
+          setRestItem(scheduleState.restItem);
+          setNextTraining(scheduleState.nextTraining);
+          setWorkout(null);
+          setExercises([]);
+          setSetLogs({});
+          setCoachRecommendations([]);
+          setLastCompletedWorkout(null);
           writeClientCache<TodayCache>(todayCacheKey, {
             coachRecommendations: [],
             exercises: [],
             lastCompletedWorkout: null,
+            nextTraining: scheduleState.nextTraining,
+            restItem: scheduleState.restItem,
             setLogs: {},
             userId: user.id,
             workout: null
           });
+          setStatus("ready");
+          return;
+        }
+
+        if (scheduleState.kind === "empty") {
+          writeClientCache<TodayCache>(todayCacheKey, {
+            coachRecommendations: [],
+            exercises: [],
+            lastCompletedWorkout: null,
+            nextTraining: null,
+            restItem: null,
+            setLogs: {},
+            userId: user.id,
+            workout: null
+          });
+          setRestItem(null);
+          setNextTraining(null);
           setWorkout(null);
           setExercises([]);
           setSetLogs({});
@@ -394,6 +472,10 @@ export function TodayWorkout() {
           setMessage("当前计划已经没有待训练日。可以查看历史复盘，或去计划页生成下一轮周期。");
           return;
         }
+
+        const workoutData = trainingData as WorkoutRow;
+        setRestItem(null);
+        setNextTraining(scheduleState.workout);
 
         const catalogExerciseResult = await withTimeout(
           supabase
@@ -442,6 +524,8 @@ export function TodayWorkout() {
           coachRecommendations: [],
           exercises: exerciseRows,
           lastCompletedWorkout: lastWorkout,
+          nextTraining: scheduleState.workout,
+          restItem: null,
           setLogs: groupedLogs,
           userId: user.id,
           workout: workoutData as WorkoutRow
@@ -456,11 +540,21 @@ export function TodayWorkout() {
     const cached = readClientCache<TodayCache>(todayCacheKey);
     if (cached) {
       setUserId(cached.userId);
-      setWorkout(cached.workout);
-      setExercises(cached.exercises);
-      setSetLogs(cached.setLogs);
-      setLastCompletedWorkout(cached.lastCompletedWorkout);
-      setCoachRecommendations(cached.coachRecommendations);
+      setRestItem(cached.restItem ?? null);
+      setNextTraining(cached.nextTraining ?? null);
+      if (cached.restItem) {
+        setWorkout(null);
+        setExercises([]);
+        setSetLogs({});
+        setLastCompletedWorkout(null);
+        setCoachRecommendations([]);
+      } else {
+        setWorkout(cached.workout);
+        setExercises(cached.exercises);
+        setSetLogs(cached.setLogs);
+        setLastCompletedWorkout(cached.lastCompletedWorkout);
+        setCoachRecommendations(cached.coachRecommendations);
+      }
       setStatus("ready");
     }
 
@@ -958,6 +1052,47 @@ export function TodayWorkout() {
     setReloadTrigger((current) => current + 1);
   }
 
+  async function completeRestDay() {
+    if (!restItem || !userId || !canCompleteRestDay(restItem)) return;
+
+    setRestSaveStatus("saving");
+    setMessage("");
+
+    try {
+      const supabase = createBrowserSupabaseClient();
+      const completedAt = new Date().toISOString();
+      const { data, error } = await supabase
+        .from("workouts")
+        .update({ completed_at: completedAt, status: "completed", updated_at: completedAt })
+        .eq("id", restItem.id)
+        .eq("user_id", userId)
+        .eq("day_type", "rest")
+        .in("status", ["scheduled", "draft"])
+        .select("id")
+        .maybeSingle();
+
+      if (error || !data) {
+        setRestSaveStatus("error");
+        setMessage("恢复日状态已变化，请刷新后再试。");
+        return;
+      }
+
+      clearTodayAndPlanCaches();
+      await trackEvent({
+        eventName: "rest_day_completed",
+        properties: { rest_day_id: restItem.id },
+        supabase,
+        userId
+      });
+      setRestSaveStatus("idle");
+      setMessage("恢复日已完成。");
+      setReloadTrigger((current) => current + 1);
+    } catch {
+      setRestSaveStatus("error");
+      setMessage("完成休息失败，请检查网络后重试。");
+    }
+  }
+
   if (status === "loading") {
     return (
       <div className="flex items-center gap-3 rounded-xl border border-line p-4 text-muted">
@@ -969,6 +1104,24 @@ export function TodayWorkout() {
 
   if (status === "error") {
     return <p className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600">{message}</p>;
+  }
+
+  if (restItem) {
+    return (
+      <div>
+        <RestDayCard
+          nextTraining={nextTraining}
+          onComplete={completeRestDay}
+          restItem={restItem}
+          saving={restSaveStatus === "saving"}
+        />
+        {message ? (
+          <p className={`mt-3 rounded-lg border px-3 py-2 text-sm ${restSaveStatus === "error" ? "border-red-200 text-red-600" : "border-line text-muted"}`}>
+            {message}
+          </p>
+        ) : null}
+      </div>
+    );
   }
 
   if (!workout) {

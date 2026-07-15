@@ -14,7 +14,8 @@ export type AnalyticsEventName =
   | "pr_goal_cancelled"
   | "csv_exported"
   | "feedback_submitted"
-  | "exercise_substituted";
+  | "exercise_substituted"
+  | "rest_day_completed";
 
 export async function trackEvent({
   eventName,

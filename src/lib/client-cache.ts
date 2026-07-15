@@ -70,6 +70,19 @@ export function clearTrainingDataCaches() {
   }
 }
 
+export function clearTodayAndPlanCaches() {
+  if (typeof window === "undefined") return;
+
+  try {
+    for (const storage of [window.localStorage, window.sessionStorage]) {
+      storage.removeItem(`${cachePrefix}today`);
+      storage.removeItem(`${cachePrefix}plan`);
+    }
+  } catch {
+    // Cache failures should never block the rest-day completion workflow.
+  }
+}
+
 const draftPrefix = "strength-training-draft:";
 
 export function clearProgramRegenerationCaches() {
