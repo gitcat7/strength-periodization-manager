@@ -1,6 +1,6 @@
 begin;
 
-select plan(18);
+select plan(22);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values
@@ -72,6 +72,17 @@ select throws_ok(
   'training days with prescriptions cannot become rest schedule items'
 );
 
+set constraints workouts_require_continuous_schedule_index immediate;
+select throws_ok(
+  $$update public.workouts
+      set program_id = '00000000-0000-0000-0000-000000002302',
+          user_id = '00000000-0000-0000-0000-000000002202'
+      where id = '00000000-0000-0000-0000-000000002403'$$,
+  '23514',
+  'moving a schedule item validates the prior program continuity'
+);
+set constraints workouts_require_continuous_schedule_index deferred;
+
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000002201', true);
 set local role authenticated;
 
@@ -82,6 +93,17 @@ select throws_ok(
 );
 reset role;
 select is((select status from public.programs where id = '00000000-0000-0000-0000-000000002301'), 'active', 'invalid replacement leaves the old active program active');
+
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000002201', true);
+set local role authenticated;
+select throws_ok(
+  $$select * from public.replace_active_program('{"name":"Mid-flight failure","template_type":"push_pull_squat","schedule_mode":"cadence","schedule_config":{},"start_date":"2026-07-15","end_date":"2026-08-15","schedule_items":[{"scheduled_date":"2026-07-15","schedule_index":0,"sequence_index":0,"day_type":"training","name":"First inserted training","exercises":[{"exercise_id":"00000000-0000-0000-0000-000000002101","order_index":1,"target_sets":3,"target_reps":8,"target_weight":20}]},{"scheduled_date":"2026-07-16","schedule_index":1,"sequence_index":0,"day_type":"training","name":"Duplicate sequence training","exercises":[{"exercise_id":"00000000-0000-0000-0000-000000002101","order_index":1,"target_sets":3,"target_reps":8,"target_weight":20}]}]}'::jsonb)$$,
+  '23505',
+  'replacement rolls back when a later schedule write fails'
+);
+reset role;
+select is((select status from public.programs where id = '00000000-0000-0000-0000-000000002301'), 'active', 'mid-flight failure leaves the old active program active');
+select is((select count(*) from public.programs where user_id = '00000000-0000-0000-0000-000000002201' and name = 'Mid-flight failure'), 0::bigint, 'mid-flight failure leaves no replacement program');
 
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000002202', true);
 set local role authenticated;

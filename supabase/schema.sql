@@ -653,20 +653,28 @@ security definer
 set search_path = public
 as $$
 declare
-  v_program_id uuid := coalesce(new.program_id, old.program_id);
+  v_program_id uuid;
   v_count integer;
   v_min integer;
   v_max integer;
 begin
-  if not exists (select 1 from public.programs where id = v_program_id) then
-    return null;
-  end if;
-  select count(*), min(schedule_index), max(schedule_index)
-  into v_count, v_min, v_max
-  from public.workouts where program_id = v_program_id;
-  if v_count > 0 and (v_min <> 0 or v_max <> v_count - 1) then
-    raise exception 'Workout schedule_index values must be continuous from zero' using errcode = '23514';
-  end if;
+  for v_program_id in
+    select distinct candidate_program_id
+    from unnest(array[
+      case when tg_op in ('UPDATE', 'DELETE') then old.program_id end,
+      case when tg_op in ('INSERT', 'UPDATE') then new.program_id end
+    ]) as candidate_programs(candidate_program_id)
+    where candidate_program_id is not null
+  loop
+    if exists (select 1 from public.programs where id = v_program_id) then
+      select count(*), min(schedule_index), max(schedule_index)
+      into v_count, v_min, v_max
+      from public.workouts where program_id = v_program_id;
+      if v_count > 0 and (v_min <> 0 or v_max <> v_count - 1) then
+        raise exception 'Workout schedule_index values must be continuous from zero' using errcode = '23514';
+      end if;
+    end if;
+  end loop;
   return null;
 end;
 $$;

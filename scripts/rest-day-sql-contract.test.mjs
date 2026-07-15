@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const migrationPath = fileURLToPath(
-  new URL("../supabase/migrations/20260715000000_rest_day_schedule_and_program_replacement.sql", import.meta.url)
+  new URL("../supabase/migrations/20260715110000_rest_day_schedule_and_program_replacement.sql", import.meta.url)
 );
 const schemaPath = fileURLToPath(new URL("../supabase/schema.sql", import.meta.url));
 
