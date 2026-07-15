@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Copy, Download, KeyRound, Loader2, LogOut, RefreshCcw, ShieldAlert, Trash2, UserRound } from "lucide-react";
+import { BookOpen, Copy, Download, KeyRound, Loader2, LogOut, RefreshCcw, ShieldAlert, Trash2, UserRound, Wrench } from "lucide-react";
 import { trackEvent } from "@/lib/analytics";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { clearExerciseCatalogVerificationState } from "@/lib/exercise-catalog-client";
@@ -309,29 +309,86 @@ export function SettingsPanel() {
             <UserRound size={20} />
           </span>
           <div>
-            <h2 className="font-semibold">账号与训练画像</h2>
+            <h2 className="font-semibold">账号</h2>
             <p className="text-sm text-muted">{email || "已登录用户"}</p>
           </div>
         </div>
-        <Link className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink" href="/onboarding">
-          修改训练画像
-        </Link>
+        <div className="space-y-3">
+          <Link className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink transition active:scale-[0.98]" href="/onboarding">
+            修改训练画像
+          </Link>
+          <Link className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-field px-4 font-semibold text-ink transition active:scale-[0.98]" href="/exercises">
+            <BookOpen size={18} />
+            打开动作库
+          </Link>
+        </div>
       </section>
 
       <section className="rounded-xl border border-line bg-white p-4">
         <div className="mb-4 flex items-center gap-3">
           <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
-            <BookOpen size={20} />
+            <Download size={20} />
           </span>
           <div>
-            <h2 className="font-semibold">动作库</h2>
-            <p className="text-sm text-muted">查看已审核的动作要点和器械信息。</p>
+            <h2 className="font-semibold">数据</h2>
+            <p className="text-sm text-muted">导出记录或清理本地缓存。</p>
           </div>
         </div>
-        <Link className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-field px-4 font-semibold text-ink" href="/exercises">
-          <BookOpen size={18} />
-          打开动作库
-        </Link>
+        <div className="space-y-3">
+          <button
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={status === "working"}
+            onClick={exportTrainingCsv}
+            type="button"
+          >
+            {status === "working" ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />}
+            导出训练记录 CSV
+          </button>
+          <button
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 font-semibold text-ink transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={status === "working"}
+            onClick={clearLocalCache}
+            type="button"
+          >
+            {status === "working" ? <Loader2 className="animate-spin" size={18} /> : <RefreshCcw size={18} />}
+            清理本地缓存
+          </button>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-line bg-white p-4">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
+            <Wrench size={20} />
+          </span>
+          <div>
+            <h2 className="font-semibold">体验</h2>
+            <p className="text-sm text-muted">反馈、隐私与退出。</p>
+          </div>
+        </div>
+        <div className="space-y-3">
+          <Link
+            className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink transition active:scale-[0.98]"
+            href="/privacy"
+          >
+            查看隐私与数据说明
+          </Link>
+          <Link
+            className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink transition active:scale-[0.98]"
+            href="/feedback"
+          >
+            提交问题反馈
+          </Link>
+          <button
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 font-semibold text-ink transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={status === "working"}
+            onClick={signOut}
+            type="button"
+          >
+            <LogOut size={18} />
+            退出登录
+          </button>
+        </div>
       </section>
 
       <section className="rounded-xl border border-line bg-white p-4">
@@ -356,7 +413,7 @@ export function SettingsPanel() {
             <p className="mb-2 text-xs font-semibold text-muted">新令牌（关闭页面后无法再次查看）</p>
             <code className="block break-all text-sm text-ink">{newAgentToken}</code>
             <button
-              className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-action bg-white px-3 font-semibold text-action"
+              className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-action bg-white px-3 font-semibold text-action transition active:scale-[0.98]"
               onClick={copyAgentToken}
               type="button"
             >
@@ -377,7 +434,7 @@ export function SettingsPanel() {
               </div>
               <button
                 aria-label="撤销 Agent 令牌"
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-line bg-white text-red-600 disabled:opacity-60"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-line bg-white text-red-600 transition active:scale-[0.97] disabled:opacity-60"
                 disabled={agentStatus === "working"}
                 onClick={() => revokeAgentToken(token.id)}
                 title="撤销令牌"
@@ -390,34 +447,13 @@ export function SettingsPanel() {
         </div>
 
         <button
-          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
           disabled={agentStatus === "working" || !userId}
           onClick={createAgentToken}
           type="button"
         >
           {agentStatus === "working" ? <Loader2 className="animate-spin" size={18} /> : <KeyRound size={18} />}
           生成新的 Agent 令牌
-        </button>
-      </section>
-
-      <section className="rounded-xl border border-line bg-white p-4">
-        <div className="mb-4 flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
-            <Download size={20} />
-          </span>
-          <div>
-            <h2 className="font-semibold">数据导出</h2>
-            <p className="text-sm text-muted">导出已完成训练的动作和每组记录，CSV 可用 Excel 打开。</p>
-          </div>
-        </div>
-        <button
-          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={status === "working"}
-          onClick={exportTrainingCsv}
-          type="button"
-        >
-          {status === "working" ? <Loader2 className="animate-spin" size={18} /> : <Download size={18} />}
-          导出训练记录 CSV
         </button>
       </section>
 
@@ -430,40 +466,6 @@ export function SettingsPanel() {
           本产品用于训练记录和计划管理，不构成医疗、康复或个性化诊断建议。如果你有伤病、疼痛或特殊健康状况，请咨询医生、物理治疗师或专业教练。进行大重量和 PR 测试前，请充分热身并保留安全余量。
         </p>
       </section>
-
-      <Link
-        className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-white px-4 font-semibold text-ink"
-        href="/privacy"
-      >
-        查看隐私与数据说明
-      </Link>
-
-      <Link
-        className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-white px-4 font-semibold text-ink"
-        href="/feedback"
-      >
-        提交问题反馈
-      </Link>
-
-      <button
-        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={status === "working"}
-        onClick={clearLocalCache}
-        type="button"
-      >
-        {status === "working" ? <Loader2 className="animate-spin" size={18} /> : <RefreshCcw size={18} />}
-        清理本地缓存
-      </button>
-
-      <button
-        className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={status === "working"}
-        onClick={signOut}
-        type="button"
-      >
-        <LogOut size={18} />
-        退出登录
-      </button>
     </div>
   );
 }

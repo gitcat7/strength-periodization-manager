@@ -249,13 +249,13 @@ export function ProgressDashboard() {
 
   return (
     <div className="space-y-5">
+      <ProgressInsightCard insight={progress.insight} />
+
       <section className="grid gap-3 sm:grid-cols-3">
         <Metric icon={<Activity size={16} />} label="完成训练" value={`${workouts.length} 次`} />
         <Metric icon={<BarChart3 size={16} />} label="总训练量" value={`${Math.round(progress.totalVolume).toLocaleString()} kg`} />
         <Metric icon={<TrendingUp size={16} />} label="完成率" value={`${Math.round(progress.completionRate * 100)}%`} />
       </section>
-
-      <ProgressInsightCard insight={progress.insight} />
 
       <section className="rounded-xl border border-line bg-white p-4">
         <div className="mb-4 flex items-center justify-between gap-3">
@@ -321,14 +321,15 @@ function ProgressInsightCard({ insight }: { insight: ProgressInsight }) {
       : insight.tone === "warning"
         ? "border-amber/30 bg-amber/10"
         : "border-line bg-white";
+  const iconTone = insight.tone === "warning" ? "text-amber" : "text-action";
 
   return (
     <section className={`rounded-xl border p-4 ${toneClassName}`}>
       <div className="flex items-start gap-3">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white text-action">
+        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white ${iconTone}`}>
           <TrendingUp size={18} />
         </span>
-        <div>
+        <div className="min-w-0 flex-1">
           <h2 className="font-semibold">{insight.title}</h2>
           <p className="mt-1 text-sm leading-6 text-muted">{insight.message}</p>
         </div>

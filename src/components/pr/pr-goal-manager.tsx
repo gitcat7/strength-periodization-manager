@@ -315,13 +315,18 @@ export function PrGoalManager() {
             return (
               <article className="space-y-4 rounded-xl border border-line bg-white p-4" key={goal.id}>
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm text-muted">当前 PR 目标</p>
-                    <h2 className="mt-1 text-2xl font-semibold">
-                      {goal.exercises?.name ?? "主项"} {Number(goal.target_weight)}kg
-                    </h2>
+                  <div className="flex items-center gap-3">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#c75c1a]/10 text-[#c75c1a]">
+                      <Target size={20} />
+                    </span>
+                    <div>
+                      <p className="text-sm text-muted">当前 PR 目标</p>
+                      <h2 className="mt-0.5 text-2xl font-semibold">
+                        {goal.exercises?.name ?? "主项"} {Number(goal.target_weight)}kg
+                      </h2>
+                    </div>
                   </div>
-                  <span className="rounded-full bg-action/10 px-3 py-1 text-sm font-semibold text-action">
+                  <span className="shrink-0 rounded-full bg-[#c75c1a]/10 px-3 py-1 text-sm font-semibold text-[#c75c1a]">
                     {activeGoalPlan.daysUntilTarget >= 0 ? `${activeGoalPlan.daysUntilTarget} 天` : "已过期"}
                   </span>
                 </div>
@@ -371,7 +376,7 @@ export function PrGoalManager() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <button
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-[#c75c1a] px-4 font-semibold text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={status === "saving"}
                     onClick={() => updateSingleGoalStatus(goal.id, "completed")}
                     type="button"
@@ -380,7 +385,7 @@ export function PrGoalManager() {
                     标记完成
                   </button>
                   <button
-                    className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line px-4 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line px-4 font-semibold text-ink transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={status === "saving"}
                     onClick={() => updateSingleGoalStatus(goal.id, "cancelled")}
                     type="button"
@@ -397,7 +402,7 @@ export function PrGoalManager() {
 
       <form className="space-y-4 rounded-xl border border-line bg-white p-4" onSubmit={saveGoal}>
         <div className="flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
+          <span className="grid h-10 w-10 place-items-center rounded-full bg-[#c75c1a]/10 text-[#c75c1a]">
             <Target size={20} />
           </span>
           <div>

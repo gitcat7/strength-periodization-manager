@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Brain, CalendarDays, Loader2, Save, TrendingUp } from "lucide-react";
+import { Brain, CalendarDays, CheckCircle2, Loader2, Moon, Save, TrendingUp } from "lucide-react";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import type { RecommendationType } from "@/domain/fitness-coach";
@@ -365,18 +365,26 @@ export function TrainingHistory() {
           const workoutRecommendations = recommendationsByWorkoutId[workout.id] ?? [];
           const workoutLogs = exercises.flatMap((exercise) => setLogsByExerciseId[exercise.id] ?? []);
           const review = buildWorkoutReview(workoutLogs);
+          const isRecovery = workout.name.includes("恢复") || workout.name.includes("休息") || workout.name.includes("有氧");
 
           return (
-            <article className="rounded-xl border border-line bg-white p-4" key={workout.id}>
+            <article className={`rounded-xl border p-4 ${isRecovery ? "border-line bg-field/60" : "border-line bg-white"}`} key={workout.id}>
               <div className="mb-4 flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm text-muted">{workout.scheduled_date}</p>
-                  <h2 className="font-semibold">{workout.name}</h2>
-                  <p className="mt-1 text-sm text-muted">
-                    {review.completedSets} 组 · {Math.round(review.volume).toLocaleString()} kg
-                  </p>
+                <div className="flex items-start gap-3">
+                  <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${isRecovery ? "bg-[#4a7a9a]/10 text-[#4a7a9a]" : "bg-action/10 text-action"}`}>
+                    {isRecovery ? <Moon size={20} /> : <CheckCircle2 size={20} />}
+                  </span>
+                  <div>
+                    <p className="text-sm text-muted">{workout.scheduled_date}</p>
+                    <h2 className="font-semibold">{workout.name}</h2>
+                    <p className="mt-1 text-sm text-muted">
+                      {review.completedSets} 组 · {Math.round(review.volume).toLocaleString()} kg
+                    </p>
+                  </div>
                 </div>
-                <span className="rounded-full bg-action/10 px-3 py-1 text-xs font-semibold text-action">已完成</span>
+                <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${isRecovery ? "bg-[#4a7a9a]/10 text-[#4a7a9a]" : "bg-action/10 text-action"}`}>
+                  {isRecovery ? "已休息" : "已完成"}
+                </span>
               </div>
 
               <div className={`mb-4 rounded-lg border px-3 py-3 ${getWorkoutReviewClassName(review.tone)}`}>
@@ -459,7 +467,7 @@ export function TrainingHistory() {
               </div>
 
               <button
-                className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-action bg-white px-4 text-sm font-semibold text-action disabled:cursor-not-allowed disabled:opacity-60"
+                className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-action bg-white px-4 text-sm font-semibold text-action transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={saveStatus === "saving"}
                 onClick={() => saveWorkoutEdits(workout.id)}
                 type="button"

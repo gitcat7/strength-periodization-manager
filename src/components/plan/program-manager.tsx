@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Brain, CheckCircle2, Loader2, PlusCircle, XCircle } from "lucide-react";
+import { Brain, CheckCircle2, Dumbbell, Loader2, Moon, PlusCircle, XCircle } from "lucide-react";
 import type { RecommendationType } from "@/domain/fitness-coach";
 import { getNextWorkoutState } from "@/domain/next-workout";
 import { trackEvent } from "@/lib/analytics";
@@ -732,7 +732,7 @@ export function ProgramManager() {
             </div>
           </div>
           <button
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
             disabled={status === "generating"}
             onClick={generateProgram}
             type="button"
@@ -740,7 +740,7 @@ export function ProgramManager() {
             {status === "generating" ? <Loader2 className="animate-spin" size={18} /> : <PlusCircle size={18} />}
             生成 4 周训练计划
           </button>
-          <Link className="mt-3 inline-flex text-sm font-semibold text-action" href="/onboarding">
+          <Link className="mt-3 inline-flex text-sm font-semibold text-action transition active:scale-[0.98]" href="/onboarding">
             返回修改训练画像
           </Link>
         </section>
@@ -758,11 +758,11 @@ export function ProgramManager() {
             </div>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Link className="inline-flex rounded-lg bg-action px-4 py-2 font-semibold text-white" href="/today">
+            <Link className="inline-flex rounded-lg bg-action px-4 py-2 font-semibold text-white transition active:scale-[0.98]" href="/today">
               查看今日训练
             </Link>
             <button
-              className="inline-flex rounded-lg border border-line px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex rounded-lg border border-line px-4 py-2 font-semibold text-ink transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
               disabled={status === "generating"}
               onClick={generateProgram}
               type="button"
@@ -853,6 +853,7 @@ export function ProgramManager() {
           {workouts.map((workout) => {
             const workoutMeta = getWorkoutMeta(workout.name);
             const workoutState = getPlanWorkoutState(workout, workout.id === nextPlanWorkoutId);
+            const isRecovery = workout.name.includes("恢复") || workout.name.includes("休息") || workout.name.includes("有氧");
 
             return (
             <article
@@ -861,20 +862,35 @@ export function ProgramManager() {
                   ? "border-action bg-action/5"
                   : workout.status === "completed"
                     ? "border-line bg-field"
-                    : "border-line bg-white"
+                    : isRecovery
+                      ? "border-[#4a7a9a]/20 bg-[#4a7a9a]/5"
+                      : "border-line bg-white"
               }`}
               key={workout.id}
             >
               <div className="mb-3 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm text-muted">第 {workout.sequence_index + 1} 节 · 建议 {workout.scheduled_date}</p>
-                  <h3 className="font-semibold">{workout.name}</h3>
-                  <p className="mt-1 text-sm text-muted">{workoutMeta.focus}</p>
+                <div className="flex items-start gap-3">
+                  <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${
+                    workoutState.isNext
+                      ? "bg-action text-white"
+                      : workout.status === "completed"
+                        ? "bg-field text-muted"
+                        : isRecovery
+                          ? "bg-[#4a7a9a]/10 text-[#4a7a9a]"
+                          : "bg-action/10 text-action"
+                  }`}>
+                    {isRecovery ? <Moon size={18} /> : <Dumbbell size={18} />}
+                  </span>
+                  <div>
+                    <p className="text-sm text-muted">第 {workout.sequence_index + 1} 节 · 建议 {workout.scheduled_date}</p>
+                    <h3 className="font-semibold">{workout.name}</h3>
+                    <p className="mt-1 text-sm text-muted">{workoutMeta.focus}</p>
+                  </div>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
                   <span
                     className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                      workoutState.isNext ? "bg-action text-white" : "bg-action/10 text-action"
+                      workoutState.isNext ? "bg-action text-white" : isRecovery ? "bg-[#4a7a9a]/10 text-[#4a7a9a]" : "bg-action/10 text-action"
                     }`}
                   >
                     {workoutState.label}
