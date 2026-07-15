@@ -17,10 +17,12 @@ import {
 import { getDaysUntilTarget } from "@/domain/pr-planner";
 import { getNextWorkoutState } from "@/domain/next-workout";
 import { formatPrescription, getWorkoutMeta } from "@/domain/training-format";
+import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
 import { readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type WorkoutRow = {
+  day_type: "training" | "rest";
   id: string;
   scheduled_date: string;
   sequence_index: number;
@@ -112,7 +114,14 @@ export function HomeDashboard() {
   }, []);
 
   const summary = useMemo(() => {
-    const completedLogs = setLogs.filter((log) => log.completed);
+    const trainingWorkouts = filterTrainingMetricWorkouts(completedWorkouts);
+    const trainingWorkoutIds = new Set(trainingWorkouts.map((workout) => workout.id));
+    const trainingExerciseIds = new Set(
+      completedExercises
+        .filter((exercise) => trainingWorkoutIds.has(exercise.workout_id))
+        .map((exercise) => exercise.id)
+    );
+    const completedLogs = setLogs.filter((log) => log.completed && trainingExerciseIds.has(log.workout_exercise_id));
     const volume = completedLogs.reduce(
       (sum, log) => sum + Number(log.actual_weight ?? 0) * Number(log.actual_reps ?? 0),
       0
@@ -125,9 +134,9 @@ export function HomeDashboard() {
       completedSets: completedLogs.length,
       nearestPr,
       volume,
-      workouts: completedWorkouts.length
+      workouts: trainingWorkouts.length
     };
-  }, [completedWorkouts.length, prGoals, setLogs]);
+  }, [completedExercises, completedWorkouts, prGoals, setLogs]);
 
   async function loadDashboard() {
     if (!readClientCache<HomeDashboardCache>(homeDashboardCacheKey)) {
@@ -154,8 +163,9 @@ export function HomeDashboard() {
         withTimeout(
           supabase
             .from("workouts")
-            .select("id,scheduled_date,sequence_index,name,status")
+            .select("id,scheduled_date,sequence_index,name,status,day_type")
             .eq("user_id", user.id)
+            .eq("day_type", "training")
             .in("status", ["scheduled", "draft"])
             .order("sequence_index", { ascending: true })
             .limit(1)
@@ -165,9 +175,10 @@ export function HomeDashboard() {
         withTimeout(
           supabase
             .from("workouts")
-            .select("id,scheduled_date,name,status")
+            .select("id,scheduled_date,name,status,day_type")
             .eq("user_id", user.id)
             .eq("status", "completed")
+            .eq("day_type", "training")
             .order("scheduled_date", { ascending: false })
             .limit(12),
           "训练历史读取超时，请刷新页面后重试。"

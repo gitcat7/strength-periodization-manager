@@ -28,7 +28,8 @@ describe("sequence scheduling SQL contract", () => {
       expect(sql).toMatch(/unique\s*\(\s*program_id\s*,\s*sequence_index\s*\)/i);
     }
 
-    expect(schema).toMatch(/sequence_index\s+integer\s+not null/i);
+    expect(schema).toMatch(/sequence_index\s+integer\s*,/i);
+    expect(schema).toMatch(/day_type\s*=\s*'training'\s+and\s+sequence_index\s+is\s+not\s+null.*day_type\s*=\s*'rest'\s+and\s+sequence_index\s+is\s+null/is);
     expect(migration).toMatch(/add column if not exists sequence_index integer/i);
     expect(migration).toMatch(/alter column sequence_index set not null/i);
     expect(migration).toMatch(/row_number\(\)\s+over\s*\(\s*partition by\s+program_id\s+order by\s+scheduled_date\s*,\s*created_at\s*,\s*id\s*\)\s*-\s*1/i);

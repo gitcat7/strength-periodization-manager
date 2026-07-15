@@ -4,10 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Activity, BarChart3, CalendarDays, Loader2, TrendingUp } from "lucide-react";
 import { estimateOneRepMax } from "@/domain/strength";
+import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
 import { readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type WorkoutRow = {
+  day_type: "training" | "rest";
   id: string;
   scheduled_date: string;
   name: string;
@@ -94,9 +96,10 @@ export function ProgressDashboard() {
         const { data: workoutData, error: workoutError } = await withTimeout(
           supabase
             .from("workouts")
-            .select("id,scheduled_date,name")
+            .select("id,scheduled_date,name,day_type")
             .eq("user_id", user.id)
             .eq("status", "completed")
+            .eq("day_type", "training")
             .order("scheduled_date", { ascending: true })
             .limit(60),
           "训练数据读取超时，请刷新页面后重试。"
@@ -193,16 +196,19 @@ export function ProgressDashboard() {
   }, []);
 
   const progress = useMemo(() => {
-    const workoutById = new Map(workouts.map((workout) => [workout.id, workout]));
-    const exerciseById = new Map(workoutExercises.map((exercise) => [exercise.id, exercise]));
-    const completedLogs = setLogs.filter((log) => log.completed);
+    const trainingWorkouts = filterTrainingMetricWorkouts(workouts.map((workout) => ({ ...workout, dayType: workout.day_type })));
+    const trainingWorkoutIds = new Set(trainingWorkouts.map((workout) => workout.id));
+    const trainingExercises = workoutExercises.filter((exercise) => trainingWorkoutIds.has(exercise.workout_id));
+    const workoutById = new Map(trainingWorkouts.map((workout) => [workout.id, workout]));
+    const exerciseById = new Map(trainingExercises.map((exercise) => [exercise.id, exercise]));
+    const completedLogs = setLogs.filter((log) => log.completed && exerciseById.has(log.workout_exercise_id));
     const totalVolume = completedLogs.reduce(
       (sum, log) => sum + Number(log.actual_weight ?? 0) * Number(log.actual_reps ?? 0),
       0
     );
-    const plannedSets = workoutExercises.reduce((sum, exercise) => sum + Number(exercise.target_sets ?? 0), 0);
+    const plannedSets = trainingExercises.reduce((sum, exercise) => sum + Number(exercise.target_sets ?? 0), 0);
     const completionRate = plannedSets > 0 ? completedLogs.length / plannedSets : 0;
-    const weeklyTrends = buildWeeklyTrends({ workoutById, exerciseById, workoutExercises, setLogs });
+    const weeklyTrends = buildWeeklyTrends({ workoutById, exerciseById, workoutExercises: trainingExercises, setLogs });
     const liftTrends = buildLiftTrends({ workoutById, exerciseById, setLogs });
     const insight = buildProgressInsight({ completionRate, liftTrends, weeklyTrends });
 

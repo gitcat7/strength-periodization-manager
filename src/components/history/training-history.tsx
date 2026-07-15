@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Brain, CalendarDays, CheckCircle2, Loader2, Moon, Save, TrendingUp } from "lucide-react";
+import { Brain, CalendarDays, CheckCircle2, Dumbbell, Loader2, Moon, Save, TrendingUp } from "lucide-react";
+import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
+import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import type { RecommendationType } from "@/domain/fitness-coach";
 
 type WorkoutRow = {
+  day_type: "training" | "rest";
   id: string;
   scheduled_date: string;
   name: string;
@@ -104,7 +107,7 @@ export function TrainingHistory() {
         const { data: workoutData, error: workoutError } = await withTimeout(
           supabase
             .from("workouts")
-            .select("id,scheduled_date,name,completed_at")
+            .select("id,scheduled_date,name,completed_at,day_type")
             .eq("user_id", user.id)
             .eq("status", "completed")
             .order("scheduled_date", { ascending: false })
@@ -295,7 +298,11 @@ export function TrainingHistory() {
   }
 
   const summary = useMemo(() => {
-    const completedLogs = setLogs.filter((log) => log.completed);
+    const trainingWorkoutIds = new Set(
+      filterTrainingMetricWorkouts(workouts.map((workout) => ({ ...workout, dayType: workout.day_type }))).map((workout) => workout.id)
+    );
+    const trainingExerciseIds = new Set(workoutExercises.filter((exercise) => trainingWorkoutIds.has(exercise.workout_id)).map((exercise) => exercise.id));
+    const completedLogs = setLogs.filter((log) => log.completed && trainingExerciseIds.has(log.workout_exercise_id));
     const volume = completedLogs.reduce(
       (sum, log) => sum + Number(log.actual_weight ?? 0) * Number(log.actual_reps ?? 0),
       0
@@ -309,9 +316,9 @@ export function TrainingHistory() {
       averageRpe,
       completedSets: completedLogs.length,
       volume,
-      workouts: workouts.length
+      workouts: trainingWorkoutIds.size
     };
-  }, [setLogs, workouts.length]);
+  }, [setLogs, workoutExercises, workouts]);
 
   if (status === "loading") {
     return (
@@ -366,6 +373,23 @@ export function TrainingHistory() {
           const workoutLogs = exercises.flatMap((exercise) => setLogsByExerciseId[exercise.id] ?? []);
           const review = buildWorkoutReview(workoutLogs);
           const isRecovery = workout.name.includes("恢复") || workout.name.includes("休息") || workout.name.includes("有氧");
+
+          if (workout.day_type === "rest") {
+            const presentation = getScheduleItemPresentation({ dayType: workout.day_type, status: "completed" });
+
+            return (
+              <article className="rounded-xl border border-slate-200 bg-slate-50 p-4" key={workout.id}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-muted">{workout.scheduled_date}</p>
+                    <h2 className="flex items-center gap-2 font-semibold"><Moon size={16} />{presentation.title}</h2>
+                    <p className="mt-2 text-sm text-slate-600">今天以恢复为主，没有动作、组数或 RPE 需要记录。</p>
+                  </div>
+                  <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600">{presentation.statusLabel}</span>
+                </div>
+              </article>
+            );
+          }
 
           return (
             <article className={`rounded-xl border p-4 ${isRecovery ? "border-line bg-field/60" : "border-line bg-white"}`} key={workout.id}>

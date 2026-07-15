@@ -125,10 +125,10 @@ async function loadPlan(userId: string) {
 
   const { data: workouts, error: workoutsError } = await supabase
     .from("workouts")
-    .select("id,scheduled_date,sequence_index,name,status,completed_at")
+    .select("id,scheduled_date,sequence_index,schedule_index,day_type,name,status,completed_at")
     .eq("user_id", userId)
     .eq("program_id", program.id)
-    .order("sequence_index", { ascending: true });
+    .order("schedule_index", { ascending: true });
 
   if (workoutsError) throw new Error(workoutsError.message);
 
@@ -145,6 +145,7 @@ async function loadHistory(userId: string, limit: number) {
     .select("id,scheduled_date,name,status,completed_at")
     .eq("user_id", userId)
     .eq("status", "completed")
+    .eq("day_type", "training")
     .order("scheduled_date", { ascending: false })
     .limit(limit);
 
@@ -250,6 +251,7 @@ async function completeWorkout(userId: string, workoutId?: string) {
     .update({ completed_at: new Date().toISOString(), status: "completed", updated_at: new Date().toISOString() })
     .eq("id", workoutId)
     .eq("user_id", userId)
+    .eq("day_type", "training")
     .select("id,name,scheduled_date,status,completed_at")
     .single();
 

@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type AnalyticsEventName =
   | "profile_saved"
   | "program_generated"
+  | "program_regenerated"
   | "workout_saved"
   | "workout_completed"
   | "recommendation_accepted"
@@ -13,7 +14,8 @@ export type AnalyticsEventName =
   | "pr_goal_cancelled"
   | "csv_exported"
   | "feedback_submitted"
-  | "exercise_substituted";
+  | "exercise_substituted"
+  | "rest_day_completed";
 
 export async function trackEvent({
   eventName,

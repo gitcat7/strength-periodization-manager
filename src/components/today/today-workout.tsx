@@ -28,7 +28,14 @@ import {
 } from "@/domain/fitness-coach";
 import { isExerciseSubstitutionEligible } from "@/domain/exercise-substitution";
 import { trackEvent } from "@/lib/analytics";
-import { clearTrainingDataCaches, clearWorkoutDrafts, clearWorkoutDraftsByExerciseIds, readClientCache, writeClientCache } from "@/lib/client-cache";
+import {
+  clearTodayAndPlanCaches,
+  clearTrainingDataCaches,
+  clearWorkoutDrafts,
+  clearWorkoutDraftsByExerciseIds,
+  readClientCache,
+  writeClientCache
+} from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { formatPrescription, getExerciseNote, getWorkoutMeta } from "@/domain/training-format";
 import { ExerciseDetailLauncher } from "@/components/exercises/exercise-detail-launcher";
@@ -44,6 +51,14 @@ import {
   type ExerciseSubstitutionScope
 } from "./exercise-substitution-dialog-state";
 import { shouldRetryWithBaseExerciseSchema } from "./today-workout-schema-fallback";
+import { RestDayCard } from "./rest-day-card";
+import {
+  reportRestCompletionFailure,
+  resolveTodayScheduleState,
+  type RestScheduleItem,
+  type TrainingScheduleItem
+} from "./rest-day-state";
+import { completeRestDayCheckIn, getCurrentRestItem } from "./rest-day-actions";
 
 type WorkoutRow = {
   id: string;
@@ -133,6 +148,8 @@ type TodayCache = {
   coachRecommendations: Array<ExerciseCoachRecommendation & { exerciseName: string }>;
   exercises: WorkoutExerciseRow[];
   lastCompletedWorkout: LastCompletedWorkoutRow | null;
+  nextTraining: TrainingScheduleItem | null;
+  restItem: RestScheduleItem | null;
   setLogs: Record<string, SetLogRow[]>;
   userId: string;
   workout: WorkoutRow | null;
@@ -254,6 +271,10 @@ function ExerciseSubstitutionButton({
 export function TodayWorkout() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
+  const [restItem, setRestItem] = useState<RestScheduleItem | null>(null);
+  const [nextTraining, setNextTraining] = useState<TrainingScheduleItem | null>(null);
+  const [restSaveStatus, setRestSaveStatus] = useState<"idle" | "saving" | "error">("idle");
+  const [scheduleResolved, setScheduleResolved] = useState(false);
   const [workout, setWorkout] = useState<WorkoutRow | null>(null);
   const [exercises, setExercises] = useState<WorkoutExerciseRow[]>([]);
   const [setLogs, setSetLogs] = useState<Record<string, SetLogRow[]>>({});
@@ -282,12 +303,14 @@ export function TodayWorkout() {
   const [reloadTrigger, setReloadTrigger] = useState(0);
 
   useEffect(() => {
+    if (!scheduleResolved || !workout || restItem) return;
+
     const settings = readRestTimerSettings();
     if (!settings) return;
 
     setRestTimerEnabled(settings.enabled);
     setRestSeconds(settings.seconds);
-  }, []);
+  }, [restItem, scheduleResolved, workout]);
 
   useEffect(() => {
     if (!restRunning || restRemaining <= 0) return;
@@ -311,6 +334,7 @@ export function TodayWorkout() {
   useEffect(() => {
     async function loadTodayWorkout() {
       try {
+        setScheduleResolved(false);
         if (!readClientCache<TodayCache>(todayCacheKey)) {
           setStatus("loading");
         }
@@ -352,50 +376,117 @@ export function TodayWorkout() {
             coachRecommendations: [],
             exercises: [],
             lastCompletedWorkout: null,
+            nextTraining: null,
+            restItem: null,
             setLogs: {},
             userId: user.id,
             workout: null
           });
+          setScheduleResolved(true);
           setStatus("ready");
           return;
         }
 
-        const { data: workoutData, error: workoutError } = await withTimeout(
+        const today = formatDate(new Date());
+        const restItems = withTimeout(
           supabase
             .from("workouts")
-            .select("id,scheduled_date,sequence_index,name,status")
+            .select("id,scheduled_date,status,day_type")
             .eq("program_id", program.id)
+            .eq("day_type", "rest")
+            .eq("scheduled_date", today)
+            .in("status", ["scheduled", "draft"])
+            .limit(1)
+            .maybeSingle(),
+          "今日恢复日读取超时，请刷新页面后重试。"
+        ).then(({ data, error }) => {
+          if (error) throw error;
+          return data
+            ? [{ dayType: data.day_type, id: data.id, scheduledDate: data.scheduled_date, status: data.status }]
+            : [];
+        });
+
+        const trainingItems = withTimeout(
+          supabase
+            .from("workouts")
+            .select("id,scheduled_date,sequence_index,name,status,day_type")
+            .eq("program_id", program.id)
+            .eq("day_type", "training")
             .in("status", ["scheduled", "draft"])
             .order("sequence_index", { ascending: true })
             .limit(1)
             .maybeSingle(),
-          "今日训练读取超时，请刷新页面后重试。"
-        );
+          "下一节训练读取超时，请刷新页面后重试。"
+        ).then(({ data, error }) => {
+          if (error) throw error;
+          return data
+            ? [{ dayType: data.day_type, id: data.id, name: data.name, scheduledDate: data.scheduled_date, sequenceIndex: data.sequence_index, status: data.status }]
+            : [];
+        });
 
-        if (workoutError) {
-          setStatus("error");
-          setMessage(workoutError.message);
-          return;
-        }
+        const scheduleState = await resolveTodayScheduleState({
+          now: today,
+          onRestQueryError: (error) => console.warn("today rest day query failed", error),
+          restItems,
+          trainingItems
+        });
 
-        if (!workoutData) {
-          writeClientCache<TodayCache>(todayCacheKey, {
-            coachRecommendations: [],
-            exercises: [],
-            lastCompletedWorkout: null,
-            setLogs: {},
-            userId: user.id,
-            workout: null
-          });
+        if (scheduleState.kind === "rest") {
+          setRestItem(scheduleState.restItem);
+          setNextTraining(scheduleState.nextTraining);
           setWorkout(null);
           setExercises([]);
           setSetLogs({});
           setCoachRecommendations([]);
           setLastCompletedWorkout(null);
+          writeClientCache<TodayCache>(todayCacheKey, {
+            coachRecommendations: [],
+            exercises: [],
+            lastCompletedWorkout: null,
+            nextTraining: scheduleState.nextTraining,
+            restItem: scheduleState.restItem,
+            setLogs: {},
+            userId: user.id,
+            workout: null
+          });
+          setScheduleResolved(true);
+          setStatus("ready");
+          return;
+        }
+
+        if (scheduleState.kind === "empty") {
+          writeClientCache<TodayCache>(todayCacheKey, {
+            coachRecommendations: [],
+            exercises: [],
+            lastCompletedWorkout: null,
+            nextTraining: null,
+            restItem: null,
+            setLogs: {},
+            userId: user.id,
+            workout: null
+          });
+          setRestItem(null);
+          setNextTraining(null);
+          setWorkout(null);
+          setExercises([]);
+          setSetLogs({});
+          setCoachRecommendations([]);
+          setLastCompletedWorkout(null);
+          setScheduleResolved(true);
           setStatus("ready");
           setMessage("当前计划已经没有待训练日。可以查看历史复盘，或去计划页生成下一轮周期。");
           return;
         }
+
+        const workoutData: WorkoutRow = {
+          id: scheduleState.workout.id,
+          name: scheduleState.workout.name,
+          scheduled_date: scheduleState.workout.scheduledDate ?? today,
+          sequence_index: scheduleState.workout.sequenceIndex,
+          status: scheduleState.workout.status
+        };
+        setRestItem(null);
+        setNextTraining(scheduleState.workout);
 
         const catalogExerciseResult = await withTimeout(
           supabase
@@ -444,10 +535,13 @@ export function TodayWorkout() {
           coachRecommendations: [],
           exercises: exerciseRows,
           lastCompletedWorkout: lastWorkout,
+          nextTraining: scheduleState.workout,
+          restItem: null,
           setLogs: groupedLogs,
           userId: user.id,
           workout: workoutData as WorkoutRow
         });
+        setScheduleResolved(true);
         setStatus("ready");
       } catch (error) {
         setStatus("error");
@@ -457,13 +551,30 @@ export function TodayWorkout() {
 
     const cached = readClientCache<TodayCache>(todayCacheKey);
     if (cached) {
-      setUserId(cached.userId);
-      setWorkout(cached.workout);
-      setExercises(cached.exercises);
-      setSetLogs(cached.setLogs);
-      setLastCompletedWorkout(cached.lastCompletedWorkout);
-      setCoachRecommendations(cached.coachRecommendations);
-      setStatus("ready");
+      const cachedRestItem = getCurrentRestItem(cached.restItem, formatDate(new Date()));
+      const needsFreshSchedule = cached.restItem !== null && cachedRestItem === null && cached.workout === null;
+
+      if (needsFreshSchedule) {
+        setStatus("loading");
+      } else {
+        setUserId(cached.userId);
+        setRestItem(cachedRestItem);
+        setNextTraining(cached.nextTraining ?? null);
+        if (cachedRestItem) {
+          setWorkout(null);
+          setExercises([]);
+          setSetLogs({});
+          setLastCompletedWorkout(null);
+          setCoachRecommendations([]);
+        } else {
+          setWorkout(cached.workout);
+          setExercises(cached.exercises);
+          setSetLogs(cached.setLogs);
+          setLastCompletedWorkout(cached.lastCompletedWorkout);
+          setCoachRecommendations(cached.coachRecommendations);
+        }
+        setStatus("ready");
+      }
     }
 
     loadTodayWorkout();
@@ -477,6 +588,7 @@ export function TodayWorkout() {
       .select("scheduled_date,name")
       .eq("program_id", programId)
       .eq("status", "completed")
+      .eq("day_type", "training")
       .lt("scheduled_date", scheduledDate)
       .order("scheduled_date", { ascending: false })
       .limit(1)
@@ -960,6 +1072,44 @@ export function TodayWorkout() {
     setReloadTrigger((current) => current + 1);
   }
 
+  async function completeRestDay() {
+    const today = formatDate(new Date());
+    if (!restItem || !userId || !getCurrentRestItem(restItem, today)) return;
+
+    setRestSaveStatus("saving");
+    setMessage("");
+
+    try {
+      const supabase = createBrowserSupabaseClient();
+      const { data, error } = await completeRestDayCheckIn({
+        from: (table) => supabase.from(table),
+        item: restItem,
+        today,
+        userId
+      });
+
+      if (error || !data) {
+        setRestSaveStatus("error");
+        setMessage(error ? reportRestCompletionFailure(error) : "恢复日状态已变化，请刷新后再试。");
+        return;
+      }
+
+      clearTodayAndPlanCaches();
+      await trackEvent({
+        eventName: "rest_day_completed",
+        properties: { rest_day_id: restItem.id },
+        supabase,
+        userId
+      });
+      setRestSaveStatus("idle");
+      setMessage("恢复日已完成。");
+      setReloadTrigger((current) => current + 1);
+    } catch (error) {
+      setRestSaveStatus("error");
+      setMessage(reportRestCompletionFailure(error));
+    }
+  }
+
   if (status === "loading") {
     return (
       <div className="flex items-center gap-3 rounded-xl border border-line p-4 text-muted">
@@ -971,6 +1121,26 @@ export function TodayWorkout() {
 
   if (status === "error") {
     return <p className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600">{message}</p>;
+  }
+
+  const currentRestItem = getCurrentRestItem(restItem, formatDate(new Date()));
+
+  if (currentRestItem) {
+    return (
+      <div>
+        <RestDayCard
+          nextTraining={nextTraining}
+          onComplete={completeRestDay}
+          restItem={currentRestItem}
+          saving={restSaveStatus === "saving"}
+        />
+        {message ? (
+          <p className={`mt-3 rounded-lg border px-3 py-2 text-sm ${restSaveStatus === "error" ? "border-red-200 text-red-600" : "border-line text-muted"}`}>
+            {message}
+          </p>
+        ) : null}
+      </div>
+    );
   }
 
   if (!workout) {
