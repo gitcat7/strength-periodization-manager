@@ -88,6 +88,35 @@ https://你的-vercel-默认域名/auth/callback
 - `feedback_reports` 可提交并只读本人反馈。
 - `analytics_events` 可写入本人关键行为事件。
 
+### 休息日与计划重建追加验收
+
+- 执行 `20260715110000_rest_day_schedule_and_program_replacement.sql` 前完成备份，并在 SQL Editor 记录 UTC 时间。
+- cadence 与固定星期计划同时存在 `day_type='training'` 与 `day_type='rest'`；自由排程不产生虚构休息日。
+- 用以下查询按排程模式确认两种日程类型（`cadence` 与 `fixed_weekdays` 均必须返回两种 `day_type`）：
+
+```sql
+select p.schedule_mode, w.day_type, count(*) as schedule_items
+from public.programs p
+join public.workouts w on w.program_id = p.id
+where p.schedule_mode in ('cadence', 'fixed_weekdays')
+group by p.schedule_mode, w.day_type
+order by p.schedule_mode, w.day_type;
+```
+- 验证休息日没有动作处方：
+
+```sql
+select count(*) as rest_exercise_rows
+from public.workout_exercises we
+join public.workouts w on w.id = we.workout_id
+where w.day_type = 'rest';
+```
+
+结果必须为 `0`。
+
+- 重新生成在确认前不写入；有效确认后新计划先完整插入再归档旧计划；无效载荷后旧活动计划仍可用。
+- 休息日只能由本人、在当天、且状态为 `scheduled` 或 `draft` 时完成一次；完成休息不改变训练量、e1RM、PR、推荐或力量完成率。
+- 线上执行 `BASE_URL=https://你的-vercel-默认域名 pnpm vitest run scripts/rest-day-smoke.test.mjs`。
+
 ## 5. 邮件发送
 
 MVP 内测早期可以先用 Supabase 默认邮件，但如果继续出现 `email rate limit exceeded`，必须配置自定义 SMTP。
