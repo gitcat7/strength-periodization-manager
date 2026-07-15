@@ -124,6 +124,7 @@ export function ProgramManager() {
   const [templateType, setTemplateType] = useState<TemplateType>("push_pull_squat");
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("fixed_weekdays");
   const [selectedWeekdays, setSelectedWeekdays] = useState<number[]>([1, 3, 5]);
+  const [cadenceTrainDays, setCadenceTrainDays] = useState(1);
   const [cadenceRestDays, setCadenceRestDays] = useState(1);
   const [customTemplateName, setCustomTemplateName] = useState("");
   const [useCustomName, setUseCustomName] = useState(false);
@@ -494,7 +495,7 @@ export function ProgramManager() {
       scheduleMode === "fixed_weekdays"
         ? { mode: "fixed_weekdays", weekdays: selectedWeekdays }
         : scheduleMode === "cadence"
-          ? { mode: "cadence", restDays: cadenceRestDays }
+          ? { mode: "cadence", trainDays: cadenceTrainDays, restDays: cadenceRestDays }
           : { mode: "flexible" };
 
     const { data: exercises, error: exercisesError } = await supabase
@@ -698,10 +699,12 @@ export function ProgramManager() {
     <div className="space-y-5">
       <PlanBuilder
         cadenceRestDays={cadenceRestDays}
+        cadenceTrainDays={cadenceTrainDays}
         customTemplateName={customTemplateName}
         scheduleMode={scheduleMode}
         selectedWeekdays={selectedWeekdays}
         setCadenceRestDays={setCadenceRestDays}
+        setCadenceTrainDays={setCadenceTrainDays}
         setCustomTemplateName={setCustomTemplateName}
         setScheduleMode={setScheduleMode}
         setSelectedWeekdays={setSelectedWeekdays}
@@ -907,10 +910,12 @@ export function ProgramManager() {
 
 function PlanBuilder({
   cadenceRestDays,
+  cadenceTrainDays,
   customTemplateName,
   scheduleMode,
   selectedWeekdays,
   setCadenceRestDays,
+  setCadenceTrainDays,
   setCustomTemplateName,
   setScheduleMode,
   setSelectedWeekdays,
@@ -920,10 +925,12 @@ function PlanBuilder({
   useCustomName
 }: {
   cadenceRestDays: number;
+  cadenceTrainDays: number;
   customTemplateName: string;
   scheduleMode: ScheduleMode;
   selectedWeekdays: number[];
   setCadenceRestDays: (value: number) => void;
+  setCadenceTrainDays: (value: number) => void;
   setCustomTemplateName: (value: string) => void;
   setScheduleMode: (value: ScheduleMode) => void;
   setSelectedWeekdays: (value: number[]) => void;
@@ -967,15 +974,21 @@ function PlanBuilder({
         </label>
         {scheduleMode === "cadence" ? (
           <label className="block">
-            <span className="mb-1 block text-sm font-medium">每次训练后休息</span>
+            <span className="mb-1 block text-sm font-medium">训练与休息节奏（练几休几）</span>
             <select
               className="h-11 w-full rounded-lg border border-line bg-field px-3 text-sm"
-              onChange={(event) => setCadenceRestDays(Number(event.target.value))}
-              value={cadenceRestDays}
+              onChange={(event) => {
+                const [trainDays, restDays] = event.target.value.split("-").map(Number);
+                setCadenceTrainDays(trainDays);
+                setCadenceRestDays(restDays);
+              }}
+              value={`${cadenceTrainDays}-${cadenceRestDays}`}
             >
-              <option value={0}>不休息</option>
-              <option value={1}>1 天（练一休一）</option>
-              <option value={2}>2 天</option>
+              <option value="1-0">练一休零（连续训练）</option>
+              <option value="1-1">练一休一</option>
+              <option value="1-2">练一休二</option>
+              <option value="3-1">练三休一</option>
+              <option value="4-1">练四休一</option>
             </select>
           </label>
         ) : null}
@@ -1050,7 +1063,7 @@ function getProgramName(templateType: TemplateType) {
 
 function getScheduleConfig(schedule: ScheduleConfig) {
   if (schedule.mode === "fixed_weekdays") return { weekdays: schedule.weekdays };
-  if (schedule.mode === "cadence") return { rest_days: schedule.restDays };
+  if (schedule.mode === "cadence") return { train_days: schedule.trainDays ?? 1, rest_days: schedule.restDays };
   return {};
 }
 

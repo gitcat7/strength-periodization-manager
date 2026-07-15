@@ -62,4 +62,21 @@ describe("buildFourWeekProgram", () => {
       "2026-07-15"
     ]);
   });
+
+  it("groups three training days before a one-day rest in a cadence cycle", () => {
+    const workouts = buildFourWeekProgram({
+      templateType: "three_split",
+      schedule: { mode: "cadence", trainDays: 3, restDays: 1 },
+      exerciseProfiles: profiles,
+      startDate: new Date("2026-07-13T00:00:00")
+    });
+
+    expect(workouts.slice(0, 5).map((workout) => workout.scheduledDate)).toEqual([
+      "2026-07-13",
+      "2026-07-14",
+      "2026-07-15",
+      "2026-07-17",
+      "2026-07-18"
+    ]);
+  });
 });

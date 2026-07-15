@@ -13,7 +13,7 @@ export type ScheduleMode = "fixed_weekdays" | "cadence" | "flexible";
 
 export type ScheduleConfig =
   | { mode: "fixed_weekdays"; weekdays: number[] }
-  | { mode: "cadence"; restDays: number }
+  | { mode: "cadence"; trainDays?: number; restDays: number }
   | { mode: "flexible" };
 
 export const templateOptions: Array<{ description: string; label: string; value: TemplateType }> = [
@@ -240,10 +240,12 @@ function buildWorkoutDates(startDate: Date, schedule: ScheduleConfig, count: num
   }
 
   if (schedule.mode === "cadence") {
+    const trainDays = Math.max(1, Math.floor(schedule.trainDays ?? 1));
     const restDays = Math.max(0, Math.floor(schedule.restDays));
     while (dates.length < count) {
       dates.push(new Date(cursor));
-      cursor.setDate(cursor.getDate() + restDays + 1);
+      const completedBlock = dates.length % trainDays === 0;
+      cursor.setDate(cursor.getDate() + (completedBlock ? restDays + 1 : 1));
     }
     return dates;
   }
