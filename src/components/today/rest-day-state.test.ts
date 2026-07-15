@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { canCompleteRestDay, getTodayScheduleState } from "./rest-day-state";
+import {
+  canCompleteRestDay,
+  reportRestCompletionFailure,
+  getTodayScheduleState,
+  resolveTodayScheduleState
+} from "./rest-day-state";
 
 describe("getTodayScheduleState", () => {
   it("shows a date-exact rest day without consuming the next strength session", () => {
@@ -57,5 +62,46 @@ describe("canCompleteRestDay", () => {
     expect(canCompleteRestDay({ dayType: "training", status: "scheduled" })).toBe(false);
     expect(canCompleteRestDay({ dayType: "rest", status: "completed" })).toBe(false);
     expect(canCompleteRestDay({ dayType: "rest", status: "skipped" })).toBe(false);
+  });
+});
+
+describe("resolveTodayScheduleState", () => {
+  it("keeps the next training session available when the date-exact rest query fails", async () => {
+    const restQueryError = new Error("permission denied for table workouts");
+    const onRestQueryError = vi.fn();
+
+    await expect(
+      resolveTodayScheduleState({
+        now: "2026-07-14",
+        onRestQueryError,
+        restItems: Promise.reject(restQueryError),
+        trainingItems: Promise.resolve([
+          {
+            dayType: "training",
+            id: "train-1",
+            name: "推 A · 强度",
+            scheduledDate: "2026-07-16",
+            sequenceIndex: 1,
+            status: "scheduled"
+          }
+        ])
+      })
+    ).resolves.toMatchObject({ kind: "training", workout: { id: "train-1" } });
+
+    expect(onRestQueryError).toHaveBeenCalledWith(restQueryError);
+  });
+});
+
+describe("reportRestCompletionFailure", () => {
+  it("logs a raw database error without returning it to the rest completion UI", () => {
+    const rawDatabaseError = "new row violates row-level security policy for table workouts";
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const message = reportRestCompletionFailure(rawDatabaseError);
+
+    expect(consoleWarn).toHaveBeenCalledWith("rest day completion failed", rawDatabaseError);
+    expect(message).toBe("完成休息失败，请检查网络后重试。");
+    expect(message).not.toContain(rawDatabaseError);
+    consoleWarn.mockRestore();
   });
 });

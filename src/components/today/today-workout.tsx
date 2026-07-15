@@ -52,7 +52,8 @@ import { shouldRetryWithBaseExerciseSchema } from "./today-workout-schema-fallba
 import { RestDayCard } from "./rest-day-card";
 import {
   canCompleteRestDay,
-  getTodayScheduleState,
+  reportRestCompletionFailure,
+  resolveTodayScheduleState,
   type RestScheduleItem,
   type TrainingScheduleItem
 } from "./rest-day-state";
@@ -385,7 +386,7 @@ export function TodayWorkout() {
         }
 
         const today = formatDate(new Date());
-        const { data: restData, error: restError } = await withTimeout(
+        const restItems = withTimeout(
           supabase
             .from("workouts")
             .select("id,scheduled_date,status,day_type")
@@ -396,15 +397,14 @@ export function TodayWorkout() {
             .limit(1)
             .maybeSingle(),
           "今日恢复日读取超时，请刷新页面后重试。"
-        );
+        ).then(({ data, error }) => {
+          if (error) throw error;
+          return data
+            ? [{ dayType: data.day_type, id: data.id, scheduledDate: data.scheduled_date, status: data.status }]
+            : [];
+        });
 
-        if (restError) {
-          setStatus("error");
-          setMessage(restError.message);
-          return;
-        }
-
-        const { data: trainingData, error: trainingError } = await withTimeout(
+        const trainingItems = withTimeout(
           supabase
             .from("workouts")
             .select("id,scheduled_date,sequence_index,name,status,day_type")
@@ -415,22 +415,18 @@ export function TodayWorkout() {
             .limit(1)
             .maybeSingle(),
           "下一节训练读取超时，请刷新页面后重试。"
-        );
+        ).then(({ data, error }) => {
+          if (error) throw error;
+          return data
+            ? [{ dayType: data.day_type, id: data.id, name: data.name, scheduledDate: data.scheduled_date, sequenceIndex: data.sequence_index, status: data.status }]
+            : [];
+        });
 
-        if (trainingError) {
-          setStatus("error");
-          setMessage(trainingError.message);
-          return;
-        }
-
-        const scheduleState = getTodayScheduleState({
+        const scheduleState = await resolveTodayScheduleState({
           now: today,
-          restItems: restData
-            ? [{ dayType: restData.day_type, id: restData.id, scheduledDate: restData.scheduled_date, status: restData.status }]
-            : [],
-          trainingItems: trainingData
-            ? [{ dayType: trainingData.day_type, id: trainingData.id, name: trainingData.name, scheduledDate: trainingData.scheduled_date, sequenceIndex: trainingData.sequence_index, status: trainingData.status }]
-            : []
+          onRestQueryError: (error) => console.warn("today rest day query failed", error),
+          restItems,
+          trainingItems
         });
 
         if (scheduleState.kind === "rest") {
@@ -480,7 +476,13 @@ export function TodayWorkout() {
           return;
         }
 
-        const workoutData = trainingData as WorkoutRow;
+        const workoutData: WorkoutRow = {
+          id: scheduleState.workout.id,
+          name: scheduleState.workout.name,
+          scheduled_date: scheduleState.workout.scheduledDate ?? today,
+          sequence_index: scheduleState.workout.sequenceIndex,
+          status: scheduleState.workout.status
+        };
         setRestItem(null);
         setNextTraining(scheduleState.workout);
 
@@ -1081,7 +1083,7 @@ export function TodayWorkout() {
 
       if (error || !data) {
         setRestSaveStatus("error");
-        setMessage(error?.message ?? "恢复日状态已变化，请刷新后再试。");
+        setMessage(error ? reportRestCompletionFailure(error) : "恢复日状态已变化，请刷新后再试。");
         return;
       }
 
@@ -1097,7 +1099,7 @@ export function TodayWorkout() {
       setReloadTrigger((current) => current + 1);
     } catch (error) {
       setRestSaveStatus("error");
-      setMessage(error instanceof Error ? error.message : "完成休息失败，请检查网络后重试。");
+      setMessage(reportRestCompletionFailure(error));
     }
   }
 

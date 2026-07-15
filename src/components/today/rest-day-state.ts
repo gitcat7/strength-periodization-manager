@@ -37,3 +37,23 @@ export function getTodayScheduleState(input: {
 export function canCompleteRestDay(item: { dayType: string; status: string }): boolean {
   return item.dayType === "rest" && (item.status === "scheduled" || item.status === "draft");
 }
+
+export async function resolveTodayScheduleState(input: {
+  now: string;
+  onRestQueryError: (error: unknown) => void;
+  restItems: Promise<RestScheduleItem[]>;
+  trainingItems: Promise<TrainingScheduleItem[]>;
+}) {
+  const restItems = await input.restItems.catch((error) => {
+    input.onRestQueryError(error);
+    return [];
+  });
+  const trainingItems = await input.trainingItems;
+
+  return getTodayScheduleState({ now: input.now, restItems, trainingItems });
+}
+
+export function reportRestCompletionFailure(error: unknown): string {
+  console.warn("rest day completion failed", error);
+  return "完成休息失败，请检查网络后重试。";
+}
