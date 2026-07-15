@@ -16,4 +16,13 @@ describe("filterTrainingMetricWorkouts", () => {
     expect(metricRows.reduce((total, row) => total + row.completedSets, 0)).toBe(3);
     expect(metricRows.reduce((total, row) => total + row.plannedSets, 0)).toBe(3);
   });
+
+  it("filters database-shaped rest rows before a capped strength metric query", () => {
+    const completedRows = [
+      { day_type: "rest", id: "rest", volume: 9999 },
+      { day_type: "training", id: "training", volume: 1200 }
+    ];
+
+    expect(filterTrainingMetricWorkouts(completedRows)).toEqual([completedRows[1]]);
+  });
 });
