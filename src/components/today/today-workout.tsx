@@ -550,23 +550,29 @@ export function TodayWorkout() {
     const cached = readClientCache<TodayCache>(todayCacheKey);
     if (cached) {
       const cachedRestItem = getCurrentRestItem(cached.restItem, formatDate(new Date()));
-      setUserId(cached.userId);
-      setRestItem(cachedRestItem);
-      setNextTraining(cached.nextTraining ?? null);
-      if (cachedRestItem) {
-        setWorkout(null);
-        setExercises([]);
-        setSetLogs({});
-        setLastCompletedWorkout(null);
-        setCoachRecommendations([]);
+      const needsFreshSchedule = cached.restItem !== null && cachedRestItem === null && cached.workout === null;
+
+      if (needsFreshSchedule) {
+        setStatus("loading");
       } else {
-        setWorkout(cached.workout);
-        setExercises(cached.exercises);
-        setSetLogs(cached.setLogs);
-        setLastCompletedWorkout(cached.lastCompletedWorkout);
-        setCoachRecommendations(cached.coachRecommendations);
+        setUserId(cached.userId);
+        setRestItem(cachedRestItem);
+        setNextTraining(cached.nextTraining ?? null);
+        if (cachedRestItem) {
+          setWorkout(null);
+          setExercises([]);
+          setSetLogs({});
+          setLastCompletedWorkout(null);
+          setCoachRecommendations([]);
+        } else {
+          setWorkout(cached.workout);
+          setExercises(cached.exercises);
+          setSetLogs(cached.setLogs);
+          setLastCompletedWorkout(cached.lastCompletedWorkout);
+          setCoachRecommendations(cached.coachRecommendations);
+        }
+        setStatus("ready");
       }
-      setStatus("ready");
     }
 
     loadTodayWorkout();
