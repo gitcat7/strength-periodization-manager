@@ -42,3 +42,53 @@ textarea {
 button {
   cursor: pointer;
 }
+
+/* Semantic UI color tokens */
+.ui-completed {
+  --ui-accent: #0f8a4a;
+  --ui-accent-bg: rgba(15, 138, 74, 0.08);
+  --ui-accent-border: rgba(15, 138, 74, 0.2);
+}
+
+.ui-intensity {
+  --ui-accent: #c75c1a;
+  --ui-accent-bg: rgba(199, 92, 26, 0.08);
+  --ui-accent-border: rgba(199, 92, 26, 0.2);
+}
+
+.ui-recovery {
+  --ui-accent: #4a7a9a;
+  --ui-accent-bg: rgba(74, 122, 154, 0.08);
+  --ui-accent-border: rgba(74, 122, 154, 0.2);
+}
+
+.ui-upcoming {
+  --ui-accent: #0f8a4a;
+  --ui-accent-bg: rgba(15, 138, 74, 0.06);
+  --ui-accent-border: rgba(15, 138, 74, 0.15);
+}
+
+.ui-neutral {
+  --ui-accent: #627067;
+  --ui-accent-bg: rgba(98, 112, 103, 0.06);
+  --ui-accent-border: rgba(98, 112, 103, 0.15);
+}
+
+/* Focus ring */
+:focus-visible {
+  outline: 2px solid #0f8a4a;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
