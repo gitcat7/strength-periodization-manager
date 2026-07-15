@@ -7,7 +7,8 @@
 
 项目骨架已初始化：
 
-- Next.js 14
+- Next.js 15
+- React 19
 - TypeScript
 - Tailwind CSS
 - Supabase JS SDK

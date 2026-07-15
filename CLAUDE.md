@@ -11,7 +11,7 @@
 
 ## 产品定位
 
-“力训周期管家”是面向力量训练新手到初级训练者的移动优先 Web/PWA。技术栈是 Next.js 14 App Router、React、TypeScript、Tailwind、Supabase 和 Vercel。
+“力训周期管家”是面向力量训练新手到初级训练者的移动优先 Web/PWA。技术栈是 Next.js 15 App Router、React 19、TypeScript、Tailwind、Supabase 和 Vercel。
 
 必须保持以下产品约束：
 
