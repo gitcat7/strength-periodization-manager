@@ -271,6 +271,7 @@ export function TodayWorkout() {
   const [restItem, setRestItem] = useState<RestScheduleItem | null>(null);
   const [nextTraining, setNextTraining] = useState<TrainingScheduleItem | null>(null);
   const [restSaveStatus, setRestSaveStatus] = useState<"idle" | "saving" | "error">("idle");
+  const [scheduleResolved, setScheduleResolved] = useState(false);
   const [workout, setWorkout] = useState<WorkoutRow | null>(null);
   const [exercises, setExercises] = useState<WorkoutExerciseRow[]>([]);
   const [setLogs, setSetLogs] = useState<Record<string, SetLogRow[]>>({});
@@ -299,12 +300,14 @@ export function TodayWorkout() {
   const [reloadTrigger, setReloadTrigger] = useState(0);
 
   useEffect(() => {
+    if (!scheduleResolved || !workout || restItem) return;
+
     const settings = readRestTimerSettings();
     if (!settings) return;
 
     setRestTimerEnabled(settings.enabled);
     setRestSeconds(settings.seconds);
-  }, []);
+  }, [restItem, scheduleResolved, workout]);
 
   useEffect(() => {
     if (!restRunning || restRemaining <= 0) return;
@@ -328,6 +331,7 @@ export function TodayWorkout() {
   useEffect(() => {
     async function loadTodayWorkout() {
       try {
+        setScheduleResolved(false);
         if (!readClientCache<TodayCache>(todayCacheKey)) {
           setStatus("loading");
         }
@@ -375,6 +379,7 @@ export function TodayWorkout() {
             userId: user.id,
             workout: null
           });
+          setScheduleResolved(true);
           setStatus("ready");
           return;
         }
@@ -395,7 +400,7 @@ export function TodayWorkout() {
 
         if (restError) {
           setStatus("error");
-          setMessage("今日恢复读取失败，请刷新页面后重试。");
+          setMessage(restError.message);
           return;
         }
 
@@ -414,7 +419,7 @@ export function TodayWorkout() {
 
         if (trainingError) {
           setStatus("error");
-          setMessage("下一节训练读取失败，请刷新页面后重试。");
+          setMessage(trainingError.message);
           return;
         }
 
@@ -446,6 +451,7 @@ export function TodayWorkout() {
             userId: user.id,
             workout: null
           });
+          setScheduleResolved(true);
           setStatus("ready");
           return;
         }
@@ -468,6 +474,7 @@ export function TodayWorkout() {
           setSetLogs({});
           setCoachRecommendations([]);
           setLastCompletedWorkout(null);
+          setScheduleResolved(true);
           setStatus("ready");
           setMessage("当前计划已经没有待训练日。可以查看历史复盘，或去计划页生成下一轮周期。");
           return;
@@ -530,6 +537,7 @@ export function TodayWorkout() {
           userId: user.id,
           workout: workoutData as WorkoutRow
         });
+        setScheduleResolved(true);
         setStatus("ready");
       } catch (error) {
         setStatus("error");
@@ -1073,7 +1081,7 @@ export function TodayWorkout() {
 
       if (error || !data) {
         setRestSaveStatus("error");
-        setMessage("恢复日状态已变化，请刷新后再试。");
+        setMessage(error?.message ?? "恢复日状态已变化，请刷新后再试。");
         return;
       }
 
@@ -1087,9 +1095,9 @@ export function TodayWorkout() {
       setRestSaveStatus("idle");
       setMessage("恢复日已完成。");
       setReloadTrigger((current) => current + 1);
-    } catch {
+    } catch (error) {
       setRestSaveStatus("error");
-      setMessage("完成休息失败，请检查网络后重试。");
+      setMessage(error instanceof Error ? error.message : "完成休息失败，请检查网络后重试。");
     }
   }
 
