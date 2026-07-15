@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { clearWorkoutDrafts, clearWorkoutDraftsByExerciseIds } from "./client-cache";
+import {
+  clearProgramRegenerationCaches,
+  clearWorkoutDrafts,
+  clearWorkoutDraftsByExerciseIds
+} from "./client-cache";
 
 function createMockStorage(): Storage {
   const store = new Map<string, string>();
@@ -94,6 +98,30 @@ describe("clearWorkoutDrafts", () => {
 
     expect(clearWorkoutDrafts(["workout-a"])).toBe(false);
     expect(localStorage.getItem("strength-training-draft:workout-a")).toBe("{}");
+  });
+});
+
+describe("clearProgramRegenerationCaches", () => {
+  it("clears training, plan, today and draft cache entries without touching unrelated storage", () => {
+    const localStorage = createMockStorage();
+    const sessionStorage = createMockStorage();
+    vi.stubGlobal("window", { localStorage, sessionStorage });
+
+    localStorage.setItem("strength-training-cache:plan", "{}");
+    localStorage.setItem("strength-training-cache:today", "{}");
+    localStorage.setItem("strength-training-draft:workout-a", "{}");
+    localStorage.setItem("strength-training-rest-timer", "{}");
+    sessionStorage.setItem("strength-training-cache:plan", "{}");
+    sessionStorage.setItem("strength-training-draft:workout-a", "{}");
+
+    clearProgramRegenerationCaches();
+
+    expect(localStorage.getItem("strength-training-cache:plan")).toBeNull();
+    expect(localStorage.getItem("strength-training-cache:today")).toBeNull();
+    expect(localStorage.getItem("strength-training-draft:workout-a")).toBeNull();
+    expect(sessionStorage.getItem("strength-training-cache:plan")).toBeNull();
+    expect(sessionStorage.getItem("strength-training-draft:workout-a")).toBeNull();
+    expect(localStorage.getItem("strength-training-rest-timer")).toBe("{}");
   });
 });
 

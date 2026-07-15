@@ -1,13 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Brain, CheckCircle2, Loader2, PlusCircle, XCircle } from "lucide-react";
 import type { RecommendationType } from "@/domain/fitness-coach";
 import { getNextWorkoutState } from "@/domain/next-workout";
 import { trackEvent } from "@/lib/analytics";
-import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
+import {
+  clearProgramRegenerationCaches,
+  clearTrainingDataCaches,
+  readClientCache,
+  writeClientCache
+} from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import {
   formatPrescription,
@@ -16,13 +21,23 @@ import {
 import {
   buildFourWeekProgram,
   type ExerciseProfile,
-  type PlannedWorkout,
   templateOptions,
   type ProgramTemplateType,
   type ScheduleConfig,
   type ScheduleMode,
   type TemplateType
 } from "@/domain/program";
+import {
+  buildProgramReplacementPayload,
+  buildRegenerationPreview,
+  type ProgramReplacementPayload
+} from "@/domain/program-regeneration";
+import { ProgramRegenerationDialog } from "./program-regeneration-dialog";
+import {
+  buildConfirmationPayload,
+  createRegenerationDialogState,
+  reduceRegenerationDialog
+} from "./program-regeneration-dialog-state";
 
 type ProgramRow = {
   id: string;
@@ -37,9 +52,11 @@ type ProgramRow = {
 };
 
 type WorkoutRow = {
+  day_type: "training" | "rest";
   id: string;
+  schedule_index: number;
   scheduled_date: string;
-  sequence_index: number;
+  sequence_index: number | null;
   name: string;
   status: string;
 };
@@ -128,6 +145,11 @@ export function ProgramManager() {
   const [cadenceRestDays, setCadenceRestDays] = useState(1);
   const [customTemplateName, setCustomTemplateName] = useState("");
   const [useCustomName, setUseCustomName] = useState(false);
+  const [regenerationDialog, setRegenerationDialog] = useState(createRegenerationDialogState);
+  const confirmationInFlight = useRef(false);
+  const pendingReplacementPayload = useRef<ProgramReplacementPayload | null>(null);
+  const regenerationTriggerRef = useRef<HTMLButtonElement>(null);
+  const firstScheduleItemRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     const cached = readClientCache<PlanCache>(planCacheKey);
@@ -293,9 +315,9 @@ export function ProgramManager() {
     const supabase = createBrowserSupabaseClient();
     const { data: workoutData, error: workoutError } = await supabase
       .from("workouts")
-      .select("id,scheduled_date,sequence_index,name,status")
+      .select("id,scheduled_date,sequence_index,schedule_index,day_type,name,status")
       .eq("program_id", programId)
-      .order("sequence_index", { ascending: true });
+      .order("schedule_index", { ascending: true });
 
     if (workoutError) {
       setStatus("error");
@@ -460,7 +482,7 @@ export function ProgramManager() {
     setStatus("ready");
   }
 
-  async function generateProgram() {
+  async function openRegenerationDialog() {
     if (!userId) return;
 
     if (scheduleMode === "fixed_weekdays" && selectedWeekdays.length === 0) {
@@ -546,142 +568,82 @@ export function ProgramManager() {
       exerciseProfiles: [...exerciseProfiles, ...accessoryProfiles]
     });
 
-    const { error: archiveError } = await supabase
-      .from("programs")
-      .update({
-        status: "archived",
-        updated_at: new Date().toISOString()
-      })
-      .eq("user_id", userId)
-      .eq("status", "active");
-
-    if (archiveError) {
+    try {
+      const payload = buildProgramReplacementPayload({
+        customTemplateName: useCustomName ? customTemplateName.trim() : null,
+        exerciseIdsBySlug: new Map(exerciseRows.map((exercise) => [exercise.slug, exercise.id])),
+        plannedItems: plannedWorkouts,
+        programTemplateType: useCustomName ? "custom" : templateType,
+        schedule,
+        templateType
+      });
+      pendingReplacementPayload.current = payload;
+      setRegenerationDialog(
+        reduceRegenerationDialog(createRegenerationDialogState(), {
+          type: "open",
+          preview: buildRegenerationPreview({
+            activeItems: workouts.map((workout) => ({ dayType: workout.day_type, status: workout.status })),
+            proposedItems: plannedWorkouts
+          }),
+          selection: {
+            payload,
+            scheduleLabel: getScheduleLabel(schedule),
+            startDate: payload.start_date,
+            templateLabel: getTemplateLabel(templateType, useCustomName ? customTemplateName.trim() : null)
+          }
+        })
+      );
+      setStatus("ready");
+    } catch {
       setStatus("error");
-      setMessage(archiveError.message);
-      return;
+      setMessage("计划预览生成失败，请检查训练设置后重试。");
     }
+  }
 
-    const createdProgram = await createProgramWithWorkouts({
-      userId,
-      templateType,
-      programTemplateType: useCustomName ? "custom" : templateType,
-      customTemplateName: useCustomName ? customTemplateName.trim() : null,
-      schedule,
-      plannedWorkouts,
-      exerciseRows
+  async function confirmProgramRegeneration() {
+    if (confirmationInFlight.current) return;
+
+    const nextDialogState = reduceRegenerationDialog(regenerationDialog, { type: "confirm" });
+    const confirmationPayload = buildConfirmationPayload(nextDialogState);
+    const replacementPayload = pendingReplacementPayload.current;
+    if (!confirmationPayload || !replacementPayload || !userId) return;
+
+    confirmationInFlight.current = true;
+    setRegenerationDialog(nextDialogState);
+
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase.rpc("replace_active_program", {
+      p_payload: replacementPayload
     });
 
-    if (!createdProgram.ok) {
-      setStatus("error");
-      setMessage(createdProgram.message);
+    if (error) {
+      confirmationInFlight.current = false;
+      setRegenerationDialog((current) =>
+        reduceRegenerationDialog(current, {
+          type: "requestFailed",
+          message: "生成新计划失败，请稍后重试。当前计划未发生变化。"
+        })
+      );
       return;
     }
 
-    clearTrainingDataCaches();
+    clearProgramRegenerationCaches();
     await trackEvent({
-      eventName: "program_generated",
+      eventName: "program_regenerated",
       properties: {
-        template_type: templateType,
-        schedule_mode: scheduleMode,
-        custom_template: useCustomName,
-        workouts: plannedWorkouts.length
+        schedule_mode: replacementPayload.schedule_mode,
+        schedule_items: replacementPayload.schedule_items.length,
+        template_type: replacementPayload.template_type
       },
       supabase,
       userId
     });
-
-    setMessage("训练计划已生成。");
+    confirmationInFlight.current = false;
+    pendingReplacementPayload.current = null;
+    setRegenerationDialog((current) => reduceRegenerationDialog(current, { type: "requestSucceeded" }));
+    setMessage("新训练计划已生成。");
     await loadCurrentProgram();
-  }
-
-  async function createProgramWithWorkouts({
-    userId,
-    templateType,
-    programTemplateType,
-    customTemplateName,
-    schedule,
-    plannedWorkouts,
-    exerciseRows
-  }: {
-    userId: string;
-    templateType: TemplateType;
-    programTemplateType: ProgramTemplateType;
-    customTemplateName: string | null;
-    schedule: ScheduleConfig;
-    plannedWorkouts: PlannedWorkout[];
-    exerciseRows: ExerciseRow[];
-  }) {
-    const supabase = createBrowserSupabaseClient();
-    const exerciseBySlug = new Map(exerciseRows.map((exercise) => [exercise.slug, exercise]));
-    const startDate = plannedWorkouts[0]?.scheduledDate;
-    const endDate = plannedWorkouts[plannedWorkouts.length - 1]?.scheduledDate;
-
-    if (!startDate || !endDate) {
-      return { ok: false, message: "没有可生成的训练日。" };
-    }
-
-    const { data: programData, error: programError } = await supabase
-      .from("programs")
-      .insert({
-        user_id: userId,
-        name: customTemplateName || getProgramName(templateType),
-        template_type: programTemplateType,
-        custom_template_name: customTemplateName,
-        schedule_mode: schedule.mode,
-        schedule_config: getScheduleConfig(schedule),
-        status: "active",
-        start_date: startDate,
-        end_date: endDate
-      })
-      .select("id,name,template_type,schedule_mode,schedule_config,custom_template_name,status,start_date,end_date")
-      .single();
-
-    if (programError || !programData) {
-      return { ok: false, message: programError?.message ?? "计划创建失败。" };
-    }
-
-    for (const plannedWorkout of plannedWorkouts) {
-      const { data: workoutData, error: workoutError } = await supabase
-        .from("workouts")
-        .insert({
-          program_id: programData.id,
-          user_id: userId,
-          scheduled_date: plannedWorkout.scheduledDate,
-          sequence_index: plannedWorkout.sequenceIndex,
-          name: plannedWorkout.name,
-          status: "scheduled"
-        })
-        .select("id")
-        .single();
-
-      if (workoutError || !workoutData) {
-        return { ok: false, message: workoutError?.message ?? "训练日创建失败。" };
-      }
-
-      const workoutExercisePayload = plannedWorkout.exercises.flatMap((exercise, index) => {
-          const exerciseRow = exerciseBySlug.get(exercise.exerciseSlug);
-          if (!exerciseRow) return [];
-
-          return [{
-            workout_id: workoutData.id,
-            exercise_id: exerciseRow.id,
-            order_index: index + 1,
-            target_sets: exercise.targetSets,
-            target_reps: exercise.targetReps,
-            target_weight: exercise.targetWeight
-          }];
-        });
-
-      const { error: workoutExerciseError } = await supabase
-        .from("workout_exercises")
-        .insert(workoutExercisePayload);
-
-      if (workoutExerciseError) {
-        return { ok: false, message: workoutExerciseError.message };
-      }
-    }
-
-    return { ok: true, message: "ok" };
+    requestAnimationFrame(() => firstScheduleItemRef.current?.focus());
   }
 
   if (status === "loading") {
@@ -693,7 +655,8 @@ export function ProgramManager() {
     );
   }
 
-  const nextPlanWorkoutId = workouts.find((workout) => workout.status !== "completed")?.id ?? null;
+  const nextPlanWorkoutId =
+    workouts.find((workout) => workout.day_type === "training" && workout.status !== "completed")?.id ?? null;
 
   return (
     <div className="space-y-5">
@@ -734,7 +697,8 @@ export function ProgramManager() {
           <button
             className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             disabled={status === "generating"}
-            onClick={generateProgram}
+            onClick={openRegenerationDialog}
+            ref={regenerationTriggerRef}
             type="button"
           >
             {status === "generating" ? <Loader2 className="animate-spin" size={18} /> : <PlusCircle size={18} />}
@@ -764,7 +728,8 @@ export function ProgramManager() {
             <button
               className="inline-flex rounded-lg border border-line px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
               disabled={status === "generating"}
-              onClick={generateProgram}
+              onClick={openRegenerationDialog}
+              ref={regenerationTriggerRef}
               type="button"
             >
               重新生成计划
@@ -850,8 +815,9 @@ export function ProgramManager() {
 
       {workouts.length > 0 ? (
         <section className="space-y-3">
-          {workouts.map((workout) => {
-            const workoutMeta = getWorkoutMeta(workout.name);
+          {workouts.map((workout, index) => {
+            const isRestDay = workout.day_type === "rest";
+            const workoutMeta = isRestDay ? null : getWorkoutMeta(workout.name);
             const workoutState = getPlanWorkoutState(workout, workout.id === nextPlanWorkoutId);
 
             return (
@@ -864,12 +830,16 @@ export function ProgramManager() {
                     : "border-line bg-white"
               }`}
               key={workout.id}
+              ref={index === 0 ? firstScheduleItemRef : undefined}
+              tabIndex={index === 0 ? -1 : undefined}
             >
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm text-muted">第 {workout.sequence_index + 1} 节 · 建议 {workout.scheduled_date}</p>
-                  <h3 className="font-semibold">{workout.name}</h3>
-                  <p className="mt-1 text-sm text-muted">{workoutMeta.focus}</p>
+                  <p className="text-sm text-muted">
+                    {isRestDay ? `休息/恢复日 · 建议 ${workout.scheduled_date}` : `第 ${(workout.sequence_index ?? 0) + 1} 节 · 建议 ${workout.scheduled_date}`}
+                  </p>
+                  <h3 className="font-semibold">{isRestDay ? "休息/恢复日" : workout.name}</h3>
+                  {workoutMeta ? <p className="mt-1 text-sm text-muted">{workoutMeta.focus}</p> : null}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-2">
                   <span
@@ -879,30 +849,46 @@ export function ProgramManager() {
                   >
                     {workoutState.label}
                   </span>
-                  <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-muted">
-                    {workoutMeta.intent}
-                  </span>
+                  {workoutMeta ? (
+                    <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-muted">
+                      {workoutMeta.intent}
+                    </span>
+                  ) : null}
                 </div>
               </div>
-              <div className="space-y-2">
-                {(workoutExercisesByWorkoutId[workout.id] ?? []).map((exercise) => (
-                  <div className="flex items-center justify-between rounded-lg bg-field px-3 py-2 text-sm" key={exercise.id}>
-                    <span>{exercise.exercises?.name ?? "动作"}</span>
-                    <span className="font-semibold">
-                      {formatPrescription({
-                        slug: exercise.exercises?.slug,
-                        targetSets: exercise.target_sets,
-                        targetReps: exercise.target_reps,
-                        targetWeight: Number(exercise.target_weight)
-                      })}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              {!isRestDay ? (
+                <div className="space-y-2">
+                  {(workoutExercisesByWorkoutId[workout.id] ?? []).map((exercise) => (
+                    <div className="flex items-center justify-between rounded-lg bg-field px-3 py-2 text-sm" key={exercise.id}>
+                      <span>{exercise.exercises?.name ?? "动作"}</span>
+                      <span className="font-semibold">
+                        {formatPrescription({
+                          slug: exercise.exercises?.slug,
+                          targetSets: exercise.target_sets,
+                          targetReps: exercise.target_reps,
+                          targetWeight: Number(exercise.target_weight)
+                        })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </article>
             );
           })}
         </section>
+      ) : null}
+      {regenerationDialog.open ? (
+        <ProgramRegenerationDialog
+          onClose={() => {
+            if (regenerationDialog.phase === "submitting") return;
+            pendingReplacementPayload.current = null;
+            setRegenerationDialog((current) => reduceRegenerationDialog(current, { type: "close" }));
+          }}
+          onConfirm={confirmProgramRegeneration}
+          returnFocusRef={regenerationTriggerRef}
+          state={regenerationDialog}
+        />
       ) : null}
     </div>
   );
@@ -1067,6 +1053,16 @@ function getScheduleConfig(schedule: ScheduleConfig) {
   return {};
 }
 
+function getTemplateLabel(templateType: TemplateType, customTemplateName: string | null) {
+  return customTemplateName || templateOptions.find((option) => option.value === templateType)?.label || "训练模板";
+}
+
+function getScheduleLabel(schedule: ScheduleConfig) {
+  if (schedule.mode === "cadence") return `练 ${schedule.trainDays ?? 1} 天，休 ${schedule.restDays} 天`;
+  if (schedule.mode === "flexible") return "按训练顺序安排";
+  return `固定 ${schedule.weekdays.map((weekday) => weekdayOptions.find((option) => option.value === weekday)?.label).filter(Boolean).join("、")}`;
+}
+
 function deriveAccessoryProfiles(exercises: ExerciseRow[], mainProfiles: ExerciseProfile[]) {
   const profileBySlug = new Map(mainProfiles.map((profile) => [profile.slug, profile]));
   const squat = profileBySlug.get("back_squat");
@@ -1118,6 +1114,13 @@ function formatRecommendationType(type: RecommendationType) {
 }
 
 function getPlanWorkoutState(workout: WorkoutRow, isNextWorkout: boolean) {
+  if (workout.day_type === "rest") {
+    return {
+      isNext: false,
+      label: workout.status === "completed" ? "已完成休息" : "恢复日"
+    };
+  }
+
   if (workout.status === "completed") {
     return {
       isNext: false,
@@ -1134,7 +1137,7 @@ function getPlanWorkoutState(workout: WorkoutRow, isNextWorkout: boolean) {
         : nextState.kind === "today"
           ? "下一节训练"
           : `${nextState.daysUntil} 天后建议训练`
-      : `第 ${workout.sequence_index + 1} 节`
+      : `第 ${(workout.sequence_index ?? 0) + 1} 节`
   };
 }
 

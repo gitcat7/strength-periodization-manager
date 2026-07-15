@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type AnalyticsEventName =
   | "profile_saved"
   | "program_generated"
+  | "program_regenerated"
   | "workout_saved"
   | "workout_completed"
   | "recommendation_accepted"

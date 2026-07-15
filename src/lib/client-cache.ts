@@ -72,6 +72,23 @@ export function clearTrainingDataCaches() {
 
 const draftPrefix = "strength-training-draft:";
 
+export function clearProgramRegenerationCaches() {
+  if (typeof window === "undefined") return;
+
+  try {
+    for (const storage of [window.localStorage, window.sessionStorage]) {
+      const keysToRemove: string[] = [];
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index);
+        if (key?.startsWith(cachePrefix) || key?.startsWith(draftPrefix)) keysToRemove.push(key);
+      }
+      keysToRemove.forEach((key) => storage.removeItem(key));
+    }
+  } catch {
+    // Cache failures should never block the program replacement workflow.
+  }
+}
+
 export function clearWorkoutDrafts(workoutIds: string[]): boolean {
   if (workoutIds.length === 0) return true;
   if (typeof window === "undefined") return false;
