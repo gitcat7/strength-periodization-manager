@@ -18,11 +18,13 @@ const focusableSelector = [
 export function ProgramRegenerationDialog({
   onClose,
   onConfirm,
+  onReload,
   returnFocusRef,
   state
 }: {
   onClose: () => void;
   onConfirm: () => void;
+  onReload: () => void;
   returnFocusRef: RefObject<HTMLButtonElement | null>;
   state: Extract<RegenerationDialogState, { open: true }>;
 }) {
@@ -30,7 +32,9 @@ export function ProgramRegenerationDialog({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const onCloseRef = useRef(onClose);
   const submittingRef = useRef(false);
-  const isSubmitting = state.phase === "submitting";
+  const isSubmitting = state.phase === "submitting" || state.phase === "replacementCommitted";
+  const canConfirm = state.phase === "preview";
+  const reloadFailed = state.phase === "reloadFailed";
 
   onCloseRef.current = onClose;
   submittingRef.current = isSubmitting;
@@ -143,15 +147,25 @@ export function ProgramRegenerationDialog({
           >
             取消
           </button>
-          <button
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={isSubmitting}
-            onClick={onConfirm}
-            type="button"
-          >
-            {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : null}
-            {isSubmitting ? "正在生成计划" : "确认生成新计划"}
-          </button>
+          {reloadFailed ? (
+            <button
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white"
+              onClick={onReload}
+              type="button"
+            >
+              重新加载页面
+            </button>
+          ) : (
+            <button
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={!canConfirm}
+              onClick={onConfirm}
+              type="button"
+            >
+              {isSubmitting ? <Loader2 className="animate-spin" size={18} /> : null}
+              {state.phase === "replacementCommitted" ? "正在加载新计划" : isSubmitting ? "正在生成计划" : "确认生成新计划"}
+            </button>
+          )}
         </div>
       </section>
     </div>

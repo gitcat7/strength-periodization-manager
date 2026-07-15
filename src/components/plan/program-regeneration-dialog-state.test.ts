@@ -71,4 +71,22 @@ describe("regeneration dialog state", () => {
     expect(duplicate).toBe(state);
     expect(duplicate.phase).toBe("submitting");
   });
+
+  it("never exposes a second confirmation after replacement commits but reloading fails", () => {
+    let state = reduceRegenerationDialog(createRegenerationDialogState(), {
+      type: "open",
+      preview,
+      selection
+    });
+    state = reduceRegenerationDialog(state, { type: "confirm" });
+    state = reduceRegenerationDialog(state, { type: "replacementCommitted" });
+    state = reduceRegenerationDialog(state, {
+      type: "reloadFailed",
+      message: "新计划已生成，但无法加载最新日程。请重新加载页面数据后再继续训练。"
+    });
+
+    expect(state).toMatchObject({ open: true, phase: "reloadFailed", preview, selection });
+    expect(buildConfirmationPayload(state)).toBeNull();
+    expect(reduceRegenerationDialog(state, { type: "confirm" })).toBe(state);
+  });
 });

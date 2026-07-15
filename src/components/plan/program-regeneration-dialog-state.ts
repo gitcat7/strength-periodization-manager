@@ -18,7 +18,7 @@ export type RegenerationDialogState =
   | {
       error: string;
       open: true;
-      phase: "preview" | "submitting";
+      phase: "preview" | "submitting" | "replacementCommitted" | "reloadFailed";
       preview: RegenerationPreview;
       selection: RegenerationSelection;
     };
@@ -27,6 +27,8 @@ export type RegenerationDialogAction =
   | { type: "open"; preview: RegenerationPreview; selection: RegenerationSelection }
   | { type: "close" }
   | { type: "confirm" }
+  | { type: "replacementCommitted" }
+  | { type: "reloadFailed"; message: string }
   | { type: "requestFailed"; message: string }
   | { type: "requestSucceeded" };
 
@@ -41,9 +43,19 @@ export function reduceRegenerationDialog(
   if (action.type === "open") {
     return { error: "", open: true, phase: "preview", preview: action.preview, selection: action.selection };
   }
-  if (action.type === "close") return state.phase === "submitting" ? state : createRegenerationDialogState();
+  if (action.type === "close") {
+    return state.phase === "submitting" || state.phase === "replacementCommitted"
+      ? state
+      : createRegenerationDialogState();
+  }
   if (action.type === "confirm") {
     return state.phase === "preview" ? { ...state, error: "", phase: "submitting" } : state;
+  }
+  if (action.type === "replacementCommitted") {
+    return state.phase === "submitting" ? { ...state, phase: "replacementCommitted" } : state;
+  }
+  if (action.type === "reloadFailed") {
+    return state.phase === "replacementCommitted" ? { ...state, error: action.message, phase: "reloadFailed" } : state;
   }
   if (action.type === "requestFailed") {
     return state.phase === "submitting" ? { ...state, error: action.message, phase: "preview" } : state;

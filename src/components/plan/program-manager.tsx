@@ -33,6 +33,7 @@ import {
   type ProgramReplacementPayload
 } from "@/domain/program-regeneration";
 import { ProgramRegenerationDialog } from "./program-regeneration-dialog";
+import { resolveProgramRegenerationOutcome } from "./program-regeneration-outcome";
 import {
   buildConfirmationPayload,
   createRegenerationDialogState,
@@ -634,6 +635,7 @@ export function ProgramManager() {
       return;
     }
 
+    pendingReplacementPayload.current = null;
     clearProgramRegenerationCaches();
     await trackEvent({
       eventName: "program_regenerated",
@@ -645,30 +647,35 @@ export function ProgramManager() {
       supabase,
       userId
     });
+    setRegenerationDialog((current) => reduceRegenerationDialog(current, { type: "replacementCommitted" }));
     const reloaded = await loadCurrentProgram({ requireActiveProgram: true, showLoading: false });
     confirmationInFlight.current = false;
+    const outcome = resolveProgramRegenerationOutcome({
+      freshProgramLoaded: reloaded,
+      replacementSucceeded: true
+    });
 
-    if (!reloaded) {
-      setProgram(null);
-      setWorkouts([]);
-      setWorkoutExercises([]);
-      setRecommendations([]);
-      setRecommendationWeights({});
+    if (outcome.type === "reloadFailed") {
+      setProgram(outcome.staleData.program);
+      setWorkouts(outcome.staleData.workouts);
+      setWorkoutExercises(outcome.staleData.workoutExercises);
+      setRecommendations(outcome.staleData.recommendations);
+      setRecommendationWeights(outcome.staleData.recommendationWeights);
       setStatus("error");
-      setMessage("新计划已生成，但无法加载最新日程。请刷新页面后再继续训练，当前显示的旧日程已不再有效。");
+      setMessage(outcome.message);
       setRegenerationDialog((current) =>
         reduceRegenerationDialog(current, {
-          type: "requestFailed",
-          message: "新计划已生成，但无法加载最新日程。请刷新页面后再继续训练。"
+          type: outcome.dialogAction,
+          message: outcome.dialogMessage
         })
       );
       return;
     }
 
-    pendingReplacementPayload.current = null;
-    setRegenerationDialog((current) => reduceRegenerationDialog(current, { type: "requestSucceeded" }));
-    setMessage("新训练计划已生成。");
-    requestAnimationFrame(() => firstScheduleItemRef.current?.focus());
+    if (outcome.clearPendingPayload) pendingReplacementPayload.current = null;
+    setRegenerationDialog((current) => reduceRegenerationDialog(current, { type: outcome.dialogAction }));
+    setMessage(outcome.message);
+    if (outcome.focusScheduleRow) requestAnimationFrame(() => firstScheduleItemRef.current?.focus());
   }
 
   if (status === "loading") {
@@ -906,11 +913,12 @@ export function ProgramManager() {
       {regenerationDialog.open ? (
         <ProgramRegenerationDialog
           onClose={() => {
-            if (regenerationDialog.phase === "submitting") return;
+            if (regenerationDialog.phase === "submitting" || regenerationDialog.phase === "replacementCommitted") return;
             pendingReplacementPayload.current = null;
             setRegenerationDialog((current) => reduceRegenerationDialog(current, { type: "close" }));
           }}
           onConfirm={confirmProgramRegeneration}
+          onReload={() => window.location.reload()}
           returnFocusRef={regenerationTriggerRef}
           state={regenerationDialog}
         />
