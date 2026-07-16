@@ -178,7 +178,8 @@ function toExternalExerciseReference(value: WgerExerciseInfo): ExternalExerciseR
   const category = localizeCatalogText(readName(value.category) ?? "", "其他");
   const equipment = readNames(value.equipment).map((item) => localizeCatalogText(item, "其他器械"));
   const muscles = readNames(value.muscles).map((item) => localizeCatalogText(item, "其他肌群"));
-  const name = readChineseName(value.translations) ?? readChineseText(readName(value)) ?? `${muscles[0] ?? category}训练动作 ${externalId}`;
+  const name = readChineseName(value.translations) ?? readChineseText(readName(value));
+  if (!name || (!equipment.length && !muscles.length)) return null;
 
   return {
     category,

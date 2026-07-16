@@ -16,7 +16,7 @@ describe("wger client", () => {
     vi.unstubAllGlobals();
   });
 
-  it("maps a bounded wger response to references without returning upstream descriptions", async () => {
+  it("hides an unreadable wger record instead of inventing a fallback name", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -26,20 +26,7 @@ describe("wger client", () => {
       )
     );
 
-    await expect(searchWgerExercises({ page: 1, query: "bench" })).resolves.toEqual({
-      hasMore: false,
-      items: [
-        {
-          category: "胸部",
-          equipment: ["杠铃"],
-          externalId: "42",
-          muscles: ["胸大肌"],
-          name: "胸大肌训练动作 42",
-          provider: "wger",
-          sourceUrl: "https://wger.de/en/exercise/42"
-        }
-      ]
-    });
+    await expect(searchWgerExercises({ page: 1, query: "bench" })).resolves.toEqual({ hasMore: false, items: [] });
   });
 
   it("prefers Chinese exercise names and localizes catalog metadata", async () => {
@@ -56,15 +43,13 @@ describe("wger client", () => {
     });
   });
 
-  it("uses Chinese-only fallbacks when Wger has no Chinese translation", async () => {
+  it("does not expose English-only upstream names as a Chinese catalog action", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       next: null,
       results: [{ ...upstreamExercise, translations: [{ name: "Bench press" }] }]
     }), { status: 200 })));
 
-    await expect(searchWgerExercises({ page: 1, query: "bench" })).resolves.toMatchObject({
-      items: [{ name: "胸大肌训练动作 42" }]
-    });
+    await expect(searchWgerExercises({ page: 1, query: "bench" })).resolves.toEqual({ hasMore: false, items: [] });
   });
 
   it("uses the fixed exerciseinfo endpoint and clamps untrusted page input", async () => {
