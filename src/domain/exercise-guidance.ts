@@ -19,6 +19,17 @@ const localExerciseGuidance: Readonly<Record<string, LocalExerciseGuidance>> = O
   }
 });
 
-export function getLocalExerciseGuidance(slug: string): LocalExerciseGuidance | null {
-  return localExerciseGuidance[slug] ?? null;
+export function getLocalExerciseGuidance(slug: string, name?: string): LocalExerciseGuidance | null {
+  const knownGuidance = localExerciseGuidance[slug];
+  if (knownGuidance) return knownGuidance;
+  if (!name?.trim()) return null;
+
+  return {
+    externalId: null,
+    nameEn: name,
+    nameZh: name,
+    equipment: "按计划或可用器械",
+    target: "按训练方向与动作模式执行",
+    instructionsZh: "先使用能够稳定控制全程的重量，保持动作轨迹与呼吸稳定。出现疼痛、明显代偿或动作轨迹失控时，停止并寻求合格教练评估。"
+  };
 }

@@ -4,7 +4,6 @@ import { isExerciseSubstitutionEligible } from "./exercise-substitution";
 
 const source = {
   id: "source",
-  catalogExternalId: "0334",
   movementPattern: "shoulder_abduction",
   substitutionEnabled: true,
   trainingDirection: "push"
@@ -12,7 +11,6 @@ const source = {
 
 const compatibleAlternative = {
   id: "target",
-  catalogExternalId: "0178",
   movementPattern: "shoulder_abduction",
   substitutionEnabled: true,
   trainingDirection: "push"
@@ -27,6 +25,18 @@ describe("isExerciseSubstitutionEligible", () => {
         orderIndex: 3,
         source,
         workoutStatus
+      })
+    ).toBe(true);
+  });
+
+  it("allows a same-pattern local core substitution without a legacy catalog id", () => {
+    expect(
+      isExerciseSubstitutionEligible({
+        alternatives: [compatibleAlternative],
+        hasCompletedSet: false,
+        orderIndex: 3,
+        source,
+        workoutStatus: "scheduled"
       })
     ).toBe(true);
   });
@@ -67,10 +77,7 @@ describe("isExerciseSubstitutionEligible", () => {
     ).toBe(false);
   });
 
-  it.each([
-    ["disabled", { ...source, substitutionEnabled: false }],
-    ["unmapped", { ...source, catalogExternalId: null }]
-  ])("rejects a %s source", (_label, ineligibleSource) => {
+  it.each([["disabled", { ...source, substitutionEnabled: false }]])("rejects a %s source", (_label, ineligibleSource) => {
     expect(
       isExerciseSubstitutionEligible({
         alternatives: [compatibleAlternative],

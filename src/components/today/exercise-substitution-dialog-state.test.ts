@@ -13,7 +13,6 @@ import {
 } from "./exercise-substitution-dialog-state";
 
 const source: SubstitutionCandidate = {
-  catalogExternalId: "0334",
   id: "source-exercise",
   movementPattern: "shoulder_abduction",
   name: "侧平举",
@@ -23,7 +22,6 @@ const source: SubstitutionCandidate = {
 };
 
 const compatibleTarget: SubstitutionCandidate = {
-  catalogExternalId: "0178",
   id: "cable-lateral-raise",
   movementPattern: "shoulder_abduction",
   name: "绳索侧平举",
@@ -32,7 +30,6 @@ const compatibleTarget: SubstitutionCandidate = {
 };
 
 const incompatiblePattern: SubstitutionCandidate = {
-  catalogExternalId: "0201",
   id: "triceps-pushdown",
   movementPattern: "elbow_extension",
   name: "绳索下压",
@@ -41,7 +38,6 @@ const incompatiblePattern: SubstitutionCandidate = {
 };
 
 const incompatibleDirection: SubstitutionCandidate = {
-  catalogExternalId: "0178",
   id: "cable-lateral-raise-pull",
   movementPattern: "shoulder_abduction",
   name: "绳索侧平举",
@@ -50,7 +46,6 @@ const incompatibleDirection: SubstitutionCandidate = {
 };
 
 const disabledTarget: SubstitutionCandidate = {
-  catalogExternalId: "0178",
   id: "disabled-cable-lateral-raise",
   movementPattern: "shoulder_abduction",
   name: "禁用绳索侧平举",
@@ -58,14 +53,6 @@ const disabledTarget: SubstitutionCandidate = {
   trainingDirection: "push"
 };
 
-const unmappedTarget: SubstitutionCandidate = {
-  catalogExternalId: null,
-  id: "unmapped-lateral-raise",
-  movementPattern: "shoulder_abduction",
-  name: "未映射侧平举",
-  substitutionEnabled: true,
-  trainingDirection: "push"
-};
 
 function applyState(
   state: ReturnType<typeof getInitialExerciseSubstitutionDialogState>,
@@ -80,8 +67,7 @@ describe("exerciseSubstitutionDialogReducer", () => {
       compatibleTarget,
       incompatiblePattern,
       incompatibleDirection,
-      disabledTarget,
-      unmappedTarget
+      disabledTarget
     ]);
 
     expect(state.candidates).toEqual([compatibleTarget]);

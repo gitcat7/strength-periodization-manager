@@ -51,7 +51,6 @@ import {
   type SubstitutionOutcome,
   type ExerciseSubstitutionScope
 } from "./exercise-substitution-dialog-state";
-import { shouldRetryWithBaseExerciseSchema } from "./today-workout-schema-fallback";
 import { RestDayCard } from "./rest-day-card";
 import {
   reportRestCompletionFailure,
@@ -77,7 +76,6 @@ type WorkoutExerciseRow = {
   target_reps: number;
   target_weight: number;
   exercises: {
-    catalog_external_id: string | null;
     default_increment: number;
     movement_pattern: string | null;
     name: string;
@@ -88,34 +86,30 @@ type WorkoutExerciseRow = {
 };
 
 const workoutExerciseSelect =
-  "id,exercise_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug,default_increment,catalog_external_id,training_direction,movement_pattern,substitution_enabled)";
-const baseWorkoutExerciseSelect =
-  "id,exercise_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug,default_increment)";
+  "id,exercise_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug,default_increment,training_direction,movement_pattern,substitution_enabled)";
 
-function normalizeWorkoutExerciseRows(rows: unknown[], hasCatalogBridge: boolean): WorkoutExerciseRow[] {
+function normalizeWorkoutExerciseRows(rows: unknown[]): WorkoutExerciseRow[] {
   return (rows as Array<Omit<WorkoutExerciseRow, "exercises"> & { exercises: Partial<WorkoutExerciseRow["exercises"]> | null }>).map(
     (row) => ({
       ...row,
       exercises: row.exercises
         ? {
-            catalog_external_id: hasCatalogBridge ? row.exercises.catalog_external_id ?? null : null,
             default_increment: row.exercises.default_increment ?? 2.5,
-            movement_pattern: hasCatalogBridge ? row.exercises.movement_pattern ?? null : null,
+            movement_pattern: row.exercises.movement_pattern ?? null,
             name: row.exercises.name ?? "动作",
             slug: row.exercises.slug ?? "",
-            substitution_enabled: hasCatalogBridge ? row.exercises.substitution_enabled ?? false : false,
-            training_direction: hasCatalogBridge ? row.exercises.training_direction ?? null : null
+            substitution_enabled: row.exercises.substitution_enabled ?? false,
+            training_direction: row.exercises.training_direction ?? null
           }
         : null
     })
   );
 }
 
-type CatalogExerciseRow = {
+type CoreExerciseRow = {
   id: string;
   name: string;
   slug: string;
-  catalog_external_id: string | null;
   training_direction: string | null;
   movement_pattern: string | null;
   substitution_enabled: boolean;
@@ -176,20 +170,19 @@ const todayCacheKey = "strength-training-cache:today";
 const restTimerSettingsKey = "strength-training-rest-timer";
 const restTimerOptions = [60, 90, 120, 180];
 
-async function loadCatalogExercises(): Promise<CatalogExerciseRow[]> {
+async function loadCoreExercises(): Promise<CoreExerciseRow[]> {
   const supabase = createBrowserSupabaseClient();
   const { data, error } = await supabase
     .from("exercises")
-    .select("id,name,slug,catalog_external_id,training_direction,movement_pattern,substitution_enabled")
-    .eq("substitution_enabled", true)
-    .not("catalog_external_id", "is", null);
+    .select("id,name,slug,training_direction,movement_pattern,substitution_enabled")
+    .eq("substitution_enabled", true);
 
   if (error) {
-    console.warn("catalog exercises query failed", error.message);
+    console.warn("core exercises query failed", error.message);
     return [];
   }
 
-  return (data ?? []) as unknown as CatalogExerciseRow[];
+  return (data ?? []) as unknown as CoreExerciseRow[];
 }
 
 async function loadWorkoutIdsForExercises(workoutExerciseIds: string[]): Promise<{ workoutIds: string[]; error: string | null }> {
@@ -213,7 +206,7 @@ async function loadWorkoutIdsForExercises(workoutExerciseIds: string[]): Promise
 }
 
 type ExerciseSubstitutionButtonProps = {
-  alternatives: CatalogExerciseRow[];
+  alternatives: CoreExerciseRow[];
   exercise: WorkoutExerciseRow;
   hasCompletedSet: boolean;
   workoutStatus: string;
@@ -231,7 +224,6 @@ function ExerciseSubstitutionButton({
   if (!exerciseData) return null;
 
   const sourceCandidate: SubstitutionCandidate = {
-    catalogExternalId: exerciseData.catalog_external_id,
     id: exercise.exercise_id,
     movementPattern: exerciseData.movement_pattern,
     name: exerciseData.name,
@@ -242,7 +234,6 @@ function ExerciseSubstitutionButton({
 
   const eligible = isExerciseSubstitutionEligible({
     alternatives: alternatives.map((row) => ({
-      catalogExternalId: row.catalog_external_id,
       id: row.id,
       movementPattern: row.movement_pattern,
       name: row.name,
@@ -288,7 +279,7 @@ export function TodayWorkout() {
   const [message, setMessage] = useState("");
   const [validationIssues, setValidationIssues] = useState<TrainingValidationIssue[]>([]);
   const [workoutSummary, setWorkoutSummary] = useState<WorkoutSummary | null>(null);
-  const [catalogExercises, setCatalogExercises] = useState<CatalogExerciseRow[]>([]);
+  const [coreExercises, setCoreExercises] = useState<CoreExerciseRow[]>([]);
   const [substitutionDialog, setSubstitutionDialog] = useState<SubstitutionDialogState>({
     error: null,
     open: false,
@@ -487,22 +478,8 @@ export function TodayWorkout() {
             .order("order_index", { ascending: true }),
           "训练动作读取超时，请刷新页面后重试。"
         );
-        let exerciseData: unknown = catalogExerciseResult.data;
-        let exerciseError: { code?: string | null; message?: string | null } | null = catalogExerciseResult.error;
-
-        const hasCatalogBridge = !shouldRetryWithBaseExerciseSchema(exerciseError);
-        if (!hasCatalogBridge) {
-          const fallback = await withTimeout(
-            supabase
-              .from("workout_exercises")
-              .select(baseWorkoutExerciseSelect)
-              .eq("workout_id", workoutData.id)
-              .order("order_index", { ascending: true }),
-            "训练动作读取超时，请刷新页面后重试。"
-          );
-          exerciseData = fallback.data;
-          exerciseError = fallback.error;
-        }
+        const exerciseData: unknown = catalogExerciseResult.data;
+        const exerciseError: { code?: string | null; message?: string | null } | null = catalogExerciseResult.error;
 
         if (exerciseError) {
           setStatus("error");
@@ -510,7 +487,7 @@ export function TodayWorkout() {
           return;
         }
 
-        const exerciseRows = normalizeWorkoutExerciseRows(Array.isArray(exerciseData) ? exerciseData : [], hasCatalogBridge);
+        const exerciseRows = normalizeWorkoutExerciseRows(Array.isArray(exerciseData) ? exerciseData : []);
         setWorkout(workoutData as WorkoutRow);
         setExercises(exerciseRows);
 
@@ -519,8 +496,8 @@ export function TodayWorkout() {
           ensureSetLogs(exerciseRows, workoutData.id)
         ]);
 
-        loadCatalogExercises().then((rows) => setCatalogExercises(rows)).catch(() => {
-          // Catalog availability must not block training execution.
+        loadCoreExercises().then((rows) => setCoreExercises(rows)).catch(() => {
+          // Core substitution availability must not block training execution.
         });
         writeClientCache<TodayCache>(todayCacheKey, {
           coachRecommendations: [],
@@ -1353,12 +1330,11 @@ export function TodayWorkout() {
                   <p className="mt-2 text-sm text-muted">{getExerciseNote(exercise.exercises?.slug, index)}</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <ExerciseDetailLauncher
-                      catalogExternalId={exercise.exercises?.catalog_external_id}
                       exerciseName={exercise.exercises?.name}
                       exerciseSlug={exercise.exercises?.slug ?? "unknown"}
                     />
                     <ExerciseSubstitutionButton
-                      alternatives={catalogExercises}
+                      alternatives={coreExercises}
                       exercise={exercise}
                       hasCompletedSet={completedExerciseSets > 0}
                       workoutStatus={workout.status}
@@ -1426,8 +1402,7 @@ export function TodayWorkout() {
 
       {substitutionDialog.source ? (
         <ExerciseSubstitutionDialog
-          alternatives={catalogExercises.map((row) => ({
-            catalogExternalId: row.catalog_external_id,
+          alternatives={coreExercises.map((row) => ({
             id: row.id,
             movementPattern: row.movement_pattern,
             name: row.name,

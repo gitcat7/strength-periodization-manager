@@ -1,7 +1,6 @@
-const CACHE_VERSION = "strength-periodization-v5";
+const CACHE_VERSION = "strength-periodization-v6";
 const SHELL_CACHE = `${CACHE_VERSION}:shell`;
 const STATIC_CACHE = `${CACHE_VERSION}:static`;
-const CATALOG_CACHE = "strength-periodization-catalog-v1";
 
 const PRECACHE_URLS = [
   "/manifest.webmanifest",
@@ -26,7 +25,6 @@ self.addEventListener("activate", (event) => {
           keys
             .filter(
               (key) =>
-                key !== CATALOG_CACHE &&
                 key.startsWith("strength-periodization-") &&
                 !key.startsWith(CACHE_VERSION)
             )
@@ -47,19 +45,6 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith(networkFirst(request, SHELL_CACHE));
-    return;
-  }
-
-  if (url.pathname === "/exercise-catalog/manifest.json") {
-    event.respondWith(networkFirst(request, CATALOG_CACHE));
-    return;
-  }
-
-  if (
-    url.pathname.startsWith("/exercise-catalog/exercises.") &&
-    url.pathname.endsWith(".json")
-  ) {
-    event.respondWith(cacheFirst(request, CATALOG_CACHE));
     return;
   }
 

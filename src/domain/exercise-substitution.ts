@@ -2,7 +2,6 @@ export type ExerciseSubstitutionScope = "current_workout" | "remaining_program";
 
 export type ExerciseSubstitutionCandidate = {
   id: string;
-  catalogExternalId: string | null;
   trainingDirection: string | null;
   movementPattern: string | null;
   substitutionEnabled: boolean;
@@ -27,7 +26,6 @@ export function isExerciseSubstitutionEligible({
   if (orderIndex < 3 || hasCompletedSet) return false;
   if (
     !source.substitutionEnabled ||
-    source.catalogExternalId === null ||
     source.trainingDirection === null ||
     source.movementPattern === null
   ) {
@@ -38,7 +36,6 @@ export function isExerciseSubstitutionEligible({
     (alternative) =>
       alternative.id !== source.id &&
       alternative.substitutionEnabled &&
-      alternative.catalogExternalId !== null &&
       alternative.trainingDirection === source.trainingDirection &&
       alternative.movementPattern === source.movementPattern
   );

@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { ExternalLink, X } from "lucide-react";
-import type { ExerciseCatalogRecord } from "@/domain/exercise-catalog";
+import type { ExternalExerciseReference } from "@/domain/external-exercise";
 import type { LocalExerciseGuidance } from "@/domain/exercise-guidance";
 import { createDetailFocusManager, getNextDialogFocusTarget } from "./exercise-detail-focus";
 
@@ -10,7 +10,7 @@ type ExerciseDetailPanelProps = {
   localGuidance: LocalExerciseGuidance | null;
   onClose: () => void;
   open: boolean;
-  record: ExerciseCatalogRecord | null;
+  reference: ExternalExerciseReference | null;
   restoreFocusTarget?: HTMLElement | null;
   desktopSide?: boolean;
 };
@@ -20,7 +20,7 @@ export function ExerciseDetailPanel({
   localGuidance,
   onClose,
   open,
-  record,
+  reference,
   restoreFocusTarget = null
 }: ExerciseDetailPanelProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -29,7 +29,7 @@ export function ExerciseDetailPanel({
   const onCloseRef = useRef(onClose);
   const [isMobile, setIsMobile] = useState(false);
   const titleId = useId();
-  const detail = record ?? localGuidance;
+  const detail = reference ?? localGuidance;
 
   useEffect(() => {
     const media = window.matchMedia("(max-width: 767px)");
@@ -88,9 +88,7 @@ export function ExerciseDetailPanel({
 
   if (!open || !detail) return null;
 
-  const title = record?.nameZh ?? detail.nameZh;
-  const sourceUrl = "https://github.com/hasaneyldrm/exercises-dataset/tree/118e4bd6b14da6df0e36605d7169b65db18389a4";
-  const noticeUrl = "https://github.com/gitcat7/strength-periodization-manager/blob/main/THIRD_PARTY_NOTICES.md";
+  const title = reference ? reference.name : localGuidance!.nameZh;
 
   return (
     <div
@@ -115,7 +113,7 @@ export function ExerciseDetailPanel({
             <h2 className="text-xl font-semibold" id={titleId}>
               {title}
             </h2>
-            {record?.nameZh ? <p className="mt-1 text-sm text-muted">{record.nameEn}</p> : null}
+            {reference ? <p className="mt-1 text-sm text-muted">wger 动作引用</p> : null}
           </div>
           <button
             aria-label="关闭动作详情"
@@ -132,24 +130,24 @@ export function ExerciseDetailPanel({
         <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm">
           <div>
             <dt className="text-muted">器械</dt>
-            <dd className="mt-1 font-medium text-ink">{detail.equipment}</dd>
+            <dd className="mt-1 font-medium text-ink">{reference ? reference.equipment.join("、") || "未注明" : localGuidance!.equipment}</dd>
           </div>
           <div>
             <dt className="text-muted">目标肌群</dt>
-            <dd className="mt-1 font-medium text-ink">{detail.target}</dd>
+            <dd className="mt-1 font-medium text-ink">{reference ? reference.muscles.join("、") || reference.category || "未注明" : localGuidance!.target}</dd>
           </div>
-          {record ? (
+          {reference ? (
             <div className="col-span-2">
-              <dt className="text-muted">次要肌群</dt>
-              <dd className="mt-1 font-medium text-ink">{record.secondaryMuscles.join("、") || "无"}</dd>
+              <dt className="text-muted">分类</dt>
+              <dd className="mt-1 font-medium text-ink">{reference.category ?? "未注明"}</dd>
             </div>
           ) : null}
         </dl>
 
-        <section className="mt-6">
+        {localGuidance ? <section className="mt-6">
           <h3 className="font-semibold">动作要点</h3>
-          <p className="mt-2 text-sm leading-6 text-muted">{detail.instructionsZh}</p>
-        </section>
+          <p className="mt-2 text-sm leading-6 text-muted">{localGuidance.instructionsZh}</p>
+        </section> : null}
 
         <section className="mt-5 rounded-lg bg-field p-3">
           <h3 className="text-sm font-semibold">新手提示</h3>
@@ -158,13 +156,13 @@ export function ExerciseDetailPanel({
           </p>
         </section>
 
-        {record ? (
+        {reference ? (
           <footer className="mt-6 flex flex-wrap gap-x-4 gap-y-2 border-t border-line pt-4 text-sm">
-            <a className="inline-flex items-center gap-1 font-semibold text-action" href={sourceUrl} rel="noreferrer" target="_blank">
-              上游来源
+            <a className="inline-flex items-center gap-1 font-semibold text-action" href={reference.sourceUrl} rel="noreferrer" target="_blank">
+              wger 来源
               <ExternalLink size={14} />
             </a>
-            <a className="inline-flex items-center gap-1 font-semibold text-action" href={noticeUrl} rel="noreferrer" target="_blank">
+            <a className="inline-flex items-center gap-1 font-semibold text-action" href="https://wger.de/api/v2/" rel="noreferrer" target="_blank">
               许可说明
               <ExternalLink size={14} />
             </a>

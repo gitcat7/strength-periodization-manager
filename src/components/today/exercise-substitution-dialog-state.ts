@@ -1,7 +1,6 @@
 export type ExerciseSubstitutionScope = "current_workout" | "remaining_program";
 
 export type SubstitutionCandidate = {
-  catalogExternalId: string | null;
   id: string;
   movementPattern: string | null;
   name: string;
@@ -46,7 +45,6 @@ export function isCompatibleCandidate(source: SubstitutionCandidate, candidate: 
   return (
     candidate.id !== source.id &&
     candidate.substitutionEnabled &&
-    candidate.catalogExternalId !== null &&
     candidate.trainingDirection === source.trainingDirection &&
     candidate.movementPattern === source.movementPattern
   );

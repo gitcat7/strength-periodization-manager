@@ -18,4 +18,11 @@ describe("getLocalExerciseGuidance", () => {
   it("returns null for unknown local guidance slugs", () => {
     expect(getLocalExerciseGuidance("bench_press")).toBeNull();
   });
+
+  it("gives an unmapped local core action local guidance instead of a third-party detail", () => {
+    expect(getLocalExerciseGuidance("barbell_bench_press", "杠铃卧推")).toMatchObject({
+      externalId: null,
+      nameZh: "杠铃卧推"
+    });
+  });
 });

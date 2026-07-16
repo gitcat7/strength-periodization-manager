@@ -7,8 +7,6 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "catalog:sync": "node scripts/sync-exercise-catalog.mjs",
-    "catalog:verify": "node scripts/verify-exercise-catalog.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

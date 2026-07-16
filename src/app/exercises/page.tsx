@@ -16,7 +16,7 @@ export default function ExercisesPage() {
             <BookOpen size={22} />
           </span>
           <div>
-            <p className="text-sm text-muted">已审核动作与基础指导</p>
+            <p className="text-sm text-muted">wger 动作引用与本地基础指导</p>
             <h1 className="text-2xl font-semibold">动作库</h1>
           </div>
         </div>
