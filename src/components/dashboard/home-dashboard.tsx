@@ -414,8 +414,8 @@ export function HomeDashboard() {
                 <h2 className="text-xl font-bold">{nextWorkout ? nextWorkout.name : "暂无训练计划"}</h2>
               </div>
             </div>
-            <Link className="pressable inline-flex items-center gap-1 rounded-md bg-action px-3 py-2 text-sm font-semibold text-white" href="/today">
-              {nextWorkout ? "开始训练" : "去创建"}
+            <Link className="pressable inline-flex items-center gap-1 rounded-md bg-action px-3 py-2 text-sm font-semibold text-white" href={nextWorkout ? "/today" : "/single-workout"}>
+              {nextWorkout ? "开始训练" : "记录今日训练"}
               <ArrowRight size={16} />
             </Link>
           </div>
@@ -452,9 +452,9 @@ export function HomeDashboard() {
             </>
           ) : (
             <div className="border-t border-line pt-4">
-              <p className="text-sm text-muted">从一分化、三分化、五分化或推拉蹲开始，也可命名自己的训练循环。</p>
+              <p className="text-sm text-muted">可以先记录一场训练；单次记录会进入历史和进展，但不会生成或修改周期计划。</p>
               <Link className="pressable mt-3 inline-flex rounded-md border border-action px-3 py-2 text-sm font-semibold text-action" href="/plan">
-                创建训练模板
+                创建周期计划
               </Link>
             </div>
           )}

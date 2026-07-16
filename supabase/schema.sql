@@ -61,7 +61,7 @@ create table if not exists public.programs (
 
 create table if not exists public.workouts (
   id uuid primary key default gen_random_uuid(),
-  program_id uuid not null references public.programs(id) on delete cascade,
+  program_id uuid references public.programs(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
   scheduled_date date not null,
   sequence_index integer,
@@ -560,18 +560,24 @@ on public.workouts for all
 to authenticated
 using (
   auth.uid() = user_id
-  and exists (
-    select 1 from public.programs as program
-    where program.id = workouts.program_id
-      and program.user_id = auth.uid()
+  and (
+    workouts.program_id is null
+    or exists (
+      select 1 from public.programs as program
+      where program.id = workouts.program_id
+        and program.user_id = auth.uid()
+    )
   )
 )
 with check (
   auth.uid() = user_id
-  and exists (
-    select 1 from public.programs as program
-    where program.id = workouts.program_id
-      and program.user_id = auth.uid()
+  and (
+    workouts.program_id is null
+    or exists (
+      select 1 from public.programs as program
+      where program.id = workouts.program_id
+        and program.user_id = auth.uid()
+    )
   )
 );
 
@@ -583,20 +589,20 @@ using (
   exists (
     select 1
     from public.workouts as workout
-    join public.programs as program on program.id = workout.program_id
+    left join public.programs as program on program.id = workout.program_id
     where workout.id = workout_exercises.workout_id
       and workout.user_id = auth.uid()
-      and program.user_id = auth.uid()
+      and (workout.program_id is null or program.user_id = auth.uid())
   )
 )
 with check (
   exists (
     select 1
     from public.workouts as workout
-    join public.programs as program on program.id = workout.program_id
+    left join public.programs as program on program.id = workout.program_id
     where workout.id = workout_exercises.workout_id
       and workout.user_id = auth.uid()
-      and program.user_id = auth.uid()
+      and (workout.program_id is null or program.user_id = auth.uid())
   )
 );
 
