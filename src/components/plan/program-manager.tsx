@@ -321,7 +321,12 @@ export function ProgramManager() {
     const loadedMainLifts = (mainLiftsResult.data ?? []) as ExerciseRow[];
     setMainLifts(loadedMainLifts);
 
-    if (profileResult.error || !profileResult.data) {
+    if (profileResult.error) {
+      setMessage("计划参数读取失败，请刷新后重试。");
+      return;
+    }
+
+    if (!profileResult.data) {
       setPlanSetup({
         ...defaultPlanSetup,
         lifts: loadedMainLifts.map((exercise) => ({ exerciseId: exercise.id, weightKg: "", reps: "5" }))
@@ -1163,6 +1168,14 @@ export function PlanSetupForm({
     update({ availableWeekdays });
   }
 
+  function updateLift(exerciseId: string, patch: Partial<{ weightKg: string; reps: string }>) {
+    const existingLift = value.lifts.find((lift) => lift.exerciseId === exerciseId);
+    const lifts = existingLift
+      ? value.lifts.map((lift) => lift.exerciseId === exerciseId ? { ...lift, ...patch } : lift)
+      : [...value.lifts, { exerciseId, weightKg: "", reps: "5", ...patch }];
+    update({ lifts });
+  }
+
   return (
     <section className="rounded-lg border border-line bg-white p-4">
       <div className="mb-4">
@@ -1273,9 +1286,7 @@ export function PlanSetupForm({
                     className="h-10 w-full rounded-md border border-line bg-white px-2 text-sm"
                     inputMode="decimal"
                     min="0"
-                    onChange={(event) => update({
-                      lifts: value.lifts.map((item) => item.exerciseId === exercise.id ? { ...item, weightKg: event.target.value } : item)
-                    })}
+                    onChange={(event) => updateLift(exercise.id, { weightKg: event.target.value })}
                     step="0.5"
                     type="number"
                     value={lift.weightKg}
@@ -1288,9 +1299,7 @@ export function PlanSetupForm({
                     className="h-10 w-full rounded-md border border-line bg-white px-2 text-sm"
                     inputMode="numeric"
                     min="1"
-                    onChange={(event) => update({
-                      lifts: value.lifts.map((item) => item.exerciseId === exercise.id ? { ...item, reps: event.target.value } : item)
-                    })}
+                    onChange={(event) => updateLift(exercise.id, { reps: event.target.value })}
                     type="number"
                     value={lift.reps}
                   />
