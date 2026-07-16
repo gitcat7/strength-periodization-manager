@@ -285,3 +285,25 @@ git commit -m "docs: record P0 workout verification"
 - **Spec coverage:** Task 1 covers finite audited actions, readable external filtering, ordering and details. Task 2 covers caller-owned manual snapshots and RPC/RLS validation. Tasks 3–4 cover field labels, validation retention and both completion summaries. Task 5 covers homepage/training boundaries and default browse. Task 6 covers full automation and authenticated browser checks.
 - **No placeholders:** all tasks identify concrete files, interfaces, RED/GREEN commands, expected outcomes and commits.
 - **Type consistency:** reviewed/external/manual exercise inputs flow through `single-workout.ts`; set validation and summary use the shared `workout-recording.ts` interface in both recorder pages.
+
+## Implementation Evidence — 2026-07-16
+
+- [x] Task 1: `ad4b4ad feat: add reviewed exercise selection` — 80 product-owned reviewed actions; unreadable/metadata-free wger entries are not returned; targeted tests: 12 passed.
+- [x] Task 2: `be88440 feat: validate standalone workout records` — `manual`/`reviewed` workout snapshots, owner-bound standalone RPC updates, completed-set database validation, migration and `schema.sql` parity; TypeScript + SQL contract tests: 13 passed.
+- [x] Task 3/4: `0231d25 feat: make workout recording safe` — shared group validation/summary; free-training boundary, audited default action list, explicit wger search, manual action entry, fixed set headers, field errors and completion confirmation; periodic training now also confirms a summary before final write.
+- [x] Task 5: same UI commit — homepage exposes `继续今日计划` and `快速记录自由训练` separately, while no-plan state preserves free training plus `创建周期计划`.
+
+### Automated verification
+
+- `pnpm test`: PASS — 46 files / 178 tests passed; 1 existing skipped.
+- `pnpm lint`: PASS.
+- `pnpm typecheck`: PASS.
+- `pnpm build`: PASS.
+- `pnpm release:check`: PASS.
+- `pnpm test:db`: BLOCKED by local infrastructure, not assertions: `127.0.0.1:54322` refused the PostgreSQL connection. `supabase/tests/standalone_workout_drafts.test.sql` must be run after a local Supabase start or against an approved test environment.
+
+### Remaining environment checks
+
+- Authenticated browser smoke remains to be run in an environment with Supabase credentials/session: free workout at 320px, draft restore, valid/invalid completed sets, completion summary, history/progress/CSV visibility, and active-program next-workout invariance.
+- The required database migration is `supabase/migrations/20260716150000_p0_workout_recording.sql`; it has not been applied to any remote database by this task.
+- This branch has not been merged, pushed, or deployed by design.
