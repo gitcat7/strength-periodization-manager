@@ -24,6 +24,9 @@ type WorkoutExerciseRow = {
   target_sets: number;
   target_reps: number;
   target_weight: number;
+  exercise_name_snapshot?: string | null;
+  exercise_provider?: string | null;
+  external_exercise_id?: string | null;
   exercises: {
     name: string;
     slug: string;
@@ -477,7 +480,7 @@ async function loadWorkoutExercises(workoutIds: string[]) {
   const { data, error } = await withTimeout(
     supabase
       .from("workout_exercises")
-      .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
+      .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercise_name_snapshot,exercise_provider,external_exercise_id,exercises(name,slug)")
       .in("workout_id", workoutIds)
       .order("order_index", { ascending: true }),
     "训练动作读取超时，请稍后重试。"
@@ -526,6 +529,8 @@ function buildTrainingCsv({
     "day_type",
     "exercise_name",
     "exercise_slug",
+    "exercise_provider",
+    "external_exercise_id",
     "exercise_order",
     "set_index",
     "target_weight_kg",
@@ -551,8 +556,10 @@ function buildTrainingCsv({
           workout?.name ?? "",
           workout?.status ?? "",
           workout?.day_type ?? "",
-          exercise?.exercises?.name ?? "",
+          exercise?.exercises?.name ?? exercise?.exercise_name_snapshot ?? "",
           exercise?.exercises?.slug ?? "",
+          exercise?.exercise_provider ?? "",
+          exercise?.external_exercise_id ?? "",
           exercise?.order_index ?? "",
           log.set_index,
           log.target_weight,

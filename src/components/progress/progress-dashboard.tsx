@@ -20,6 +20,7 @@ type WorkoutExerciseRow = {
   id: string;
   workout_id: string;
   target_sets: number;
+  exercise_name_snapshot?: string | null;
   exercises: {
     name: string;
     slug: string;
@@ -127,7 +128,7 @@ export function ProgressDashboard() {
         const { data: exerciseData, error: exerciseError } = await withTimeout(
           supabase
             .from("workout_exercises")
-            .select("id,workout_id,target_sets,exercises(name,slug,is_main_lift)")
+            .select("id,workout_id,target_sets,exercise_name_snapshot,exercise_provider,external_exercise_id,exercises(name,slug,is_main_lift)")
             .in("workout_id", workoutIds),
           "动作数据读取超时，请刷新页面后重试。"
         );
