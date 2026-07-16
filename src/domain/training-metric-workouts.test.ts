@@ -25,4 +25,9 @@ describe("filterTrainingMetricWorkouts", () => {
 
     expect(filterTrainingMetricWorkouts(completedRows)).toEqual([completedRows[1]]);
   });
+
+  it("keeps a completed standalone training row in history and strength metrics", () => {
+    const standaloneWorkout = { day_type: "training", id: "standalone", program_id: null, volume: 950 };
+    expect(filterTrainingMetricWorkouts([standaloneWorkout])).toEqual([standaloneWorkout]);
+  });
 });

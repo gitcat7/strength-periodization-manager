@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { getDaysUntilTarget } from "@/domain/pr-planner";
 import { getNextWorkoutState } from "@/domain/next-workout";
+import { selectNextProgramWorkout } from "@/domain/next-program-workout";
 import { formatPrescription, getWorkoutMeta } from "@/domain/training-format";
 import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
 import { readClientCache, writeClientCache } from "@/lib/client-cache";
@@ -25,6 +26,7 @@ import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 type WorkoutRow = {
   day_type: "training" | "rest";
   id: string;
+  program_id: string | null;
   scheduled_date: string;
   sequence_index: number;
   name: string;
@@ -100,8 +102,9 @@ export function HomeDashboard() {
     const cached = readClientCache<HomeDashboardCache>(homeDashboardCacheKey);
     if (cached) {
       setEmail(cached.email);
-      setNextWorkout(cached.nextWorkout);
-      setNextWorkoutExercises(cached.nextWorkoutExercises);
+      // The active program may have changed since this cache was written.
+      setNextWorkout(null);
+      setNextWorkoutExercises([]);
       setCompletedWorkouts(cached.completedWorkouts);
       setCompletedExercises(cached.completedExercises);
       setSetLogs(cached.setLogs);
@@ -160,18 +163,37 @@ export function HomeDashboard() {
 
       setEmail(user.email ?? "");
 
+      const { data: activeProgram, error: activeProgramError } = await withTimeout(
+        supabase
+          .from("programs")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("status", "active")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        "当前训练计划读取超时，请刷新页面后重试。"
+      );
+      if (activeProgramError) {
+        setStatus("error");
+        setMessage(activeProgramError.message);
+        return;
+      }
+
       const [nextWorkoutResult, completedResult] = await Promise.all([
         withTimeout(
-          loadWorkoutsWithDayTypeFallback(
-            () => supabase.from("workouts").select("id,scheduled_date,sequence_index,name,status,day_type").eq("user_id", user.id).eq("day_type", "training").in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle(),
-            () => supabase.from("workouts").select("id,scheduled_date,sequence_index,name,status").eq("user_id", user.id).in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle()
-          ),
+          activeProgram
+            ? loadWorkoutsWithDayTypeFallback(
+                () => supabase.from("workouts").select("id,program_id,scheduled_date,sequence_index,name,status,day_type").eq("program_id", activeProgram.id).eq("day_type", "training").in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle(),
+                () => supabase.from("workouts").select("id,program_id,scheduled_date,sequence_index,name,status").eq("program_id", activeProgram.id).in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle()
+              )
+            : Promise.resolve({ data: null, error: null, usedLegacySchema: false }),
           "训练计划读取超时，请刷新页面后重试。"
         ),
         withTimeout(
           loadWorkoutsWithDayTypeFallback(
-            () => supabase.from("workouts").select("id,scheduled_date,name,status,day_type").eq("user_id", user.id).eq("status", "completed").eq("day_type", "training").order("scheduled_date", { ascending: false }).limit(12),
-            () => supabase.from("workouts").select("id,scheduled_date,name,status").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12)
+            () => supabase.from("workouts").select("id,program_id,scheduled_date,name,status,day_type").eq("user_id", user.id).eq("status", "completed").eq("day_type", "training").order("scheduled_date", { ascending: false }).limit(12),
+            () => supabase.from("workouts").select("id,program_id,scheduled_date,name,status").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12)
           ),
           "训练历史读取超时，请刷新页面后重试。"
         )
@@ -185,7 +207,9 @@ export function HomeDashboard() {
         return;
       }
 
-      const nextWorkoutRow = nextWorkoutData as WorkoutRow | null;
+      const nextWorkoutRow = activeProgram
+        ? selectNextProgramWorkout(nextWorkoutData ? [nextWorkoutData as WorkoutRow] : [], activeProgram.id)
+        : null;
       setNextWorkout(nextWorkoutRow);
 
       const { data: completedData, error: completedError } = completedResult;

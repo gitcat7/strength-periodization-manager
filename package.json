@@ -16,6 +16,7 @@
     "release:check": "node scripts/release-check.mjs",
     "smoke": "node scripts/smoke-check.mjs",
     "test": "vitest run",
+    "test:db": "pnpm dlx supabase@2.34.3 test db supabase/tests/standalone_workout_drafts.test.sql --local",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },

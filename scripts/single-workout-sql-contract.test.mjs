@@ -2,6 +2,10 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "vitest";
 
 const migrationPath = new URL("../supabase/migrations/20260716090000_standalone_workouts.sql", import.meta.url);
+const draftMigrationPath = new URL("../supabase/migrations/20260716093000_standalone_workout_drafts.sql", import.meta.url);
+const schemaPath = new URL("../supabase/schema.sql", import.meta.url);
+const databaseTestPath = new URL("../supabase/tests/standalone_workout_drafts.test.sql", import.meta.url);
+const packagePath = new URL("../package.json", import.meta.url);
 
 describe("standalone workout migration", () => {
   test("permits owned training workouts without a program while retaining RLS ownership", async () => {
@@ -11,5 +15,31 @@ describe("standalone workout migration", () => {
     expect(sql).toMatch(/workouts\.program_id is null/i);
     expect(sql).toMatch(/auth\.uid\(\) = workouts\.user_id/i);
     expect(sql).toMatch(/workout\.program_id is null/i);
+  });
+
+  test("keeps draft RPCs, ownership grants, and schema initialization in sync", async () => {
+    const [draftMigration, schema, databaseTest, packageJson] = await Promise.all([
+      readFile(draftMigrationPath, "utf8"),
+      readFile(schemaPath, "utf8"),
+      readFile(databaseTestPath, "utf8"),
+      readFile(packagePath, "utf8")
+    ]);
+
+    for (const sql of [draftMigration, schema]) {
+      expect(sql).toMatch(/create or replace function public\.save_standalone_workout\(p_payload jsonb\)/i);
+      expect(sql).toMatch(/create or replace function public\.get_standalone_workout_draft\(\)/i);
+      expect(sql).toMatch(/v_user_id uuid := auth\.uid\(\)/i);
+      expect(sql).toMatch(/grant execute on function public\.save_standalone_workout\(jsonb\) to authenticated/i);
+      expect(sql).toMatch(/grant execute on function public\.get_standalone_workout_draft\(\) to authenticated/i);
+    }
+    expect(schema).toMatch(/create or replace function public\.create_standalone_workout\(p_payload jsonb\)/i);
+    expect(databaseTest).toMatch(/set local role authenticated/i);
+    expect(databaseTest).toMatch(/another user cannot read the owner draft/i);
+    expect(databaseTest).toMatch(/invalid draft payload is rejected/i);
+    expect(databaseTest).toMatch(/invalid NaN weight is rejected/i);
+    expect(databaseTest).toMatch(/grant all on table standalone_test_state to authenticated/i);
+    expect(draftMigration).toMatch(/'floor_crunch', '卷腹', 'cardio'/i);
+    expect(schema).toMatch(/'floor_crunch', '卷腹', 'cardio'/i);
+    expect(JSON.parse(packageJson).scripts["test:db"]).toMatch(/supabase.*test db/i);
   });
 });
