@@ -15,6 +15,7 @@ import {
   writeClientCache
 } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 import {
   formatPrescription,
   getWorkoutMeta
@@ -139,6 +140,7 @@ export function ProgramManager() {
   const [recommendations, setRecommendations] = useState<RecommendationRow[]>([]);
   const [recommendationWeights, setRecommendationWeights] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<"loading" | "ready" | "generating" | "error">("loading");
+  const [usesLegacyScheduleSchema, setUsesLegacyScheduleSchema] = useState(false);
   const [message, setMessage] = useState("");
   const [templateType, setTemplateType] = useState<TemplateType>("push_pull_squat");
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("fixed_weekdays");
@@ -322,11 +324,10 @@ export function ProgramManager() {
     | { ok: false }
   > {
     const supabase = createBrowserSupabaseClient();
-    const { data: workoutData, error: workoutError } = await supabase
-      .from("workouts")
-      .select("id,scheduled_date,sequence_index,schedule_index,day_type,name,status")
-      .eq("program_id", programId)
-      .order("schedule_index", { ascending: true });
+    const { data: workoutData, error: workoutError, usedLegacySchema } = await loadWorkoutsWithDayTypeFallback(
+      () => supabase.from("workouts").select("id,scheduled_date,sequence_index,schedule_index,day_type,name,status").eq("program_id", programId).order("schedule_index", { ascending: true }),
+      () => supabase.from("workouts").select("id,scheduled_date,sequence_index,name,status").eq("program_id", programId).order("sequence_index", { ascending: true })
+    );
 
     if (workoutError) {
       setStatus("error");
@@ -335,6 +336,12 @@ export function ProgramManager() {
     }
 
     const workoutRows = ((workoutData ?? []) as WorkoutRow[]).sort((a, b) => a.schedule_index - b.schedule_index);
+    if (usedLegacySchema) {
+      setUsesLegacyScheduleSchema(true);
+      setMessage("数据库升级尚未完成：当前以原有训练计划模式运行，休息日和原子重建将在升级后启用。");
+    } else {
+      setUsesLegacyScheduleSchema(false);
+    }
     const workoutIds = workoutRows.map((workout) => workout.id);
     setWorkouts(workoutRows);
 
@@ -493,6 +500,12 @@ export function ProgramManager() {
 
   async function openRegenerationDialog() {
     if (!userId) return;
+
+    if (usesLegacyScheduleSchema) {
+      setStatus("error");
+      setMessage("数据库升级尚未完成，暂不能重新生成计划。现有训练记录仍可正常使用。");
+      return;
+    }
 
     if (scheduleMode === "fixed_weekdays" && selectedWeekdays.length === 0) {
       setStatus("error");

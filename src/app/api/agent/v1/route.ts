@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticateAgentRequest } from "@/lib/agent-auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 
 export const dynamic = "force-dynamic";
 
@@ -123,36 +124,30 @@ async function loadPlan(userId: string) {
   if (programError) throw new Error(programError.message);
   if (!program) return { message: "当前没有进行中的训练计划。", program: null, workouts: [] };
 
-  const { data: workouts, error: workoutsError } = await supabase
-    .from("workouts")
-    .select("id,scheduled_date,sequence_index,schedule_index,day_type,name,status,completed_at")
-    .eq("user_id", userId)
-    .eq("program_id", program.id)
-    .order("schedule_index", { ascending: true });
+  const { data: workouts, error: workoutsError } = await loadWorkoutsWithDayTypeFallback(
+    () => supabase.from("workouts").select("id,scheduled_date,sequence_index,schedule_index,day_type,name,status,completed_at").eq("user_id", userId).eq("program_id", program.id).order("schedule_index", { ascending: true }),
+    () => supabase.from("workouts").select("id,scheduled_date,sequence_index,name,status,completed_at").eq("user_id", userId).eq("program_id", program.id).order("sequence_index", { ascending: true })
+  );
 
   if (workoutsError) throw new Error(workoutsError.message);
 
   return {
     program,
-    workouts: await Promise.all((workouts ?? []).map((workout) => loadWorkoutDetail(userId, workout)))
+    workouts: await Promise.all((workouts ?? []).map((workout: { completed_at: string | null; id: string; name: string; scheduled_date: string; sequence_index?: number; status: string }) => loadWorkoutDetail(userId, workout)))
   };
 }
 
 async function loadHistory(userId: string, limit: number) {
   const supabase = createAdminSupabaseClient();
-  const { data: workouts, error } = await supabase
-    .from("workouts")
-    .select("id,scheduled_date,name,status,completed_at")
-    .eq("user_id", userId)
-    .eq("status", "completed")
-    .eq("day_type", "training")
-    .order("scheduled_date", { ascending: false })
-    .limit(limit);
+  const { data: workouts, error } = await loadWorkoutsWithDayTypeFallback(
+    () => supabase.from("workouts").select("id,scheduled_date,name,status,completed_at,day_type").eq("user_id", userId).eq("status", "completed").eq("day_type", "training").order("scheduled_date", { ascending: false }).limit(limit),
+    () => supabase.from("workouts").select("id,scheduled_date,name,status,completed_at").eq("user_id", userId).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(limit)
+  );
 
   if (error) throw new Error(error.message);
   return {
     count: workouts?.length ?? 0,
-    workouts: await Promise.all((workouts ?? []).map((workout) => loadWorkoutDetail(userId, workout)))
+    workouts: await Promise.all((workouts ?? []).map((workout: { completed_at: string | null; id: string; name: string; scheduled_date: string; sequence_index?: number; status: string }) => loadWorkoutDetail(userId, workout)))
   };
 }
 
@@ -246,14 +241,9 @@ async function completeWorkout(userId: string, workoutId?: string) {
   await assertWorkoutOwnership(userId, workoutId);
 
   const supabase = createAdminSupabaseClient();
-  const { data, error } = await supabase
-    .from("workouts")
-    .update({ completed_at: new Date().toISOString(), status: "completed", updated_at: new Date().toISOString() })
-    .eq("id", workoutId)
-    .eq("user_id", userId)
-    .eq("day_type", "training")
-    .select("id,name,scheduled_date,status,completed_at")
-    .single();
+  const primary = () => supabase.from("workouts").update({ completed_at: new Date().toISOString(), status: "completed", updated_at: new Date().toISOString() }).eq("id", workoutId).eq("user_id", userId).eq("day_type", "training").select("id,name,scheduled_date,status,completed_at,day_type").single();
+  const legacy = () => supabase.from("workouts").update({ completed_at: new Date().toISOString(), status: "completed", updated_at: new Date().toISOString() }).eq("id", workoutId).eq("user_id", userId).select("id,name,scheduled_date,status,completed_at").single();
+  const { data, error } = await loadWorkoutsWithDayTypeFallback(primary, legacy);
 
   if (error) throw new Error(error.message);
   return { message: "训练已完成。", workout: data };

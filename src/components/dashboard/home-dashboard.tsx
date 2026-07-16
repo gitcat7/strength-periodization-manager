@@ -20,6 +20,7 @@ import { formatPrescription, getWorkoutMeta } from "@/domain/training-format";
 import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
 import { readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 
 type WorkoutRow = {
   day_type: "training" | "rest";
@@ -161,26 +162,17 @@ export function HomeDashboard() {
 
       const [nextWorkoutResult, completedResult] = await Promise.all([
         withTimeout(
-          supabase
-            .from("workouts")
-            .select("id,scheduled_date,sequence_index,name,status,day_type")
-            .eq("user_id", user.id)
-            .eq("day_type", "training")
-            .in("status", ["scheduled", "draft"])
-            .order("sequence_index", { ascending: true })
-            .limit(1)
-            .maybeSingle(),
+          loadWorkoutsWithDayTypeFallback(
+            () => supabase.from("workouts").select("id,scheduled_date,sequence_index,name,status,day_type").eq("user_id", user.id).eq("day_type", "training").in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle(),
+            () => supabase.from("workouts").select("id,scheduled_date,sequence_index,name,status").eq("user_id", user.id).in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle()
+          ),
           "训练计划读取超时，请刷新页面后重试。"
         ),
         withTimeout(
-          supabase
-            .from("workouts")
-            .select("id,scheduled_date,name,status,day_type")
-            .eq("user_id", user.id)
-            .eq("status", "completed")
-            .eq("day_type", "training")
-            .order("scheduled_date", { ascending: false })
-            .limit(12),
+          loadWorkoutsWithDayTypeFallback(
+            () => supabase.from("workouts").select("id,scheduled_date,name,status,day_type").eq("user_id", user.id).eq("status", "completed").eq("day_type", "training").order("scheduled_date", { ascending: false }).limit(12),
+            () => supabase.from("workouts").select("id,scheduled_date,name,status").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12)
+          ),
           "训练历史读取超时，请刷新页面后重试。"
         )
       ]);

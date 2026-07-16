@@ -7,6 +7,7 @@ import { estimateOneRepMax } from "@/domain/strength";
 import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
 import { readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 
 type WorkoutRow = {
   day_type: "training" | "rest";
@@ -94,14 +95,10 @@ export function ProgressDashboard() {
         }
 
         const { data: workoutData, error: workoutError } = await withTimeout(
-          supabase
-            .from("workouts")
-            .select("id,scheduled_date,name,day_type")
-            .eq("user_id", user.id)
-            .eq("status", "completed")
-            .eq("day_type", "training")
-            .order("scheduled_date", { ascending: true })
-            .limit(60),
+          loadWorkoutsWithDayTypeFallback(
+            () => supabase.from("workouts").select("id,scheduled_date,name,day_type").eq("user_id", user.id).eq("status", "completed").eq("day_type", "training").order("scheduled_date", { ascending: true }).limit(60),
+            () => supabase.from("workouts").select("id,scheduled_date,name").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: true }).limit(60)
+          ),
           "训练数据读取超时，请刷新页面后重试。"
         );
 

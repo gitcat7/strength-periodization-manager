@@ -7,6 +7,7 @@ import { trackEvent } from "@/lib/analytics";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { clearExerciseCatalogVerificationState } from "@/lib/exercise-catalog-client";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 
 type WorkoutRow = {
   day_type: "training" | "rest";
@@ -126,12 +127,10 @@ export function SettingsPanel() {
       }
 
       const { data: workoutData, error: workoutError } = await withTimeout(
-        supabase
-          .from("workouts")
-          .select("id,scheduled_date,name,status,day_type")
-          .eq("user_id", user.id)
-          .eq("status", "completed")
-          .order("scheduled_date", { ascending: true }),
+        loadWorkoutsWithDayTypeFallback(
+          () => supabase.from("workouts").select("id,scheduled_date,name,status,day_type").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: true }),
+          () => supabase.from("workouts").select("id,scheduled_date,name,status").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: true })
+        ),
         "训练数据读取超时，请稍后重试。"
       );
 

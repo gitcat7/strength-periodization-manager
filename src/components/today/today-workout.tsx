@@ -37,6 +37,7 @@ import {
   writeClientCache
 } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 import { formatPrescription, getExerciseNote, getWorkoutMeta } from "@/domain/training-format";
 import { ExerciseDetailLauncher } from "@/components/exercises/exercise-detail-launcher";
 import {
@@ -389,15 +390,10 @@ export function TodayWorkout() {
 
         const today = formatDate(new Date());
         const restItems = withTimeout(
-          supabase
-            .from("workouts")
-            .select("id,scheduled_date,status,day_type")
-            .eq("program_id", program.id)
-            .eq("day_type", "rest")
-            .eq("scheduled_date", today)
-            .in("status", ["scheduled", "draft"])
-            .limit(1)
-            .maybeSingle(),
+          loadWorkoutsWithDayTypeFallback(
+            () => supabase.from("workouts").select("id,scheduled_date,status,day_type").eq("program_id", program.id).eq("day_type", "rest").eq("scheduled_date", today).in("status", ["scheduled", "draft"]).limit(1).maybeSingle(),
+            () => Promise.resolve({ data: null, error: null })
+          ),
           "今日恢复日读取超时，请刷新页面后重试。"
         ).then(({ data, error }) => {
           if (error) throw error;
@@ -407,15 +403,10 @@ export function TodayWorkout() {
         });
 
         const trainingItems = withTimeout(
-          supabase
-            .from("workouts")
-            .select("id,scheduled_date,sequence_index,name,status,day_type")
-            .eq("program_id", program.id)
-            .eq("day_type", "training")
-            .in("status", ["scheduled", "draft"])
-            .order("sequence_index", { ascending: true })
-            .limit(1)
-            .maybeSingle(),
+          loadWorkoutsWithDayTypeFallback(
+            () => supabase.from("workouts").select("id,scheduled_date,sequence_index,name,status,day_type").eq("program_id", program.id).eq("day_type", "training").in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle(),
+            () => supabase.from("workouts").select("id,scheduled_date,sequence_index,name,status").eq("program_id", program.id).in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle()
+          ),
           "下一节训练读取超时，请刷新页面后重试。"
         ).then(({ data, error }) => {
           if (error) throw error;
@@ -583,16 +574,10 @@ export function TodayWorkout() {
 
   async function loadLastCompletedWorkout(programId: string, scheduledDate: string) {
     const supabase = createBrowserSupabaseClient();
-    const { data, error } = await supabase
-      .from("workouts")
-      .select("scheduled_date,name")
-      .eq("program_id", programId)
-      .eq("status", "completed")
-      .eq("day_type", "training")
-      .lt("scheduled_date", scheduledDate)
-      .order("scheduled_date", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data, error } = await loadWorkoutsWithDayTypeFallback(
+      () => supabase.from("workouts").select("scheduled_date,name,day_type").eq("program_id", programId).eq("status", "completed").eq("day_type", "training").lt("scheduled_date", scheduledDate).order("scheduled_date", { ascending: false }).limit(1).maybeSingle(),
+      () => supabase.from("workouts").select("scheduled_date,name").eq("program_id", programId).eq("status", "completed").lt("scheduled_date", scheduledDate).order("scheduled_date", { ascending: false }).limit(1).maybeSingle()
+    );
 
     if (error) {
       setStatus("error");

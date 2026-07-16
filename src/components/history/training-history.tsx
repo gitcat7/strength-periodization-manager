@@ -7,6 +7,7 @@ import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
 import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 import type { RecommendationType } from "@/domain/fitness-coach";
 
 type WorkoutRow = {
@@ -105,13 +106,10 @@ export function TrainingHistory() {
         }
 
         const { data: workoutData, error: workoutError } = await withTimeout(
-          supabase
-            .from("workouts")
-            .select("id,scheduled_date,name,completed_at,day_type")
-            .eq("user_id", user.id)
-            .eq("status", "completed")
-            .order("scheduled_date", { ascending: false })
-            .limit(12),
+          loadWorkoutsWithDayTypeFallback(
+            () => supabase.from("workouts").select("id,scheduled_date,name,completed_at,day_type").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12),
+            () => supabase.from("workouts").select("id,scheduled_date,name,completed_at").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12)
+          ),
           "训练历史读取超时，请刷新页面后重试。"
         );
 
