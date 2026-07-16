@@ -263,12 +263,24 @@ export function PrGoalManager() {
 
     setStatus("saving");
     setMessage("");
+    const supabase = createBrowserSupabaseClient();
+    const { data: athleteProfile, error: athleteProfileError } = await supabase
+      .from("athlete_profiles")
+      .select("experience_level")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (athleteProfileError) {
+      setStatus("error");
+      setMessage(athleteProfileError.message);
+      return;
+    }
+
     const estimatedOneRepMax = estimateOneRepMax(workingSet.weightKg, workingSet.reps);
     const trainingMax = roundToNearestPlate(
-      calculateTrainingMax(estimatedOneRepMax, "beginner"),
+      calculateTrainingMax(estimatedOneRepMax, athleteProfile?.experience_level ?? "beginner"),
       Number(selectedExercise.default_increment) || 2.5
     );
-    const supabase = createBrowserSupabaseClient();
     const { error } = await supabase.from("lift_profiles").upsert(
       {
         user_id: userId,

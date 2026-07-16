@@ -34,15 +34,15 @@ for (const check of checks) {
     const response = await requestText(url);
     const body = response.body;
 
-    if (!response.ok) {
-      failures.push(`${check.path} returned ${response.status}`);
+    if (check.type === "redirect") {
+      if (!response.url.endsWith(check.location) && response.location !== check.location) {
+        failures.push(`${check.path} did not redirect to ${check.location}`);
+      }
       continue;
     }
 
-    if (check.type === "redirect") {
-      if (!response.url.endsWith(check.location)) {
-        failures.push(`${check.path} did not redirect to ${check.location}`);
-      }
+    if (!response.ok) {
+      failures.push(`${check.path} returned ${response.status}`);
       continue;
     }
 
@@ -126,7 +126,8 @@ function requestTextWithNode(url, originalError) {
             body,
             ok: status >= 200 && status < 300,
             status,
-            url
+            url,
+            location: response.headers.location ?? null
           });
         });
       }

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, CircleAlert, Loader2 } from "lucide-react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
-import { completeMagicLinkSignIn } from "@/lib/supabase/magic-link";
+import { completeMagicLinkSignIn, getLoginNext } from "@/lib/supabase/magic-link";
 
 export function AuthCallbackHandler() {
   const router = useRouter();
@@ -19,7 +19,7 @@ export function AuthCallbackHandler() {
     async function completeAuth() {
       try {
         const supabase = createBrowserSupabaseClient();
-        const next = searchParams.get("next") || "/diagnostics";
+        const next = getLoginNext(searchParams);
         const authErrorMessage = getAuthErrorMessage(window.location.hash);
         if (authErrorMessage) {
           if (!active) return;
@@ -93,7 +93,7 @@ export function AuthCallbackHandler() {
       {status === "error" ? (
         <Link
           className="inline-flex rounded-lg bg-action px-4 py-2 font-semibold text-white"
-          href={`/login?next=${encodeURIComponent(searchParams.get("next") || "/diagnostics")}`}
+          href={`/login?next=${encodeURIComponent(getLoginNext(searchParams))}`}
         >
           重新登录
         </Link>

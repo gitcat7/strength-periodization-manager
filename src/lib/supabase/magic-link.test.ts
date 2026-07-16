@@ -9,4 +9,8 @@ describe("getLoginNext", () => {
   it("keeps a safe explicit next path", () => {
     expect(getLoginNext(new URLSearchParams("next=%2Fsingle-workout"))).toBe("/single-workout");
   });
+
+  it("rejects an unsafe callback destination", () => {
+    expect(getLoginNext(new URLSearchParams("next=%2F%2Fevil.example"))).toBe("/");
+  });
 });
