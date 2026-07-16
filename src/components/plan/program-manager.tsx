@@ -7,6 +7,12 @@ import { Brain, CheckCircle2, Dumbbell, Loader2, Moon, PlusCircle, XCircle } fro
 import type { RecommendationType } from "@/domain/fitness-coach";
 import { getNextWorkoutState } from "@/domain/next-workout";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
+import {
+  validatePlanSetup,
+  type PlanSetupInput,
+  type PlanSetupValidationResult
+} from "@/domain/plan-setup";
+import { calculateTrainingMax, estimateOneRepMax, roundToNearestPlate } from "@/domain/strength";
 import { trackEvent } from "@/lib/analytics";
 import {
   clearProgramRegenerationCaches,
@@ -103,6 +109,7 @@ type ExerciseRow = {
   slug: string;
   name: string;
   default_increment: number;
+  is_main_lift?: boolean;
 };
 
 type LiftProfileRow = {
@@ -132,6 +139,16 @@ type PlanCache = {
 
 const planCacheKey = "strength-training-cache:plan";
 
+const defaultPlanSetup: PlanSetupInput = {
+  availableWeekdays: [1, 3, 5],
+  experienceLevel: "beginner",
+  goal: "strength",
+  injuryNotes: "",
+  lifts: [],
+  sessionDurationMinutes: 60,
+  trainingDaysPerWeek: 3
+};
+
 export function ProgramManager() {
   const router = useRouter();
   const [userId, setUserId] = useState<string | null>(null);
@@ -150,6 +167,10 @@ export function ProgramManager() {
   const [cadenceRestDays, setCadenceRestDays] = useState(1);
   const [customTemplateName, setCustomTemplateName] = useState("");
   const [useCustomName, setUseCustomName] = useState(false);
+  const [mainLifts, setMainLifts] = useState<ExerciseRow[]>([]);
+  const [planSetup, setPlanSetup] = useState<PlanSetupInput>(defaultPlanSetup);
+  const [planSetupErrors, setPlanSetupErrors] = useState<Record<string, string>>({});
+  const [showPlanSetup, setShowPlanSetup] = useState(false);
   const [regenerationDialog, setRegenerationDialog] = useState(createRegenerationDialogState);
   const confirmationInFlight = useRef(false);
   const pendingReplacementPayload = useRef<ProgramReplacementPayload | null>(null);
@@ -193,6 +214,8 @@ export function ProgramManager() {
     setUserId(userData.user.id);
     const cached = getUserScopedCache(readClientCache<PlanCache>(planCacheKey), userData.user.id);
     if (cached) hydratePlanCache(cached);
+
+    await loadPlanSetup(userData.user.id);
 
     const [recommendationsResult, programResult] = await Promise.all([
       fetchRecommendations(userData.user.id),
@@ -272,6 +295,136 @@ export function ProgramManager() {
       workouts: loadedWorkouts.value.workouts
     });
     setStatus("ready");
+    return true;
+  }
+
+  async function loadPlanSetup(targetUserId: string) {
+    const supabase = createBrowserSupabaseClient();
+    const [profileResult, mainLiftsResult] = await Promise.all([
+      supabase
+        .from("athlete_profiles")
+        .select("experience_level,goal,training_days_per_week,available_weekdays,session_duration_minutes,injury_notes")
+        .eq("user_id", targetUserId)
+        .maybeSingle(),
+      supabase
+        .from("exercises")
+        .select("id,slug,name,default_increment,is_main_lift")
+        .eq("is_main_lift", true)
+        .order("created_at", { ascending: true })
+    ]);
+
+    if (mainLiftsResult.error) {
+      setMessage("主项动作读取失败，请刷新后重试。");
+      return;
+    }
+
+    const loadedMainLifts = (mainLiftsResult.data ?? []) as ExerciseRow[];
+    setMainLifts(loadedMainLifts);
+
+    if (profileResult.error || !profileResult.data) {
+      setPlanSetup({
+        ...defaultPlanSetup,
+        lifts: loadedMainLifts.map((exercise) => ({ exerciseId: exercise.id, weightKg: "", reps: "5" }))
+      });
+      return;
+    }
+
+    const profile = profileResult.data;
+    const { data: liftRows, error: liftError } = await supabase
+      .from("lift_profiles")
+      .select("exercise_id,estimated_1rm")
+      .eq("user_id", targetUserId)
+      .in("exercise_id", loadedMainLifts.map((exercise) => exercise.id));
+
+    if (liftError) {
+      setMessage("主项最近工作组读取失败，请刷新后重试。");
+      return;
+    }
+
+    const estimatedByExerciseId = new Map(
+      (liftRows ?? []).map((lift) => [lift.exercise_id, Number(lift.estimated_1rm)])
+    );
+    const availableWeekdays = Array.isArray(profile.available_weekdays) && profile.available_weekdays.length > 0
+      ? profile.available_weekdays
+      : defaultPlanSetup.availableWeekdays;
+    const trainingDaysPerWeek = [3, 4, 7].includes(Number(profile.training_days_per_week))
+      ? Number(profile.training_days_per_week)
+      : defaultPlanSetup.trainingDaysPerWeek;
+
+    setSelectedWeekdays(availableWeekdays);
+    setPlanSetup({
+      availableWeekdays,
+      experienceLevel: profile.experience_level as PlanSetupInput["experienceLevel"],
+      goal: profile.goal as PlanSetupInput["goal"],
+      injuryNotes: profile.injury_notes ?? "",
+      lifts: loadedMainLifts.map((exercise) => {
+        const estimatedOneRepMax = estimatedByExerciseId.get(exercise.id) ?? 0;
+        const workingWeight = inferFiveRepWorkingWeight(estimatedOneRepMax, Number(exercise.default_increment) || 2.5);
+        return { exerciseId: exercise.id, weightKg: workingWeight ? String(workingWeight) : "", reps: "5" };
+      }),
+      sessionDurationMinutes: Number(profile.session_duration_minutes) || defaultPlanSetup.sessionDurationMinutes,
+      trainingDaysPerWeek
+    });
+  }
+
+  async function persistPlanSetup(): Promise<PlanSetupValidationResult["ok"]> {
+    if (!userId) return false;
+
+    const parsed = validatePlanSetup(planSetup);
+    if (!parsed.ok) {
+      setPlanSetupErrors(parsed.fieldErrors);
+      setStatus("ready");
+      return false;
+    }
+
+    setPlanSetupErrors({});
+    const supabase = createBrowserSupabaseClient();
+    const { error: profileError } = await supabase.from("athlete_profiles").upsert(
+      {
+        user_id: userId,
+        experience_level: parsed.value.experienceLevel,
+        goal: parsed.value.goal,
+        training_days_per_week: parsed.value.trainingDaysPerWeek,
+        available_weekdays: parsed.value.availableWeekdays,
+        session_duration_minutes: parsed.value.sessionDurationMinutes,
+        injury_notes: parsed.value.injuryNotes || null,
+        unit: "kg",
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: "user_id" }
+    );
+
+    if (profileError) {
+      setStatus("error");
+      setMessage(profileError.message);
+      return false;
+    }
+
+    const incrementById = new Map(mainLifts.map((exercise) => [exercise.id, Number(exercise.default_increment) || 2.5]));
+    const liftPayload = parsed.value.lifts.map((lift) => {
+      const estimatedOneRepMax = estimateOneRepMax(lift.workingWeight, lift.reps);
+      return {
+        user_id: userId,
+        exercise_id: lift.exerciseId,
+        estimated_1rm: Number(estimatedOneRepMax.toFixed(2)),
+        training_max: roundToNearestPlate(
+          calculateTrainingMax(estimatedOneRepMax, parsed.value.experienceLevel),
+          incrementById.get(lift.exerciseId) ?? 2.5
+        ),
+        source_type: "working_set"
+      };
+    });
+    const { error: liftError } = await supabase
+      .from("lift_profiles")
+      .upsert(liftPayload, { onConflict: "user_id,exercise_id" });
+
+    if (liftError) {
+      setStatus("error");
+      setMessage(liftError.message);
+      return false;
+    }
+
+    clearTrainingDataCaches();
     return true;
   }
 
@@ -523,19 +676,10 @@ export function ProgramManager() {
     setStatus("generating");
     setMessage("");
 
+    const saved = await persistPlanSetup();
+    if (!saved) return;
+
     const supabase = createBrowserSupabaseClient();
-    const { data: profile, error: profileError } = await supabase
-      .from("athlete_profiles")
-      .select("training_days_per_week,available_weekdays")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    if (profileError || !profile) {
-      setStatus("error");
-      setMessage(profileError?.message ?? "请先创建训练画像。");
-      return;
-    }
-
     const schedule: ScheduleConfig =
       scheduleMode === "fixed_weekdays"
         ? { mode: "fixed_weekdays", weekdays: selectedWeekdays }
@@ -717,12 +861,27 @@ export function ProgramManager() {
         setCadenceTrainDays={setCadenceTrainDays}
         setCustomTemplateName={setCustomTemplateName}
         setScheduleMode={setScheduleMode}
-        setSelectedWeekdays={setSelectedWeekdays}
+        setSelectedWeekdays={(availableWeekdays) => {
+          setSelectedWeekdays(availableWeekdays);
+          setPlanSetup((current) => ({ ...current, availableWeekdays }));
+        }}
         setTemplateType={setTemplateType}
         setUseCustomName={setUseCustomName}
         templateType={templateType}
         useCustomName={useCustomName}
       />
+
+      {(!program || showPlanSetup) ? (
+        <PlanSetupForm
+          errors={planSetupErrors}
+          mainLifts={mainLifts}
+          onChange={(next) => {
+            setPlanSetup(next);
+            setSelectedWeekdays(next.availableWeekdays);
+          }}
+          value={planSetup}
+        />
+      ) : null}
 
       {message ? (
         <p className={`rounded-lg border px-3 py-2 text-sm ${status === "error" ? "border-red-200 text-red-600" : "border-line text-muted"}`}>
@@ -737,8 +896,8 @@ export function ProgramManager() {
               <PlusCircle size={20} />
             </span>
             <div>
-              <h2 className="font-semibold">还没有当前训练计划</h2>
-              <p className="text-sm text-muted">选择训练结构和安排方式后，按你的训练顺序生成 4 周计划。</p>
+              <h2 className="font-semibold">创建第一个计划</h2>
+              <p className="text-sm text-muted">填写计划参数、选择训练结构和安排方式后，即可生成 4 周计划。</p>
             </div>
           </div>
           <button
@@ -751,9 +910,6 @@ export function ProgramManager() {
             {status === "generating" ? <Loader2 className="animate-spin" size={18} /> : <PlusCircle size={18} />}
             生成 4 周训练计划
           </button>
-          <Link className="mt-3 inline-flex text-sm font-semibold text-action transition active:scale-[0.98]" href="/onboarding">
-            返回修改训练画像
-          </Link>
         </section>
       ) : (
         <section className="action-surface p-4">
@@ -781,6 +937,13 @@ export function ProgramManager() {
               type="button"
             >
               重新生成计划
+            </button>
+            <button
+              className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink"
+              onClick={() => setShowPlanSetup((current) => !current)}
+              type="button"
+            >
+              {showPlanSetup ? "收起计划参数" : "调整计划参数"}
             </button>
           </div>
         </section>
@@ -966,6 +1129,179 @@ export function ProgramManager() {
         />
       ) : null}
     </div>
+  );
+}
+
+export function PlanSetupForm({
+  errors,
+  mainLifts,
+  onChange,
+  value
+}: {
+  errors: Record<string, string>;
+  mainLifts: ExerciseRow[];
+  onChange: (value: PlanSetupInput) => void;
+  value: PlanSetupInput;
+}) {
+  function update(patch: Partial<PlanSetupInput>) {
+    onChange({ ...value, ...patch });
+  }
+
+  function selectTrainingDays(trainingDaysPerWeek: number) {
+    const availableWeekdays = trainingDaysPerWeek === 3
+      ? [1, 3, 5]
+      : trainingDaysPerWeek === 4
+        ? [1, 2, 4, 5]
+        : [0, 1, 2, 3, 4, 5, 6];
+    update({ availableWeekdays, trainingDaysPerWeek });
+  }
+
+  function toggleWeekday(day: number) {
+    const availableWeekdays = value.availableWeekdays.includes(day)
+      ? value.availableWeekdays.filter((item) => item !== day)
+      : [...value.availableWeekdays, day].sort((left, right) => left - right);
+    update({ availableWeekdays });
+  }
+
+  return (
+    <section className="rounded-lg border border-line bg-white p-4">
+      <div className="mb-4">
+        <p className="page-kicker">计划参数</p>
+        <h2 className="text-xl font-bold">训练安排与主项最近工作组</h2>
+        <p className="mt-1 text-sm leading-6 text-muted">只在创建或重建周期计划时需要填写；单次训练不受影响。</p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">每周训练天数</span>
+          <select
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            onChange={(event) => selectTrainingDays(Number(event.target.value))}
+            value={value.trainingDaysPerWeek}
+          >
+            <option value={3}>3 天</option>
+            <option value={4}>4 天</option>
+            <option value={7}>7 天</option>
+          </select>
+          {errors.trainingDaysPerWeek ? <p className="mt-1 text-xs text-red-600">{errors.trainingDaysPerWeek}</p> : null}
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">主要目标</span>
+          <select
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            onChange={(event) => update({ goal: event.target.value as PlanSetupInput["goal"] })}
+            value={value.goal}
+          >
+            <option value="strength">力量增长</option>
+            <option value="hypertrophy_strength">增肌兼力量</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">单次时长</span>
+          <select
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            onChange={(event) => update({ sessionDurationMinutes: Number(event.target.value) })}
+            value={value.sessionDurationMinutes}
+          >
+            {[45, 60, 75, 90].map((minutes) => <option key={minutes} value={minutes}>{minutes} 分钟</option>)}
+          </select>
+          {errors.sessionDurationMinutes ? <p className="mt-1 text-xs text-red-600">{errors.sessionDurationMinutes}</p> : null}
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">训练经验（可选）</span>
+          <select
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            onChange={(event) => update({ experienceLevel: event.target.value as PlanSetupInput["experienceLevel"] })}
+            value={value.experienceLevel}
+          >
+            <option value="beginner">新手，0-6 个月</option>
+            <option value="novice">初级，6-18 个月</option>
+            <option value="intermediate">中级，18 个月以上</option>
+          </select>
+        </label>
+      </div>
+
+      <fieldset className="mt-4">
+        <legend className="mb-2 text-sm font-medium">可训练日</legend>
+        <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
+          {weekdayOptions.map((weekday) => {
+            const active = value.availableWeekdays.includes(weekday.value);
+            return (
+              <button
+                aria-pressed={active}
+                className={`h-10 rounded-lg border text-sm font-semibold ${active ? "border-action bg-action text-white" : "border-line bg-field text-ink"}`}
+                key={weekday.value}
+                onClick={() => toggleWeekday(weekday.value)}
+                type="button"
+              >
+                {weekday.label}
+              </button>
+            );
+          })}
+        </div>
+        {errors.availableWeekdays ? <p className="mt-1 text-xs text-red-600">{errors.availableWeekdays}</p> : null}
+      </fieldset>
+
+      <label className="mt-4 block">
+        <span className="mb-1 block text-sm font-medium">伤病或禁忌动作（可选）</span>
+        <textarea
+          className="min-h-20 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm"
+          maxLength={500}
+          onChange={(event) => update({ injuryNotes: event.target.value })}
+          placeholder="例如：右肩不适，暂时不做过顶推"
+          value={value.injuryNotes}
+        />
+      </label>
+
+      <div className="mt-5">
+        <h3 className="font-semibold">主项最近工作组</h3>
+        <p className="mt-1 text-sm text-muted">至少填写一个稳定完成的工作组，例如卧推 80kg × 5。</p>
+        <div className="mt-3 space-y-3">
+          {mainLifts.map((exercise) => {
+            const lift = value.lifts.find((item) => item.exerciseId === exercise.id) ?? {
+              exerciseId: exercise.id,
+              weightKg: "",
+              reps: "5"
+            };
+            return (
+              <div className="grid grid-cols-[minmax(0,1fr)_84px_72px] items-end gap-2" key={exercise.id}>
+                <p className="min-w-0 truncate pb-2 font-medium">{exercise.name}</p>
+                <label className="block">
+                  <span className="mb-1 block text-[11px] text-muted">重量 kg</span>
+                  <input
+                    aria-label={`${exercise.name}重量 kg`}
+                    className="h-10 w-full rounded-md border border-line bg-white px-2 text-sm"
+                    inputMode="decimal"
+                    min="0"
+                    onChange={(event) => update({
+                      lifts: value.lifts.map((item) => item.exerciseId === exercise.id ? { ...item, weightKg: event.target.value } : item)
+                    })}
+                    step="0.5"
+                    type="number"
+                    value={lift.weightKg}
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-[11px] text-muted">次数</span>
+                  <input
+                    aria-label={`${exercise.name}次数`}
+                    className="h-10 w-full rounded-md border border-line bg-white px-2 text-sm"
+                    inputMode="numeric"
+                    min="1"
+                    onChange={(event) => update({
+                      lifts: value.lifts.map((item) => item.exerciseId === exercise.id ? { ...item, reps: event.target.value } : item)
+                    })}
+                    type="number"
+                    value={lift.reps}
+                  />
+                </label>
+              </div>
+            );
+          })}
+        </div>
+        {errors.lifts ? <p className="mt-2 text-xs text-red-600">{errors.lifts}</p> : null}
+      </div>
+    </section>
   );
 }
 

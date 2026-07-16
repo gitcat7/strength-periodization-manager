@@ -13,10 +13,10 @@ export default function PlanPage() {
 
         <div className="mb-6 flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm text-muted">第 2 步</p>
+            <p className="text-sm text-muted">训练计划</p>
             <h1 className="text-2xl font-semibold">生成训练计划</h1>
             <p className="mt-3 text-sm leading-6 text-muted">
-              基于你的训练画像、可训练日和主项训练最大值，生成 4 周力量训练计划。
+              填写本次计划需要的训练安排与主项最近工作组，即可生成 4 周周期。
             </p>
           </div>
           <Link className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-line bg-field text-ink" href="/history">
