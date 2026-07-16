@@ -9,6 +9,7 @@ import {
   toggleSelectedExercise,
   type SelectableExercise
 } from "./single-workout";
+import { reviewedExercises } from "./reviewed-exercise-library";
 
 const exercises: SelectableExercise[] = [
   { id: "bench", name: "bench press", category: "push", catalogExternalId: "0025", defaultIncrement: 2.5, movementPattern: "horizontal_press", slug: "barbell-bench-press", trainingDirection: "push" },
@@ -84,6 +85,57 @@ describe("single workout domain", () => {
       exercise_provider: "wger",
       external_exercise_id: "42"
     });
+  });
+
+  it("serializes a user-owned manual action as a bounded standalone snapshot", () => {
+    const payload = buildStandaloneWorkoutSavePayload("2026-07-16", [{
+      manualExercise: {
+        equipment: ["哑铃"],
+        id: "manual:00000000-0000-4000-8000-000000000001",
+        loadType: "weighted",
+        muscles: ["背部"],
+        name: "酒店健身房划船"
+      },
+      sets: [{ completed: true, reps: "10", rpe: "7", weight: "20" }]
+    }]);
+
+    expect(payload.exercises[0]).toMatchObject({
+      exercise_id: null,
+      exercise_metadata_snapshot: { equipment: ["哑铃"], loadType: "weighted", muscles: ["背部"] },
+      exercise_name_snapshot: "酒店健身房划船",
+      exercise_provider: "manual",
+      external_exercise_id: "manual:00000000-0000-4000-8000-000000000001"
+    });
+  });
+
+  it("serializes a reviewed product action without creating a public database exercise", () => {
+    const reviewed = reviewedExercises.find((item) => item.id === "barbell-bench-press");
+    expect(reviewed).toBeDefined();
+    const payload = buildStandaloneWorkoutSavePayload("2026-07-16", [{
+      reviewedExercise: reviewed!,
+      sets: [{ completed: false, reps: "", rpe: "", weight: "" }]
+    }]);
+
+    expect(payload.exercises[0]).toMatchObject({
+      exercise_id: null,
+      exercise_name_snapshot: "杠铃卧推",
+      exercise_provider: "reviewed",
+      external_exercise_id: "reviewed:barbell-bench-press"
+    });
+  });
+
+  it("accepts a manual snapshot when restoring the caller draft", () => {
+    expect(() => parseStandaloneWorkoutDraft({
+      exercises: [{
+        exercise_id: null,
+        exercise_metadata_snapshot: { equipment: [], loadType: "bodyweight", muscles: [] },
+        exercise_name_snapshot: "旅行深蹲",
+        exercise_provider: "manual",
+        external_exercise_id: "manual:00000000-0000-4000-8000-000000000001",
+        sets: [{ completed: false, reps: "", rpe: "", weight: "" }]
+      }],
+      workout_id: "draft-1"
+    })).not.toThrow();
   });
 
   it("rejects a stored row that mixes a local id and an external reference", () => {

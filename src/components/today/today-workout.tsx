@@ -59,6 +59,7 @@ import {
   type TrainingScheduleItem
 } from "./rest-day-state";
 import { completeRestDayCheckIn, getCurrentRestItem } from "./rest-day-actions";
+import { buildCompletionSummary } from "@/domain/workout-recording";
 
 type WorkoutRow = {
   id: string;
@@ -279,6 +280,7 @@ export function TodayWorkout() {
   const [message, setMessage] = useState("");
   const [validationIssues, setValidationIssues] = useState<TrainingValidationIssue[]>([]);
   const [workoutSummary, setWorkoutSummary] = useState<WorkoutSummary | null>(null);
+  const [completionPreview, setCompletionPreview] = useState<ReturnType<typeof buildCompletionSummary> | null>(null);
   const [coreExercises, setCoreExercises] = useState<CoreExerciseRow[]>([]);
   const [substitutionDialog, setSubstitutionDialog] = useState<SubstitutionDialogState>({
     error: null,
@@ -739,7 +741,7 @@ export function TodayWorkout() {
     });
   }
 
-  async function saveLogs({ completeWorkout = false }: { completeWorkout?: boolean } = {}) {
+  async function saveLogs({ completeWorkout = false, confirmed = false }: { completeWorkout?: boolean; confirmed?: boolean } = {}) {
     if (!workout) return;
     if (completeWorkout && !userId) {
       setSaveStatus("error");
@@ -748,13 +750,6 @@ export function TodayWorkout() {
     }
 
     const allLogs = Object.values(setLogs).flat();
-    const incompleteSetCount = allLogs.filter((log) => !log.completed).length;
-    if (completeWorkout && incompleteSetCount > 0) {
-      setSaveStatus("error");
-      setMessage(`还有 ${incompleteSetCount} 组没有勾选完成。可以先保存记录，或补完后再完成训练。`);
-      return;
-    }
-
     const nextValidationIssues = validateTrainingLogs({ completeWorkout, exercises, setLogs });
     const blockingIssues = nextValidationIssues.filter((issue) => issue.severity === "error");
     if (blockingIssues.length > 0) {
@@ -762,6 +757,18 @@ export function TodayWorkout() {
       setValidationIssues(nextValidationIssues);
       setWorkoutSummary(null);
       setMessage(`发现 ${blockingIssues.length} 个需要修正的数据，请检查后再${completeWorkout ? "完成训练" : "保存"}。`);
+      return;
+    }
+
+    if (completeWorkout && !confirmed) {
+      setValidationIssues(nextValidationIssues);
+      setCompletionPreview(buildCompletionSummary(allLogs.map((log) => ({
+        completed: log.completed,
+        loadType: "weighted" as const,
+        reps: String(log.actual_reps ?? log.target_reps ?? ""),
+        rpe: log.rpe === null ? "" : String(log.rpe),
+        weight: String(log.actual_weight ?? log.target_weight ?? "")
+      }))));
       return;
     }
 
@@ -1420,6 +1427,21 @@ export function TodayWorkout() {
           saving={substitutionDialog.saving}
           source={substitutionDialog.source}
         />
+      ) : null}
+
+      {completionPreview ? (
+        <div aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-black/30 p-4 sm:place-items-center" role="dialog">
+          <div className="w-full max-w-md rounded-lg bg-white p-4">
+            <h2 className="text-lg font-bold">本次训练摘要</h2>
+            <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+              <p><span className="block text-muted">已完成组</span><strong>{completionPreview.completedSetCount} 组</strong></p>
+              <p><span className="block text-muted">漏记组</span><strong>{completionPreview.incompleteSetCount} 组</strong></p>
+              <p><span className="block text-muted">总吨位</span><strong>{completionPreview.totalTonnage === null ? "不适用" : `${completionPreview.totalTonnage} kg`}</strong></p>
+              <p><span className="block text-muted">最高 e1RM</span><strong>{completionPreview.bestE1rm === null ? "不适用" : `${completionPreview.bestE1rm} kg`}</strong></p>
+            </div>
+            <div className="mt-4 flex gap-2"><button className="rounded-md border border-line px-3 py-2 text-sm font-semibold" onClick={() => setCompletionPreview(null)} type="button">返回继续记录</button><button className="rounded-md bg-action px-3 py-2 text-sm font-semibold text-white" disabled={saveStatus === "saving"} onClick={() => void saveLogs({ completeWorkout: true, confirmed: true })} type="button">{completionPreview.incompleteSetCount ? "仍然结束训练" : "确认完成"}</button></div>
+          </div>
+        </div>
       ) : null}
 
       <div className="sticky bottom-3 z-20 grid gap-2 rounded-xl border border-line bg-white/95 p-3 shadow-lg backdrop-blur">

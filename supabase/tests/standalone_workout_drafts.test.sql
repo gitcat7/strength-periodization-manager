@@ -1,6 +1,6 @@
 begin;
 
-select plan(14);
+select plan(18);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values
@@ -52,6 +52,25 @@ select throws_ok(
   $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"draft","exercises":[{"exercise_id":"00000000-0000-0000-0000-000000003201","sets":[{"weight":"NaN","reps":"5","rpe":"8","completed":true}]}]}'::jsonb)$$,
   'P0001',
   'invalid NaN weight is rejected'
+);
+select public.save_standalone_workout(jsonb_build_object(
+  'workout_id', (select workout_id from standalone_test_state),
+  'scheduled_date', '2026-07-16', 'status', 'draft',
+  'exercises', jsonb_build_array(jsonb_build_object(
+    'exercise_id', null,
+    'exercise_provider', 'manual',
+    'external_exercise_id', 'manual:00000000-0000-4000-8000-000000000001',
+    'exercise_name_snapshot', '酒店健身房划船',
+    'exercise_metadata_snapshot', jsonb_build_object('equipment', jsonb_build_array('哑铃'), 'muscles', jsonb_build_array('背部'), 'loadType', 'weighted'),
+    'sets', jsonb_build_array(jsonb_build_object('weight', '20', 'reps', '10', 'rpe', '7', 'completed', true))
+  ))
+));
+select is((select exercise_provider from public.workout_exercises where workout_id = (select workout_id from standalone_test_state)), 'manual', 'manual action is stored only as a workout snapshot');
+select is((select exercise_name_snapshot from public.workout_exercises where workout_id = (select workout_id from standalone_test_state)), '酒店健身房划船', 'manual snapshot preserves a readable user-provided name');
+select throws_ok(
+  $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"completed","exercises":[{"exercise_provider":"manual","external_exercise_id":"manual:00000000-0000-4000-8000-000000000001","exercise_name_snapshot":"徒手划船","exercise_metadata_snapshot":{"equipment":[],"muscles":[],"loadType":"bodyweight"},"sets":[{"weight":"","reps":"","rpe":"7","completed":true}]}]}'::jsonb)$$,
+  'P0001',
+  'completed standalone set requires repetitions'
 );
 reset role;
 
