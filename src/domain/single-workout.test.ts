@@ -86,6 +86,41 @@ describe("single workout domain", () => {
     });
   });
 
+  it("serializes a user-owned manual action as a bounded standalone snapshot", () => {
+    const payload = buildStandaloneWorkoutSavePayload("2026-07-16", [{
+      manualExercise: {
+        equipment: ["哑铃"],
+        id: "manual:00000000-0000-4000-8000-000000000001",
+        loadType: "weighted",
+        muscles: ["背部"],
+        name: "酒店健身房划船"
+      },
+      sets: [{ completed: true, reps: "10", rpe: "7", weight: "20" }]
+    }]);
+
+    expect(payload.exercises[0]).toMatchObject({
+      exercise_id: null,
+      exercise_metadata_snapshot: { equipment: ["哑铃"], loadType: "weighted", muscles: ["背部"] },
+      exercise_name_snapshot: "酒店健身房划船",
+      exercise_provider: "manual",
+      external_exercise_id: "manual:00000000-0000-4000-8000-000000000001"
+    });
+  });
+
+  it("accepts a manual snapshot when restoring the caller draft", () => {
+    expect(() => parseStandaloneWorkoutDraft({
+      exercises: [{
+        exercise_id: null,
+        exercise_metadata_snapshot: { equipment: [], loadType: "bodyweight", muscles: [] },
+        exercise_name_snapshot: "旅行深蹲",
+        exercise_provider: "manual",
+        external_exercise_id: "manual:00000000-0000-4000-8000-000000000001",
+        sets: [{ completed: false, reps: "", rpe: "", weight: "" }]
+      }],
+      workout_id: "draft-1"
+    })).not.toThrow();
+  });
+
   it("rejects a stored row that mixes a local id and an external reference", () => {
     expect(() => parseStandaloneWorkoutDraft({
       exercises: [{
