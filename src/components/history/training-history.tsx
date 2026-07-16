@@ -8,6 +8,7 @@ import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts"
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
+import { resolveWorkoutExerciseName } from "@/lib/workout-exercise-presentation";
 import type { RecommendationType } from "@/domain/fitness-coach";
 
 type WorkoutRow = {
@@ -25,6 +26,7 @@ type WorkoutExerciseRow = {
   target_sets: number;
   target_reps: number;
   target_weight: number;
+  exercise_name_snapshot?: string | null;
   exercises: {
     name: string;
     slug: string;
@@ -141,7 +143,7 @@ export function TrainingHistory() {
           withTimeout(
             supabase
               .from("workout_exercises")
-              .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
+              .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercise_name_snapshot,exercise_provider,external_exercise_id,exercises(name,slug)")
               .in("workout_id", workoutIds)
               .order("order_index", { ascending: true }),
             "历史动作读取超时，请刷新页面后重试。"
@@ -427,7 +429,7 @@ export function TrainingHistory() {
                   return (
                     <div className="rounded-lg bg-field px-3 py-2 text-sm" key={exercise.id}>
                       <div className="flex items-center justify-between gap-3">
-                        <span className="font-semibold">{exercise.exercises?.name ?? "动作"}</span>
+                        <span className="font-semibold">{resolveWorkoutExerciseName(exercise)}</span>
                         <span className="text-action">
                           {logs.filter((log) => log.completed).length}/{logs.length} 组
                         </span>

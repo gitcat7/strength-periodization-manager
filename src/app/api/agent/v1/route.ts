@@ -3,6 +3,7 @@ import { z } from "zod";
 import { authenticateAgentRequest } from "@/lib/agent-auth";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
+import { resolveWorkoutExerciseName } from "@/lib/workout-exercise-presentation";
 
 export const dynamic = "force-dynamic";
 
@@ -257,7 +258,7 @@ async function loadWorkoutDetail(
   const supabase = createAdminSupabaseClient();
   const { data: exercises, error: exerciseError } = await supabase
     .from("workout_exercises")
-    .select("id,exercise_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
+    .select("id,exercise_id,exercise_provider,external_exercise_id,exercise_name_snapshot,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
     .eq("workout_id", workout.id)
     .order("order_index", { ascending: true });
 
@@ -276,6 +277,10 @@ async function loadWorkoutDetail(
     ...workout,
     exercises: (exercises ?? []).map((exercise) => ({
       ...exercise,
+      exercise_name: resolveWorkoutExerciseName({
+        ...exercise,
+        exercises: Array.isArray(exercise.exercises) ? exercise.exercises[0] ?? null : exercise.exercises
+      }),
       set_logs: (setLogs ?? []).filter((set) => set.workout_exercise_id === exercise.id)
     }))
   };
