@@ -33,6 +33,7 @@ describe("PlanSetupForm", () => {
           goal: "strength",
           injuryNotes: "",
           lifts: [{ exerciseId: "bench", weightKg: "80", reps: "5" }],
+          weekCount: 4,
           trainingDaysPerWeek: 3
         }}
       />
@@ -42,6 +43,9 @@ describe("PlanSetupForm", () => {
     expect(container.querySelector('input[aria-label="卧推重量 kg"]')).toHaveProperty("value", "80");
     expect(container.textContent).toContain("至少录入一个主项最近工作组");
     expect(container.textContent).toContain("增肌（Hypertrophy）");
+    expect(container.textContent).toContain("计划周期");
+    expect(container.querySelector('select[aria-label="计划周期"]')).toHaveProperty("value", "4");
+    expect(container.querySelectorAll('select[aria-label="计划周期"] option')).toHaveLength(12);
     expect(container.textContent).not.toContain("单次时长");
     expect(container.textContent).not.toContain("可训练日");
   });

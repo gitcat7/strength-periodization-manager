@@ -51,12 +51,44 @@ describe("buildFourWeekProgram", () => {
     ]);
   });
 
+  it("generates the selected number of weeks and repeats the four-week loading block", () => {
+    const workouts = buildFourWeekProgram({
+      templateType: "three_split",
+      schedule: { mode: "fixed_weekdays", weekdays: [1, 3, 5] },
+      exerciseProfiles: profiles,
+      startDate: new Date("2026-07-13T00:00:00"),
+      weekCount: 6
+    }).filter((workout) => workout.dayType === "training");
+
+    expect(workouts).toHaveLength(18);
+    expect(workouts.at(-1)?.name).toBe("第 6 周 · 腿");
+    expect(workouts[3]?.exercises[0]?.targetWeight).toBe(97.5);
+    expect(workouts[15]?.exercises[0]?.targetWeight).toBe(97.5);
+  });
+
+  it("treats twelve selected weeks as twelve calendar weeks for every template", () => {
+    const workouts = buildFourWeekProgram({
+      templateType: "one_split",
+      schedule: { mode: "fixed_weekdays", weekdays: [1, 3, 5] },
+      exerciseProfiles: profiles,
+      startDate: new Date("2026-07-13T00:00:00"),
+      weekCount: 12
+    }).filter((workout) => workout.dayType === "training");
+
+    expect(workouts).toHaveLength(36);
+    expect(workouts.at(-1)).toMatchObject({
+      name: "第 12 周 · 全身训练",
+      scheduledDate: "2026-10-02"
+    });
+  });
+
   it("keeps sequence order when flexible scheduling only supplies suggested dates", () => {
     const workouts = buildFourWeekProgram({
       templateType: "one_split",
       schedule: { mode: "flexible" },
       exerciseProfiles: profiles,
-      startDate: new Date("2026-07-13T00:00:00")
+      startDate: new Date("2026-07-13T00:00:00"),
+      trainingDaysPerWeek: 3
     });
 
     const trainingWorkouts = workouts.filter((workout) => workout.dayType === "training");
@@ -69,6 +101,7 @@ describe("buildFourWeekProgram", () => {
       "2026-07-14",
       "2026-07-15"
     ]);
+    expect(trainingWorkouts[3]?.scheduledDate).toBe("2026-07-20");
   });
 
   it("groups three training days before a one-day rest in a cadence cycle", () => {
@@ -152,9 +185,9 @@ describe("buildFourWeekProgram", () => {
       Array.from({ length: flexibleItems.length }, (_, index) => index)
     );
     expect(buildSchedulePreview(cadenceItems)).toEqual({
-      endDate: "2026-08-04",
-      restDays: 11,
-      trainingDays: 12
+      endDate: "2026-08-08",
+      restDays: 13,
+      trainingDays: 14
     });
   });
 });

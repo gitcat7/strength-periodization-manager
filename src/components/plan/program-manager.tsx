@@ -144,6 +144,7 @@ const defaultPlanSetup: PlanSetupInput = {
   goal: "strength",
   injuryNotes: "",
   lifts: [],
+  weekCount: 4,
   trainingDaysPerWeek: 3
 };
 
@@ -366,6 +367,7 @@ export function ProgramManager() {
         const workingWeight = inferFiveRepWorkingWeight(estimatedOneRepMax, Number(exercise.default_increment) || 2.5);
         return { exerciseId: exercise.id, weightKg: workingWeight ? String(workingWeight) : "", reps: "5" };
       }),
+      weekCount: 4,
       trainingDaysPerWeek
     });
   }
@@ -735,7 +737,9 @@ export function ProgramManager() {
     const plannedWorkouts = buildFourWeekProgram({
       templateType,
       schedule,
-      exerciseProfiles: [...exerciseProfiles, ...accessoryProfiles]
+      exerciseProfiles: [...exerciseProfiles, ...accessoryProfiles],
+      weekCount: planSetup.weekCount,
+      trainingDaysPerWeek: planSetup.trainingDaysPerWeek
     });
 
     try {
@@ -894,7 +898,7 @@ export function ProgramManager() {
             </span>
             <div>
               <h2 className="font-semibold">创建第一个计划</h2>
-              <p className="text-sm text-muted">填写计划参数、选择训练结构和安排方式后，即可生成 4 周计划。</p>
+              <p className="text-sm text-muted">填写计划参数、选择训练结构和安排方式后，即可生成 1–12 周计划。</p>
             </div>
           </div>
           <button
@@ -905,7 +909,7 @@ export function ProgramManager() {
             type="button"
           >
             {status === "generating" ? <Loader2 className="animate-spin" size={18} /> : <PlusCircle size={18} />}
-            生成 4 周训练计划
+            生成 {planSetup.weekCount} 周训练计划
           </button>
         </section>
       ) : (
@@ -929,11 +933,17 @@ export function ProgramManager() {
             <button
               className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
               disabled={status === "generating"}
-              onClick={openRegenerationDialog}
+              onClick={() => {
+                if (!showPlanSetup) {
+                  setShowPlanSetup(true);
+                  return;
+                }
+                openRegenerationDialog();
+              }}
               ref={regenerationTriggerRef}
               type="button"
             >
-              重新生成计划
+              {showPlanSetup ? "预览并重新生成计划" : "调整周期并重新生成"}
             </button>
             <button
               className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink"
@@ -1173,6 +1183,20 @@ export function PlanSetupForm({
             <option value={7}>7 天</option>
           </select>
           {errors.trainingDaysPerWeek ? <p className="mt-1 text-xs text-red-600">{errors.trainingDaysPerWeek}</p> : null}
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">计划周期</span>
+          <select
+            aria-label="计划周期"
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            onChange={(event) => update({ weekCount: Number(event.target.value) })}
+            value={value.weekCount}
+          >
+            {Array.from({ length: 12 }, (_, index) => index + 1).map((weeks) => (
+              <option key={weeks} value={weeks}>{weeks} 周</option>
+            ))}
+          </select>
+          {errors.weekCount ? <p className="mt-1 text-xs text-red-600">{errors.weekCount}</p> : null}
         </label>
         <label className="block">
           <span className="mb-1 block text-sm font-medium">主要目标</span>

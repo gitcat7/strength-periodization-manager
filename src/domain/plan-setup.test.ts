@@ -7,6 +7,7 @@ function baseInput(overrides: Partial<PlanSetupInput> = {}): PlanSetupInput {
     goal: "strength",
     injuryNotes: "",
     lifts: [{ exerciseId: "bench", weightKg: "80", reps: "5" }],
+    weekCount: 4,
     trainingDaysPerWeek: 3,
     ...overrides
   };
@@ -40,5 +41,12 @@ describe("validatePlanSetup", () => {
       expect(result.value).not.toHaveProperty("availableWeekdays");
       expect(result.value).not.toHaveProperty("sessionDurationMinutes");
     }
+  });
+
+  it("rejects a plan period longer than twelve weeks", () => {
+    expect(validatePlanSetup(baseInput({ weekCount: 13 }))).toEqual({
+      ok: false,
+      fieldErrors: { weekCount: "计划周期应为 1-12 周" }
+    });
   });
 });

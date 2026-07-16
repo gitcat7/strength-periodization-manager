@@ -251,26 +251,32 @@ export function buildFourWeekProgram({
   availableWeekdays,
   schedule,
   exerciseProfiles,
-  startDate = new Date()
+  startDate = new Date(),
+  weekCount = 4,
+  trainingDaysPerWeek
 }: {
   templateType: TemplateType;
   availableWeekdays?: number[];
   schedule?: ScheduleConfig;
   exerciseProfiles: ExerciseProfile[];
   startDate?: Date;
+  weekCount?: number;
+  trainingDaysPerWeek?: number;
 }) {
   const template = chooseTemplate(templateType);
   const profileBySlug = new Map(exerciseProfiles.map((profile) => [profile.slug, profile]));
+  const normalizedWeekCount = normalizeWeekCount(weekCount);
   const workoutDates = buildWorkoutDates(
     startDate,
     schedule ?? { mode: "fixed_weekdays", weekdays: availableWeekdays ?? [1, 3, 5] },
-    template.length * 4
+    normalizedWeekCount,
+    normalizeTrainingDaysPerWeek(trainingDaysPerWeek, template.length)
   );
 
   const trainingWorkouts: PlannedTrainingWorkout[] = workoutDates.map((date, index) => {
-    const weekIndex = Math.floor(index / template.length);
+    const weekIndex = getCalendarWeekIndex(date, startDate);
     const templateWorkout = template[index % template.length];
-    const bump = weekIntensityBumps[weekIndex] ?? 0;
+    const bump = weekIntensityBumps[weekIndex % weekIntensityBumps.length] ?? 0;
 
     return {
       name: `第 ${weekIndex + 1} 周 · ${templateWorkout.name}`,
@@ -304,15 +310,20 @@ export function getTemplateType(trainingDaysPerWeek: number): TemplateType {
   return trainingDaysPerWeek === 4 ? "five_split" : "three_split";
 }
 
-function buildWorkoutDates(startDate: Date, schedule: ScheduleConfig, count: number) {
+function buildWorkoutDates(startDate: Date, schedule: ScheduleConfig, weekCount: number, trainingDaysPerWeek: number) {
   const dates: Date[] = [];
   const cursor = new Date(startDate);
   cursor.setHours(0, 0, 0, 0);
+  const endExclusive = new Date(cursor);
+  endExclusive.setDate(endExclusive.getDate() + weekCount * 7);
 
   if (schedule.mode === "flexible") {
-    while (dates.length < count) {
-      dates.push(new Date(cursor));
-      cursor.setDate(cursor.getDate() + 1);
+    for (let weekIndex = 0; weekIndex < weekCount; weekIndex += 1) {
+      for (let dayIndex = 0; dayIndex < trainingDaysPerWeek; dayIndex += 1) {
+        const date = new Date(cursor);
+        date.setDate(date.getDate() + weekIndex * 7 + dayIndex);
+        dates.push(date);
+      }
     }
     return dates;
   }
@@ -320,7 +331,7 @@ function buildWorkoutDates(startDate: Date, schedule: ScheduleConfig, count: num
   if (schedule.mode === "cadence") {
     const trainDays = Math.max(1, Math.floor(schedule.trainDays ?? 1));
     const restDays = Math.max(0, Math.floor(schedule.restDays));
-    while (dates.length < count) {
+    while (cursor < endExclusive) {
       dates.push(new Date(cursor));
       const completedBlock = dates.length % trainDays === 0;
       cursor.setDate(cursor.getDate() + (completedBlock ? restDays + 1 : 1));
@@ -331,7 +342,7 @@ function buildWorkoutDates(startDate: Date, schedule: ScheduleConfig, count: num
   const sortedWeekdays = [...schedule.weekdays].sort((a, b) => a - b);
   if (sortedWeekdays.length === 0) return dates;
 
-  while (dates.length < count) {
+  while (cursor < endExclusive) {
     if (sortedWeekdays.includes(cursor.getDay())) {
       dates.push(new Date(cursor));
     }
@@ -339,6 +350,24 @@ function buildWorkoutDates(startDate: Date, schedule: ScheduleConfig, count: num
   }
 
   return dates;
+}
+
+function getCalendarWeekIndex(date: Date, startDate: Date) {
+  const normalizedStart = new Date(startDate);
+  normalizedStart.setHours(0, 0, 0, 0);
+  const normalizedDate = new Date(date);
+  normalizedDate.setHours(0, 0, 0, 0);
+  return Math.floor((normalizedDate.getTime() - normalizedStart.getTime()) / (7 * 24 * 60 * 60 * 1000));
+}
+
+function normalizeTrainingDaysPerWeek(value: number | undefined, fallback: number) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 7) return fallback;
+  return value;
+}
+
+function normalizeWeekCount(value: number | undefined) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 12) return 4;
+  return value;
 }
 
 function formatDate(date: Date) {

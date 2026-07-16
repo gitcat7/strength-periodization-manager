@@ -6,6 +6,7 @@ export type PlanSetupInput = {
   goal: PlanGoal;
   injuryNotes: string;
   lifts: Array<{ exerciseId: string; weightKg: string; reps: string }>;
+  weekCount: number;
   trainingDaysPerWeek: number;
 };
 
@@ -34,6 +35,10 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
     fieldErrors.trainingDaysPerWeek = "每周训练天数应为 1-7 天";
   }
 
+  if (!Number.isInteger(input.weekCount) || input.weekCount < 1 || input.weekCount > 12) {
+    fieldErrors.weekCount = "计划周期应为 1-12 周";
+  }
+
   if (!experienceLevel) {
     fieldErrors.experienceLevel = "请选择训练经验";
   }
@@ -53,6 +58,7 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
       goal: input.goal,
       injuryNotes: input.injuryNotes.trim().slice(0, 500),
       lifts,
+      weekCount: input.weekCount,
       trainingDaysPerWeek: input.trainingDaysPerWeek
     }
   };

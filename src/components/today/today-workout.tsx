@@ -1114,7 +1114,7 @@ export function TodayWorkout() {
           </span>
           <div>
             <h2 className="font-semibold">还没有可执行的训练计划</h2>
-            <p className="text-sm text-muted">{message || "先创建训练计划，即可生成 4 周周期。"}</p>
+            <p className="text-sm text-muted">{message || "先创建训练计划，即可生成 1–12 周周期。"}</p>
           </div>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
