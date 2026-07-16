@@ -50,8 +50,8 @@ export function BottomNav() {
 
           return (
             <Link
-              className={`pressable relative flex min-h-12 flex-col items-center justify-center gap-1 rounded-md px-1 ${
-                active ? "bg-action/10 text-action" : "text-muted hover:bg-field"
+              className={`bottom-nav-item pressable relative flex min-h-12 flex-col items-center justify-center gap-1 rounded-md px-1 ${
+                active ? "bottom-nav-item-active bg-action/10 text-action" : "text-muted"
               }`}
               href={item.href}
               key={item.href}

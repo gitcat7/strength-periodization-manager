@@ -77,6 +77,12 @@ body {
   transform: scale(0.98);
 }
 
+@media (hover: hover) {
+  .bottom-nav-item:not(.bottom-nav-item-active):hover {
+    background-color: rgb(246 248 245);
+  }
+}
+
 button,
 input,
 select,
