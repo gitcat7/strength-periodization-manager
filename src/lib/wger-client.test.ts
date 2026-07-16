@@ -30,15 +30,40 @@ describe("wger client", () => {
       hasMore: false,
       items: [
         {
-          category: "Chest",
-          equipment: ["Barbell"],
+          category: "胸部",
+          equipment: ["杠铃"],
           externalId: "42",
-          muscles: ["Pectoralis major"],
-          name: "Bench press",
+          muscles: ["胸大肌"],
+          name: "胸大肌训练动作 42",
           provider: "wger",
           sourceUrl: "https://wger.de/en/exercise/42"
         }
       ]
+    });
+  });
+
+  it("prefers Chinese exercise names and localizes catalog metadata", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      next: null,
+      results: [{
+        ...upstreamExercise,
+        translations: [{ name: "Bench press" }, { name: "杠铃卧推" }]
+      }]
+    }), { status: 200 })));
+
+    await expect(searchWgerExercises({ page: 1, query: "bench" })).resolves.toMatchObject({
+      items: [{ category: "胸部", equipment: ["杠铃"], muscles: ["胸大肌"], name: "杠铃卧推" }]
+    });
+  });
+
+  it("uses Chinese-only fallbacks when Wger has no Chinese translation", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      next: null,
+      results: [{ ...upstreamExercise, translations: [{ name: "Bench press" }] }]
+    }), { status: 200 })));
+
+    await expect(searchWgerExercises({ page: 1, query: "bench" })).resolves.toMatchObject({
+      items: [{ name: "胸大肌训练动作 42" }]
     });
   });
 

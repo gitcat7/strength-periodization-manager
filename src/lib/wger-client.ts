@@ -175,18 +175,43 @@ function parsePage(value: unknown): { next: unknown; results: WgerExerciseInfo[]
 function toExternalExerciseReference(value: WgerExerciseInfo): ExternalExerciseReference | null {
   const externalId = typeof value.id === "number" || typeof value.id === "string" ? String(value.id) : "";
   if (!isWgerExternalId(externalId)) return null;
-  const name = readName(value) ?? readNameFromTranslations(value);
-  if (!name) return null;
+  const category = localizeCatalogText(readName(value.category) ?? "", "其他");
+  const equipment = readNames(value.equipment).map((item) => localizeCatalogText(item, "其他器械"));
+  const muscles = readNames(value.muscles).map((item) => localizeCatalogText(item, "其他肌群"));
+  const name = readChineseName(value.translations) ?? readChineseText(readName(value)) ?? `${muscles[0] ?? category}训练动作 ${externalId}`;
 
   return {
-    category: readName(value.category) ?? null,
-    equipment: readNames(value.equipment),
+    category,
+    equipment,
     externalId,
-    muscles: readNames(value.muscles),
+    muscles,
     name,
     provider: "wger",
     sourceUrl: `https://wger.de/en/exercise/${externalId}`
   };
+}
+
+function readChineseName(values: unknown) {
+  if (!Array.isArray(values)) return null;
+  for (const value of values) {
+    const name = readName(value);
+    if (name && /[\u3400-\u9fff]/.test(name)) return name;
+  }
+  return null;
+}
+
+function readChineseText(value: string | null) {
+  return value && /[\u3400-\u9fff]/.test(value) ? value : null;
+}
+
+function localizeCatalogText(value: string, fallback: string) {
+  const translations: Record<string, string> = {
+    Arms: "手臂", Back: "背部", Barbell: "杠铃", Bench: "训练凳", Chest: "胸部", Dumbbell: "哑铃",
+    "Gluteus maximus": "臀大肌", Hamstrings: "腘绳肌", Legs: "腿部", "Latissimus dorsi": "背阔肌",
+    "none (bodyweight exercise)": "徒手", "Pectoralis major": "胸大肌", Quadriceps: "股四头肌",
+    Shoulders: "肩部", Trapezius: "斜方肌", "Triceps brachii": "肱三头肌"
+  };
+  return translations[value] ?? fallback;
 }
 
 function readName(value: unknown) {
@@ -200,10 +225,6 @@ function readNames(values: unknown) {
     const name = readName(value);
     return name ? [name] : [];
   }).slice(0, 12);
-}
-
-function readNameFromTranslations(value: WgerExerciseInfo) {
-  return readNames(value.translations)[0] ?? null;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
