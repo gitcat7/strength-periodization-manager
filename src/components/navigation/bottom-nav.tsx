@@ -5,6 +5,7 @@ import Link from "next/link";
 import { BarChart3, CalendarDays, Dumbbell, Settings, Trophy } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { isNavigationItemActive } from "./navigation-state";
 
 const hiddenPrefixes = ["/login", "/auth"];
 
@@ -46,7 +47,7 @@ export function BottomNav() {
       <div className="mx-auto grid max-w-3xl grid-cols-5 gap-1 text-xs text-muted">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+          const active = isNavigationItemActive(pathname, item.href);
 
           return (
             <Link
