@@ -4,6 +4,7 @@ import {
   buildStandaloneWorkoutSavePayload,
   filterSelectableExercises,
   isStandaloneWorkout,
+  parseStandaloneWorkoutDraft,
   restoreStandaloneDraft,
   toggleSelectedExercise,
   type SelectableExercise
@@ -55,6 +56,48 @@ describe("single workout domain", () => {
   it("keeps the same standalone workout id on a later draft save", () => {
     expect(buildStandaloneWorkoutSavePayload("2026-07-16", exercises.slice(0, 1))).not.toHaveProperty("workout_id");
     expect(buildStandaloneWorkoutSavePayload("2026-07-16", exercises.slice(0, 1), "draft-1")).toMatchObject({ workout_id: "draft-1" });
+  });
+
+  it("serializes an external standalone exercise without a local exercise id", () => {
+    const payload = buildStandaloneWorkoutSavePayload("2026-07-16", [{
+      externalReference: {
+        category: "Chest",
+        equipment: ["Barbell"],
+        externalId: "42",
+        muscles: ["Pectoralis major"],
+        name: "Bench press",
+        provider: "wger",
+        sourceUrl: "https://wger.de/en/exercise/42"
+      },
+      sets: [{ completed: true, reps: "5", rpe: "8", weight: "80" }]
+    }]);
+
+    expect(payload.exercises[0]).toMatchObject({
+      exercise_id: null,
+      exercise_metadata_snapshot: {
+        category: "Chest",
+        equipment: ["Barbell"],
+        muscles: ["Pectoralis major"],
+        sourceUrl: "https://wger.de/en/exercise/42"
+      },
+      exercise_name_snapshot: "Bench press",
+      exercise_provider: "wger",
+      external_exercise_id: "42"
+    });
+  });
+
+  it("rejects a stored row that mixes a local id and an external reference", () => {
+    expect(() => parseStandaloneWorkoutDraft({
+      exercises: [{
+        exercise_id: "bench",
+        exercise_name_snapshot: "Bench press",
+        exercise_provider: "wger",
+        external_exercise_id: "42",
+        exercise_metadata_snapshot: { category: "Chest", equipment: [], muscles: [], sourceUrl: "https://wger.de/en/exercise/42" },
+        sets: []
+      }],
+      workout_id: "draft-1"
+    })).toThrow("INVALID_EXERCISE_REFERENCE");
   });
 
   it("restores a saved standalone draft with its recorded sets", () => {

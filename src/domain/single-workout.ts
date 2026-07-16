@@ -1,4 +1,5 @@
 import { reviewedExerciseNamesZh } from "./exercise-catalog-names";
+import { isWgerExternalId, toExternalExerciseSnapshot, type ExternalExerciseReference } from "./external-exercise";
 
 export type SingleWorkoutCategory = "胸" | "背" | "腿" | "肩" | "手臂" | "核心" | "全身";
 
@@ -15,9 +16,20 @@ export type SelectableExercise = {
 
 export type StandaloneSetDraft = { completed: boolean; reps: string; rpe: string; weight: string };
 export type StandaloneDraftExercise = SelectableExercise & { sets: StandaloneSetDraft[] };
+export type ExternalStandaloneDraftExercise = {
+  externalReference: ExternalExerciseReference;
+  sets: StandaloneSetDraft[];
+};
 type StoredStandaloneDraft = {
   workout_id: string;
-  exercises: Array<{ exercise_id: string; sets: StandaloneSetDraft[] }>;
+  exercises: Array<{
+    exercise_id: string | null;
+    exercise_metadata_snapshot?: unknown;
+    exercise_name_snapshot?: unknown;
+    exercise_provider?: unknown;
+    external_exercise_id?: unknown;
+    sets: StandaloneSetDraft[];
+  }>;
 };
 
 const sectionMatchers: Record<SingleWorkoutCategory, RegExp> = {
@@ -93,18 +105,53 @@ export function buildStandaloneWorkoutPayload(date: string, exercises: readonly 
 
 export function buildStandaloneWorkoutSavePayload(
   date: string,
-  exercises: readonly (SelectableExercise & Partial<Pick<StandaloneDraftExercise, "sets">>)[],
+  exercises: readonly ((SelectableExercise & Partial<Pick<StandaloneDraftExercise, "sets">>) | ExternalStandaloneDraftExercise)[],
   workoutId?: string
 ) {
   return {
     ...(workoutId ? { workout_id: workoutId } : {}),
     scheduled_date: date,
     status: "draft" as const,
-    exercises: exercises.map((exercise) => ({
-      exercise_id: exercise.id,
-      sets: (exercise.sets ?? []).map((set, index) => ({ set_index: index + 1, ...set }))
-    }))
+    exercises: exercises.map((exercise) => {
+      const sets = (exercise.sets ?? []).map((set, index) => ({ set_index: index + 1, ...set }));
+      if ("externalReference" in exercise) {
+        return {
+          exercise_id: null,
+          exercise_metadata_snapshot: toExternalExerciseSnapshot(exercise.externalReference),
+          exercise_name_snapshot: exercise.externalReference.name,
+          exercise_provider: "wger" as const,
+          external_exercise_id: exercise.externalReference.externalId,
+          sets
+        };
+      }
+      return { exercise_id: exercise.id, sets };
+    })
   };
+}
+
+export function parseStandaloneWorkoutDraft(value: unknown): StoredStandaloneDraft {
+  if (!isRecord(value) || typeof value.workout_id !== "string" || !Array.isArray(value.exercises)) {
+    throw new Error("INVALID_EXERCISE_REFERENCE");
+  }
+  for (const exercise of value.exercises) {
+    if (!isRecord(exercise) || !Array.isArray(exercise.sets)) throw new Error("INVALID_EXERCISE_REFERENCE");
+    const local = typeof exercise.exercise_id === "string";
+    const hasExternalFields = [
+      exercise.exercise_provider,
+      exercise.external_exercise_id,
+      exercise.exercise_name_snapshot,
+      exercise.exercise_metadata_snapshot
+    ].some((field) => field !== null && field !== undefined);
+    const external = exercise.exercise_id === null
+      && exercise.exercise_provider === "wger"
+      && typeof exercise.external_exercise_id === "string"
+      && isWgerExternalId(exercise.external_exercise_id)
+      && typeof exercise.exercise_name_snapshot === "string"
+      && exercise.exercise_name_snapshot.trim().length > 0
+      && isRecord(exercise.exercise_metadata_snapshot);
+    if ((local && hasExternalFields) || (!local && !external)) throw new Error("INVALID_EXERCISE_REFERENCE");
+  }
+  return value as StoredStandaloneDraft;
 }
 
 export function restoreStandaloneDraft(
@@ -116,6 +163,7 @@ export function restoreStandaloneDraft(
   return {
     workoutId: stored.workout_id,
     exercises: stored.exercises.flatMap((item) => {
+      if (typeof item.exercise_id !== "string") return [];
       const exercise = selectableById.get(item.exercise_id);
       return exercise ? [{ ...exercise, sets: item.sets }] : [];
     })
@@ -124,4 +172,8 @@ export function restoreStandaloneDraft(
 
 export function isStandaloneWorkout(workout: { program_id: string | null }) {
   return workout.program_id === null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
