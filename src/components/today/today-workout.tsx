@@ -1164,27 +1164,27 @@ export function TodayWorkout() {
 
   return (
     <section className="space-y-4">
-      <div className="rounded-xl border border-line bg-white p-4">
+      <div className="action-surface p-4">
         <div className="flex items-start gap-3">
-          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-white transition ${headerView.tone === "completed" ? "bg-action" : "bg-action"}`}>
+          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-white ${headerView.tone === "completed" ? "bg-action" : "bg-[#c75c1a]"}`}>
             <Dumbbell size={20} />
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="text-sm text-muted">{workout.scheduled_date}</p>
-              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${headerView.tone === "completed" ? "bg-action/10 text-action" : "bg-field text-muted"}`}>
+              <p className="page-kicker">{workout.scheduled_date}</p>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${headerView.tone === "completed" ? "bg-action/10 text-action" : "bg-[#fff1e8] text-[#c75c1a]"}`}>
                 {headerView.progressLabel}
               </span>
             </div>
-            <h2 className="mt-0.5 text-xl font-semibold">{workout.name}</h2>
+            <h2 className="mt-0.5 text-xl font-bold">{workout.name}</h2>
             <p className="mt-1 text-sm text-muted">{workoutMeta.focus}</p>
             <p className="mt-1 text-sm text-muted">{workoutMeta.note}</p>
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-action/15 pt-3">
           <button
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-line px-3 text-sm font-semibold text-ink transition active:scale-[0.98]"
+            className="pressable inline-flex h-11 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-semibold text-ink"
             onClick={fillByPlan}
             type="button"
           >
@@ -1192,7 +1192,7 @@ export function TodayWorkout() {
             按计划填入
           </button>
           <button
-            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-action px-3 text-sm font-semibold text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            className="pressable inline-flex h-11 items-center justify-center gap-2 rounded-md bg-action px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             disabled={saveStatus === "saving"}
             onClick={() => saveLogs()}
             type="button"
@@ -1203,7 +1203,7 @@ export function TodayWorkout() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-line bg-white p-4">
+      <div className="rounded-lg border border-line bg-white p-4">
         <div className="flex items-start gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-action/10 text-action">
             <Brain size={18} />
@@ -1298,9 +1298,13 @@ export function TodayWorkout() {
         </div>
       ) : null}
 
-      <div className="rounded-xl border border-line bg-white p-4">
-        <h3 className="font-semibold">执行记录</h3>
-        <p className="mt-1 text-sm text-muted">记录实际完成重量、次数和 RPE。RPE 8 大约是还剩 2 次余量。</p>
+      <div className="flex items-start justify-between gap-3 border-b border-line px-1 pb-3">
+        <div className="min-w-0">
+          <p className="page-kicker">训练执行</p>
+          <h3 className="section-heading mt-1">执行记录</h3>
+          <p className="mt-1 text-sm leading-5 text-muted">记录实际完成重量、次数和 RPE。RPE 8 大约是还剩 2 次余量。</p>
+        </div>
+        <span className="rounded-full bg-action/10 px-2 py-1 text-xs font-bold text-action">{completedSets}/{totalSets} 组</span>
       </div>
 
       <div className="space-y-3">
@@ -1309,9 +1313,9 @@ export function TodayWorkout() {
           const completedExerciseSets = exerciseLogs.filter((log) => log.completed).length;
 
           return (
-            <article className="rounded-xl border border-line bg-white p-4" key={exercise.id}>
+            <article className={`rounded-lg border bg-white p-4 ${completedExerciseSets === exerciseLogs.length && exerciseLogs.length > 0 ? "border-action/30 border-l-4" : "border-line border-l-4 border-l-[#c75c1a]"}`} key={exercise.id}>
               <div className="flex items-start gap-3">
-                <span className="grid h-8 w-8 place-items-center rounded-full bg-action text-sm font-semibold text-white">
+                <span className={`grid h-8 w-8 place-items-center rounded-full text-sm font-semibold text-white ${completedExerciseSets === exerciseLogs.length && exerciseLogs.length > 0 ? "bg-action" : "bg-[#c75c1a]"}`}>
                   {index + 1}
                 </span>
                 <div className="min-w-0 flex-1">
@@ -1338,7 +1342,7 @@ export function TodayWorkout() {
                         })}
                       </p>
                       <button
-                        className="h-8 rounded-lg border border-line px-2 text-xs font-semibold text-ink"
+                        className="pressable h-8 rounded-md border border-line px-2 text-xs font-semibold text-ink"
                         onClick={() => fillExerciseByPlan(exercise.id)}
                         type="button"
                       >

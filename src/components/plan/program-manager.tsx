@@ -730,7 +730,7 @@ export function ProgramManager() {
       ) : null}
 
       {!program ? (
-        <section className="rounded-xl border border-line p-4">
+        <section className="action-surface p-4">
           <div className="mb-4 flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
               <PlusCircle size={20} />
@@ -741,7 +741,7 @@ export function ProgramManager() {
             </div>
           </div>
           <button
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+            className="pressable flex h-12 w-full items-center justify-center gap-2 rounded-md bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             disabled={status === "generating"}
             onClick={openRegenerationDialog}
             ref={regenerationTriggerRef}
@@ -755,24 +755,25 @@ export function ProgramManager() {
           </Link>
         </section>
       ) : (
-        <section className="rounded-xl border border-line p-4">
+        <section className="action-surface p-4">
           <div className="mb-4 flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
               <CheckCircle2 size={20} />
             </span>
             <div>
-              <h2 className="font-semibold">{program.name}</h2>
+              <p className="page-kicker">当前周期</p>
+              <h2 className="font-bold">{program.name}</h2>
               <p className="text-sm text-muted">
                 {program.start_date} 至 {program.end_date}
               </p>
             </div>
           </div>
           <div className="flex flex-wrap gap-3">
-            <Link className="inline-flex rounded-lg bg-action px-4 py-2 font-semibold text-white transition active:scale-[0.98]" href="/today">
+            <Link className="pressable inline-flex rounded-md bg-action px-4 py-2 font-semibold text-white" href="/today">
               查看今日训练
             </Link>
             <button
-              className="inline-flex rounded-lg border border-line px-4 py-2 font-semibold text-ink transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+              className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
               disabled={status === "generating"}
               onClick={openRegenerationDialog}
               ref={regenerationTriggerRef}
@@ -870,14 +871,14 @@ export function ProgramManager() {
 
             return (
             <article
-              className={`rounded-xl border p-4 ${
+              className={`rounded-lg border border-l-4 p-4 ${
                 workoutState.isNext
-                  ? "border-action bg-action/5"
+                  ? "border-action border-l-action bg-action/5"
                   : workout.status === "completed"
-                    ? "border-line bg-field"
+                    ? "border-line border-l-action bg-field"
                     : isRecovery
-                      ? "border-[#4a7a9a]/20 bg-[#4a7a9a]/5"
-                      : "border-line bg-white"
+                      ? "border-[#4a7a9a]/20 border-l-[#4a7a9a] bg-[#4a7a9a]/5"
+                      : "border-line border-l-[#c75c1a] bg-white"
               }`}
               key={workout.id}
               ref={index === 0 ? firstScheduleItemRef : undefined}
@@ -903,7 +904,7 @@ export function ProgramManager() {
                         {isRestDay ? `恢复安排 · ${workout.scheduled_date}` : `第 ${(workout.sequence_index ?? 0) + 1} 节 · 建议 ${workout.scheduled_date}`}
                       </span>
                     </p>
-                    <h3 className="font-semibold">{isRestDay ? presentation.title : workout.name}</h3>
+                    <h3 className="font-bold">{isRestDay ? presentation.title : workout.name}</h3>
                     {workoutMeta ? <p className="mt-1 text-sm text-muted">{workoutMeta.focus}</p> : null}
                   </div>
                 </div>
@@ -925,7 +926,7 @@ export function ProgramManager() {
               {!isRestDay ? (
                 <div className="space-y-2">
                   {(workoutExercisesByWorkoutId[workout.id] ?? []).map((exercise) => (
-                    <div className="flex items-center justify-between rounded-lg bg-field px-3 py-2 text-sm" key={exercise.id}>
+                    <div className="flex items-center justify-between border-b border-line/70 px-1 py-2 text-sm last:border-b-0" key={exercise.id}>
                       <span>{exercise.exercises?.name ?? "动作"}</span>
                       <span className="font-semibold">
                         {formatPrescription({
@@ -999,10 +1000,10 @@ function PlanBuilder({
   useCustomName: boolean;
 }) {
   return (
-    <section className="rounded-xl border border-line bg-white p-4">
+    <section className="rounded-lg border border-line bg-white p-4">
       <div className="mb-4">
-        <p className="text-sm text-muted">计划设置</p>
-        <h2 className="text-xl font-semibold">先选训练结构，再选安排方式</h2>
+        <p className="page-kicker">计划设置</p>
+        <h2 className="text-xl font-bold">先选训练结构，再选安排方式</h2>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {templateOptions.map((option) => (

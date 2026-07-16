@@ -42,7 +42,7 @@ export function BottomNav() {
   }
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white/95 px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-[0_-8px_24px_rgba(23,33,27,0.08)] backdrop-blur">
+    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-[0_-6px_18px_rgba(23,33,27,0.08)]">
       <div className="mx-auto grid max-w-3xl grid-cols-5 gap-1 text-xs text-muted">
         {navItems.map((item) => {
           const Icon = item.icon;
@@ -50,7 +50,7 @@ export function BottomNav() {
 
           return (
             <Link
-              className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg px-1 transition active:scale-[0.97] ${
+              className={`pressable relative flex min-h-12 flex-col items-center justify-center gap-1 rounded-md px-1 ${
                 active ? "bg-action/10 text-action" : "text-muted hover:bg-field"
               }`}
               href={item.href}
@@ -59,10 +59,11 @@ export function BottomNav() {
               onTouchStart={() => router.prefetch(item.href)}
               prefetch
             >
+              {active ? <span className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-action" /> : null}
               <span className={`${active ? "text-action" : "text-muted"}`}>
                 <Icon size={18} />
               </span>
-              <span className={`text-xs font-medium ${active ? "text-action" : "text-muted"}`}>{item.label}</span>
+              <span className={`text-xs ${active ? "font-bold text-action" : "font-medium text-muted"}`}>{item.label}</span>
             </Link>
           );
         })}

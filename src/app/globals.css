@@ -20,9 +20,7 @@ body {
   min-height: 100%;
   margin: 0;
   padding-bottom: calc(76px + env(safe-area-inset-bottom));
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(243, 246, 241, 0.96)),
-    #f3f6f1;
+  background: #f3f6f1;
   color: #17211b;
   font-family:
     Inter,
@@ -30,6 +28,53 @@ body {
     "Microsoft YaHei",
     Arial,
     sans-serif;
+}
+
+.app-shell {
+  padding-bottom: calc(84px + env(safe-area-inset-bottom));
+}
+
+.page-kicker {
+  color: #627067;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.section-heading {
+  color: #17211b;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.action-surface {
+  border: 1px solid rgba(15, 138, 74, 0.24);
+  border-left: 4px solid #0f8a4a;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 18px rgba(23, 33, 27, 0.06);
+}
+
+.tone-intensity {
+  border-left-color: #c75c1a;
+  background: #fff9f5;
+}
+
+.tone-recovery {
+  border-left-color: #4a7a9a;
+  background: #f5f9fc;
+}
+
+.tone-completed {
+  border-left-color: #0f8a4a;
+  background: #f4faf6;
+}
+
+.pressable {
+  transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.pressable:active {
+  transform: scale(0.98);
 }
 
 button,

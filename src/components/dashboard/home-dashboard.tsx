@@ -383,59 +383,51 @@ export function HomeDashboard() {
   const nextWorkoutState = nextWorkout ? getNextWorkoutState(nextWorkout.scheduled_date) : null;
 
   return (
-    <main className="min-h-screen px-4 py-6">
+    <main className="app-shell min-h-screen px-4 py-6">
       <section className="mx-auto max-w-3xl space-y-5">
-        <header className="rounded-[20px] border border-line bg-white p-5 shadow-sm">
+        <header className="flex items-start justify-between gap-3 px-1">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-sm text-muted">{email}</p>
-              <h1 className="mt-1 text-2xl font-semibold">训练工作台</h1>
+              <p className="page-kicker">{email}</p>
+              <h1 className="mt-1 text-2xl font-bold">训练工作台</h1>
             </div>
-            <Link className="grid h-10 w-10 place-items-center rounded-full border border-line bg-field text-ink" href="/settings">
-              <Settings size={18} />
-            </Link>
           </div>
+          <Link aria-label="打开设置" className="pressable grid h-10 w-10 place-items-center rounded-full border border-line bg-white text-ink" href="/settings" title="设置">
+            <Settings size={18} />
+          </Link>
         </header>
 
-        <section className="grid gap-3 sm:grid-cols-3">
+        <section className="grid divide-x divide-line overflow-hidden rounded-lg border border-line bg-white sm:grid-cols-3">
           <Metric icon={<CheckCircle2 size={16} />} label="近 12 次训练" value={`${summary.workouts} 次`} />
           <Metric icon={<Activity size={16} />} label="训练量" value={`${Math.round(summary.volume).toLocaleString()} kg`} />
           <Metric icon={<Trophy size={16} />} label="PR 目标" value={`${prGoals.length} 个`} />
         </section>
 
-        <Link
-          className="inline-flex h-10 w-fit items-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink"
-          href="/exercises"
-        >
-          <BookOpen size={17} />
-          动作库
-        </Link>
-
-        <section className="rounded-xl border border-line bg-white p-4">
+        <section className={`action-surface p-4 ${nextWorkoutMeta?.intent === "强度" ? "tone-intensity" : ""}`}>
           <div className="mb-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-action text-white">
+              <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-white ${nextWorkoutMeta?.intent === "强度" ? "bg-[#c75c1a]" : "bg-action"}`}>
                 <Dumbbell size={20} />
               </span>
               <div>
-                <p className="text-sm text-muted">{nextWorkout ? "下一次训练" : "当前状态"}</p>
-                <h2 className="text-xl font-semibold">{nextWorkout ? nextWorkout.name : "暂无训练计划"}</h2>
+                <p className="page-kicker">{nextWorkout ? "下一次训练" : "当前状态"}</p>
+                <h2 className="text-xl font-bold">{nextWorkout ? nextWorkout.name : "暂无训练计划"}</h2>
               </div>
             </div>
-            <Link className="inline-flex items-center gap-1 rounded-lg bg-action px-3 py-2 text-sm font-semibold text-white transition active:scale-[0.98]" href="/today">
-              开始
+            <Link className="pressable inline-flex items-center gap-1 rounded-md bg-action px-3 py-2 text-sm font-semibold text-white" href="/today">
+              {nextWorkout ? "开始训练" : "去创建"}
               <ArrowRight size={16} />
             </Link>
           </div>
           {nextWorkout ? (
             <>
-              <div className="mb-3 rounded-lg bg-field px-3 py-3">
+              <div className="mb-3 border-y border-action/15 py-3">
                 <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 font-semibold text-ink">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 font-semibold text-ink shadow-sm">
                     <CalendarDays size={14} />
                     {formatWorkoutState(nextWorkoutState)}
                   </span>
-                  <span className="rounded-full bg-white px-2 py-1 font-semibold text-action">
+                  <span className={`rounded-full bg-white px-2 py-1 font-semibold shadow-sm ${nextWorkoutMeta?.intent === "强度" ? "text-[#c75c1a]" : "text-action"}`}>
                     {nextWorkoutMeta?.label} · {nextWorkoutMeta?.intent}
                   </span>
                   <span className="text-muted">{nextWorkout.scheduled_date}</span>
@@ -444,7 +436,7 @@ export function HomeDashboard() {
               </div>
               <div className="space-y-2">
                 {nextWorkoutExercises.slice(0, 5).map((exercise) => (
-                  <div className="flex items-center justify-between rounded-lg border border-line px-3 py-2 text-sm" key={exercise.id}>
+                  <div className="flex items-center justify-between border-b border-line/70 px-1 py-2 text-sm last:border-b-0" key={exercise.id}>
                     <span className="font-medium">{exercise.exercises?.name ?? "动作"}</span>
                     <span className="text-action">
                       {formatPrescription({
@@ -459,14 +451,22 @@ export function HomeDashboard() {
               </div>
             </>
           ) : (
-            <div className="rounded-lg bg-field p-4">
+            <div className="border-t border-line pt-4">
               <p className="text-sm text-muted">从一分化、三分化、五分化或推拉蹲开始，也可命名自己的训练循环。</p>
-              <Link className="mt-3 inline-flex rounded-lg border border-action px-3 py-2 text-sm font-semibold text-action" href="/plan">
+              <Link className="pressable mt-3 inline-flex rounded-md border border-action px-3 py-2 text-sm font-semibold text-action" href="/plan">
                 创建训练模板
               </Link>
             </div>
           )}
         </section>
+
+        <div className="flex items-center justify-between px-1">
+          <h2 className="section-heading">训练管理</h2>
+          <Link className="pressable inline-flex items-center gap-1 text-sm font-semibold text-action" href="/exercises">
+            <BookOpen size={16} />
+            动作库
+          </Link>
+        </div>
 
         <section className="grid gap-4 lg:grid-cols-2">
           <Panel
@@ -529,12 +529,12 @@ function Metric({
   value: string;
 }) {
   return (
-    <div className="rounded-xl border border-line bg-field p-4">
+    <div className="bg-white px-3 py-4">
       <div className="mb-2 flex items-center gap-2 text-muted">
         {icon}
         <span className="text-sm">{label}</span>
       </div>
-      <p className="text-xl font-semibold">{value}</p>
+      <p className="text-xl font-bold">{value}</p>
     </div>
   );
 }
@@ -553,7 +553,7 @@ function Panel({
   title: string;
 }) {
   return (
-    <section className="rounded-xl border border-line bg-white p-4">
+    <section className="rounded-lg border border-line bg-white p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <span className="grid h-8 w-8 place-items-center rounded-full bg-action/10 text-action">{icon}</span>
