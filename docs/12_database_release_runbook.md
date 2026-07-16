@@ -137,3 +137,9 @@ where w.day_type = 'rest';
 - 每周固定备份一次。
 - 每次内测用户批量导入或清理数据前备份。
 - 不在疲劳或赶时间时执行数据库结构变更。
+# wger 外部动作引用发布顺序（2026-07-16）
+
+1. 在 Supabase SQL Editor 执行 `supabase/migrations/20260716130000_wger_external_exercise_references.sql`；它仅追加字段、约束和 RPC，不会复制第三方动作目录。
+2. 在 Vercel Production 与 Preview 设置可选环境变量 `WGER_API_BASE_URL=https://wger.de/api/v2/`；不需要 wger token。未设置时使用同一官方默认地址。
+3. 部署代码后，登录并在“记录今日训练”中搜索、添加一个 wger 动作，保存草稿、刷新并完成；确认历史与 CSV 显示名称和 `wger` provider/ID。
+4. 临时阻断上游时，确认动作搜索可重试，且已选动作和训练组仍保留；再确认本地推/拉/蹲计划、替代和 PR 不依赖 wger。

@@ -5,7 +5,6 @@ import Link from "next/link";
 import { BookOpen, Copy, Download, KeyRound, Loader2, LogOut, RefreshCcw, ShieldAlert, Trash2, UserRound, Wrench } from "lucide-react";
 import { trackEvent } from "@/lib/analytics";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
-import { clearExerciseCatalogVerificationState } from "@/lib/exercise-catalog-client";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 
@@ -195,7 +194,6 @@ export function SettingsPanel() {
 
     try {
       clearTrainingDataCaches();
-      clearExerciseCatalogVerificationState();
       if ("caches" in window) {
         const cacheKeys = await window.caches.keys();
         await Promise.all(
