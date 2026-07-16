@@ -315,8 +315,8 @@ export function SettingsPanel() {
           </div>
         </div>
         <div className="space-y-3">
-          <Link className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink transition active:scale-[0.98]" href="/onboarding">
-            修改训练画像
+          <Link className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink transition active:scale-[0.98]" href="/plan">
+            调整计划参数
           </Link>
           <Link className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-field px-4 font-semibold text-ink transition active:scale-[0.98]" href="/exercises">
             <BookOpen size={18} />

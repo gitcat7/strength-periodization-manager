@@ -23,7 +23,7 @@ export default function PrivacyPage() {
         <div className="space-y-4 text-sm leading-7 text-muted">
           <section className="rounded-xl border border-line p-4">
             <h2 className="mb-2 font-semibold text-ink">会保存哪些数据</h2>
-            <p>系统会保存你的邮箱、训练画像、训练计划、每组训练记录、Coach 调整建议和 PR 目标。</p>
+            <p>系统会保存你的邮箱、计划参数和主项最近工作组、训练计划、每组训练记录、Coach 调整建议和 PR 目标。</p>
           </section>
 
           <section className="rounded-xl border border-line p-4">

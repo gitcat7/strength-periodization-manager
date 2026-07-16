@@ -9,4 +9,11 @@ describe("home dashboard next workout source contract", () => {
     expect(source).toMatch(/setNextWorkout\(null\);/);
     expect(source).not.toMatch(/cachedNextWorkout/);
   });
+
+  test("uses the plan page instead of the retired onboarding call to action", async () => {
+    const source = await readFile(sourcePath, "utf8");
+    expect(source).toContain('href="/plan"');
+    expect(source).toContain("创建训练计划");
+    expect(source).not.toContain("训练画像");
+  });
 });

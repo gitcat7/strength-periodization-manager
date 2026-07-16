@@ -188,8 +188,8 @@ export function SupabaseDiagnostics() {
         <Link className="rounded-lg bg-action px-4 py-2 font-semibold text-white" href="/login?next=/diagnostics">
           去登录
         </Link>
-        <Link className="rounded-lg border border-line px-4 py-2 font-semibold text-ink" href="/onboarding">
-          创建训练画像
+        <Link className="rounded-lg border border-line px-4 py-2 font-semibold text-ink" href="/plan">
+          创建训练计划
         </Link>
         <Link className="rounded-lg border border-line px-4 py-2 font-semibold text-ink" href="/">
           返回首页

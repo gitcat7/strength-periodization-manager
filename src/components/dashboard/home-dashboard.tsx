@@ -384,8 +384,8 @@ export function HomeDashboard() {
             <Link className="inline-flex h-11 items-center justify-center rounded-lg bg-action px-4 font-semibold text-white" href="/login?next=/">
               登录
             </Link>
-            <Link className="inline-flex h-11 items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink" href="/onboarding">
-              创建训练画像
+            <Link className="inline-flex h-11 items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink" href="/plan">
+              创建训练计划
             </Link>
           </div>
         </section>
