@@ -5,6 +5,7 @@ import { KeyRound, Mail } from "lucide-react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import {
   completeMagicLinkSignIn,
+  getLoginNext,
   getSafeNextFromMagicLink,
   getSupabaseVerifyLinkFromPastedUrl
 } from "@/lib/supabase/magic-link";
@@ -26,7 +27,7 @@ export function EmailLoginForm() {
 
     const supabase = createBrowserSupabaseClient();
     const origin = window.location.origin;
-    const next = new URLSearchParams(window.location.search).get("next") || "/onboarding";
+    const next = getLoginNext(new URLSearchParams(window.location.search));
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
@@ -51,7 +52,7 @@ export function EmailLoginForm() {
     const pastedLink = magicLink.trim();
     const next = getSafeNextFromMagicLink(
       pastedLink,
-      new URLSearchParams(window.location.search).get("next") || "/onboarding"
+      getLoginNext(new URLSearchParams(window.location.search))
     );
 
     try {

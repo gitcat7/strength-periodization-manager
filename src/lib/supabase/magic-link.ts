@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+export function getLoginNext(searchParams: URLSearchParams): string {
+  const next = searchParams.get("next");
+  return isSafeInternalPath(next) ? next : "/";
+}
+
 export function isSupabaseVerifyLink(url: string) {
   try {
     const parsedUrl = new URL(url);

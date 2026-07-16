@@ -11,7 +11,7 @@ const checks = [
   { path: "/", type: "html", mustInclude: ["力训周期管家"] },
   { path: "/login", type: "html", mustInclude: ["登录或注册", "发送登录链接"] },
   { path: "/diagnostics", type: "html", mustInclude: ["项目诊断"] },
-  { path: "/onboarding", type: "html", mustInclude: ["创建训练画像"] },
+  { path: "/onboarding", type: "redirect", location: "/plan" },
   { path: "/plan", type: "html", mustInclude: ["生成训练计划"] },
   { path: "/today", type: "html", mustInclude: ["今日训练"] },
   { path: "/history", type: "html", mustInclude: ["训练历史"] },
@@ -36,6 +36,13 @@ for (const check of checks) {
 
     if (!response.ok) {
       failures.push(`${check.path} returned ${response.status}`);
+      continue;
+    }
+
+    if (check.type === "redirect") {
+      if (!response.url.endsWith(check.location)) {
+        failures.push(`${check.path} did not redirect to ${check.location}`);
+      }
       continue;
     }
 
@@ -87,7 +94,8 @@ async function requestText(url) {
     return {
       body: await response.text(),
       ok: response.ok,
-      status: response.status
+      status: response.status,
+      url: response.url
     };
   } catch (fetchError) {
     return requestTextWithNode(url, fetchError);
@@ -117,7 +125,8 @@ function requestTextWithNode(url, originalError) {
           resolve({
             body,
             ok: status >= 200 && status < 300,
-            status
+            status,
+            url
           });
         });
       }
@@ -151,7 +160,7 @@ async function requestTextWithPowerShell(url) {
     "$ErrorActionPreference = 'Stop'",
     "$response = Invoke-WebRequest -Uri $env:SMOKE_URL -UseBasicParsing -TimeoutSec 30",
     "$body = if ($response.Content -is [byte[]]) { [Text.Encoding]::UTF8.GetString($response.Content) } else { [string]$response.Content }",
-    "$payload = @{ status = [int]$response.StatusCode; body = $body } | ConvertTo-Json -Compress",
+    "$payload = @{ status = [int]$response.StatusCode; body = $body; url = [string]$response.BaseResponse.ResponseUri } | ConvertTo-Json -Compress",
     "Write-Output $payload"
   ].join("; ");
   const { stdout } = await execFileAsync(
@@ -171,6 +180,7 @@ async function requestTextWithPowerShell(url) {
   return {
     body: payload.body,
     ok: payload.status >= 200 && payload.status < 300,
-    status: payload.status
+    status: payload.status,
+    url: payload.url
   };
 }
