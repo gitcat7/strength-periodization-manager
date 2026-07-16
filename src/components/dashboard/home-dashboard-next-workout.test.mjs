@@ -10,10 +10,13 @@ describe("home dashboard next workout source contract", () => {
     expect(source).not.toMatch(/cachedNextWorkout/);
   });
 
-  test("uses the plan page instead of the retired onboarding call to action", async () => {
+  test("keeps planned training and free training as distinct one-click actions", async () => {
     const source = await readFile(sourcePath, "utf8");
     expect(source).toContain('href="/plan"');
-    expect(source).toContain("创建训练计划");
+    expect(source).toContain('href="/single-workout"');
+    expect(source).toContain("继续今日计划");
+    expect(source).toContain("快速记录自由训练");
+    expect(source).toContain("创建周期计划");
     expect(source).not.toContain("训练画像");
   });
 });

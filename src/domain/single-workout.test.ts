@@ -9,6 +9,7 @@ import {
   toggleSelectedExercise,
   type SelectableExercise
 } from "./single-workout";
+import { reviewedExercises } from "./reviewed-exercise-library";
 
 const exercises: SelectableExercise[] = [
   { id: "bench", name: "bench press", category: "push", catalogExternalId: "0025", defaultIncrement: 2.5, movementPattern: "horizontal_press", slug: "barbell-bench-press", trainingDirection: "push" },
@@ -104,6 +105,22 @@ describe("single workout domain", () => {
       exercise_name_snapshot: "酒店健身房划船",
       exercise_provider: "manual",
       external_exercise_id: "manual:00000000-0000-4000-8000-000000000001"
+    });
+  });
+
+  it("serializes a reviewed product action without creating a public database exercise", () => {
+    const reviewed = reviewedExercises.find((item) => item.id === "barbell-bench-press");
+    expect(reviewed).toBeDefined();
+    const payload = buildStandaloneWorkoutSavePayload("2026-07-16", [{
+      reviewedExercise: reviewed!,
+      sets: [{ completed: false, reps: "", rpe: "", weight: "" }]
+    }]);
+
+    expect(payload.exercises[0]).toMatchObject({
+      exercise_id: null,
+      exercise_name_snapshot: "杠铃卧推",
+      exercise_provider: "reviewed",
+      external_exercise_id: "reviewed:barbell-bench-press"
     });
   });
 

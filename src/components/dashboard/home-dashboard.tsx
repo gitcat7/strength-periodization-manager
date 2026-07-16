@@ -439,7 +439,7 @@ export function HomeDashboard() {
               </div>
             </div>
             <Link className="pressable inline-flex items-center gap-1 rounded-md bg-action px-3 py-2 text-sm font-semibold text-white" href={nextWorkout ? "/today" : "/single-workout"}>
-              {nextWorkout ? "开始训练" : "记录今日训练"}
+              {nextWorkout ? "继续今日计划" : "快速记录自由训练"}
               <ArrowRight size={16} />
             </Link>
           </div>
@@ -473,6 +473,9 @@ export function HomeDashboard() {
                   </div>
                 ))}
               </div>
+              <Link className="pressable mt-4 inline-flex rounded-md border border-action px-3 py-2 text-sm font-semibold text-action" href="/single-workout">
+                快速记录自由训练
+              </Link>
             </>
           ) : (
             <div className="border-t border-line pt-4">

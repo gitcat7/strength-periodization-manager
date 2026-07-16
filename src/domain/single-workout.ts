@@ -1,5 +1,6 @@
 import { reviewedExerciseNamesZh } from "./exercise-catalog-names";
 import { isWgerExternalId, toExternalExerciseSnapshot, type ExternalExerciseReference } from "./external-exercise";
+import type { ReviewedExercise } from "./reviewed-exercise-library";
 
 export type SingleWorkoutCategory = "胸" | "背" | "腿" | "肩" | "手臂" | "核心" | "全身";
 
@@ -29,6 +30,10 @@ export type ManualExerciseReference = {
 };
 export type ManualStandaloneDraftExercise = {
   manualExercise: ManualExerciseReference;
+  sets: StandaloneSetDraft[];
+};
+export type ReviewedStandaloneDraftExercise = {
+  reviewedExercise: ReviewedExercise;
   sets: StandaloneSetDraft[];
 };
 type StoredStandaloneDraft = {
@@ -116,7 +121,7 @@ export function buildStandaloneWorkoutPayload(date: string, exercises: readonly 
 
 export function buildStandaloneWorkoutSavePayload(
   date: string,
-  exercises: readonly ((SelectableExercise & Partial<Pick<StandaloneDraftExercise, "sets">>) | ExternalStandaloneDraftExercise | ManualStandaloneDraftExercise)[],
+  exercises: readonly ((SelectableExercise & Partial<Pick<StandaloneDraftExercise, "sets">>) | ExternalStandaloneDraftExercise | ManualStandaloneDraftExercise | ReviewedStandaloneDraftExercise)[],
   workoutId?: string
 ) {
   return {
@@ -146,6 +151,23 @@ export function buildStandaloneWorkoutSavePayload(
           exercise_name_snapshot: exercise.manualExercise.name,
           exercise_provider: "manual" as const,
           external_exercise_id: exercise.manualExercise.id,
+          sets
+        };
+      }
+      if ("reviewedExercise" in exercise) {
+        const reviewed = exercise.reviewedExercise;
+        return {
+          exercise_id: null,
+          exercise_metadata_snapshot: {
+            equipment: reviewed.equipment,
+            loadType: reviewed.loadType,
+            movementPattern: reviewed.movementPattern,
+            muscles: reviewed.primaryMuscles,
+            riskLevel: reviewed.riskLevel
+          },
+          exercise_name_snapshot: reviewed.nameZh,
+          exercise_provider: "reviewed" as const,
+          external_exercise_id: `reviewed:${reviewed.id}`,
           sets
         };
       }
@@ -181,7 +203,14 @@ export function parseStandaloneWorkoutDraft(value: unknown): StoredStandaloneDra
       && typeof exercise.exercise_name_snapshot === "string"
       && exercise.exercise_name_snapshot.trim().length > 0
       && isManualMetadata(exercise.exercise_metadata_snapshot);
-    if ((local && hasExternalFields) || (!local && !external && !manual)) throw new Error("INVALID_EXERCISE_REFERENCE");
+    const reviewed = exercise.exercise_id === null
+      && exercise.exercise_provider === "reviewed"
+      && typeof exercise.external_exercise_id === "string"
+      && /^reviewed:[a-z0-9-]{2,80}$/.test(exercise.external_exercise_id)
+      && typeof exercise.exercise_name_snapshot === "string"
+      && exercise.exercise_name_snapshot.trim().length > 0
+      && isManualMetadata(exercise.exercise_metadata_snapshot);
+    if ((local && hasExternalFields) || (!local && !external && !manual && !reviewed)) throw new Error("INVALID_EXERCISE_REFERENCE");
   }
   return value as StoredStandaloneDraft;
 }
