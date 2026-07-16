@@ -140,12 +140,10 @@ type PlanCache = {
 const planCacheKey = "strength-training-cache:plan";
 
 const defaultPlanSetup: PlanSetupInput = {
-  availableWeekdays: [1, 3, 5],
-  experienceLevel: "beginner",
+  experienceLevel: "",
   goal: "strength",
   injuryNotes: "",
   lifts: [],
-  sessionDurationMinutes: 60,
   trainingDaysPerWeek: 3
 };
 
@@ -170,6 +168,7 @@ export function ProgramManager() {
   const [mainLifts, setMainLifts] = useState<ExerciseRow[]>([]);
   const [planSetup, setPlanSetup] = useState<PlanSetupInput>(defaultPlanSetup);
   const [planSetupErrors, setPlanSetupErrors] = useState<Record<string, string>>({});
+  const [persistedSessionDuration, setPersistedSessionDuration] = useState(60);
   const [showPlanSetup, setShowPlanSetup] = useState(false);
   const [regenerationDialog, setRegenerationDialog] = useState(createRegenerationDialogState);
   const confirmationInFlight = useRef(false);
@@ -351,23 +350,22 @@ export function ProgramManager() {
     );
     const availableWeekdays = Array.isArray(profile.available_weekdays) && profile.available_weekdays.length > 0
       ? profile.available_weekdays
-      : defaultPlanSetup.availableWeekdays;
+      : [1, 3, 5];
     const trainingDaysPerWeek = [3, 4, 7].includes(Number(profile.training_days_per_week))
       ? Number(profile.training_days_per_week)
       : defaultPlanSetup.trainingDaysPerWeek;
 
     setSelectedWeekdays(availableWeekdays);
+    setPersistedSessionDuration(Number(profile.session_duration_minutes) || 60);
     setPlanSetup({
-      availableWeekdays,
       experienceLevel: profile.experience_level as PlanSetupInput["experienceLevel"],
-      goal: profile.goal as PlanSetupInput["goal"],
+      goal: normalizePlanGoal(profile.goal),
       injuryNotes: profile.injury_notes ?? "",
       lifts: loadedMainLifts.map((exercise) => {
         const estimatedOneRepMax = estimatedByExerciseId.get(exercise.id) ?? 0;
         const workingWeight = inferFiveRepWorkingWeight(estimatedOneRepMax, Number(exercise.default_increment) || 2.5);
         return { exerciseId: exercise.id, weightKg: workingWeight ? String(workingWeight) : "", reps: "5" };
       }),
-      sessionDurationMinutes: Number(profile.session_duration_minutes) || defaultPlanSetup.sessionDurationMinutes,
       trainingDaysPerWeek
     });
   }
@@ -390,8 +388,8 @@ export function ProgramManager() {
         experience_level: parsed.value.experienceLevel,
         goal: parsed.value.goal,
         training_days_per_week: parsed.value.trainingDaysPerWeek,
-        available_weekdays: parsed.value.availableWeekdays,
-        session_duration_minutes: parsed.value.sessionDurationMinutes,
+        available_weekdays: selectedWeekdays,
+        session_duration_minutes: persistedSessionDuration,
         injury_notes: parsed.value.injuryNotes || null,
         unit: "kg",
         updated_at: new Date().toISOString()
@@ -866,10 +864,7 @@ export function ProgramManager() {
         setCadenceTrainDays={setCadenceTrainDays}
         setCustomTemplateName={setCustomTemplateName}
         setScheduleMode={setScheduleMode}
-        setSelectedWeekdays={(availableWeekdays) => {
-          setSelectedWeekdays(availableWeekdays);
-          setPlanSetup((current) => ({ ...current, availableWeekdays }));
-        }}
+        setSelectedWeekdays={setSelectedWeekdays}
         setTemplateType={setTemplateType}
         setUseCustomName={setUseCustomName}
         templateType={templateType}
@@ -880,10 +875,7 @@ export function ProgramManager() {
         <PlanSetupForm
           errors={planSetupErrors}
           mainLifts={mainLifts}
-          onChange={(next) => {
-            setPlanSetup(next);
-            setSelectedWeekdays(next.availableWeekdays);
-          }}
+          onChange={setPlanSetup}
           value={planSetup}
         />
       ) : null}
@@ -1152,22 +1144,6 @@ export function PlanSetupForm({
     onChange({ ...value, ...patch });
   }
 
-  function selectTrainingDays(trainingDaysPerWeek: number) {
-    const availableWeekdays = trainingDaysPerWeek === 3
-      ? [1, 3, 5]
-      : trainingDaysPerWeek === 4
-        ? [1, 2, 4, 5]
-        : [0, 1, 2, 3, 4, 5, 6];
-    update({ availableWeekdays, trainingDaysPerWeek });
-  }
-
-  function toggleWeekday(day: number) {
-    const availableWeekdays = value.availableWeekdays.includes(day)
-      ? value.availableWeekdays.filter((item) => item !== day)
-      : [...value.availableWeekdays, day].sort((left, right) => left - right);
-    update({ availableWeekdays });
-  }
-
   function updateLift(exerciseId: string, patch: Partial<{ weightKg: string; reps: string }>) {
     const existingLift = value.lifts.find((lift) => lift.exerciseId === exerciseId);
     const lifts = existingLift
@@ -1189,7 +1165,7 @@ export function PlanSetupForm({
           <span className="mb-1 block text-sm font-medium">每周训练天数</span>
           <select
             className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
-            onChange={(event) => selectTrainingDays(Number(event.target.value))}
+            onChange={(event) => update({ trainingDaysPerWeek: Number(event.target.value) })}
             value={value.trainingDaysPerWeek}
           >
             <option value={3}>3 天</option>
@@ -1205,55 +1181,28 @@ export function PlanSetupForm({
             onChange={(event) => update({ goal: event.target.value as PlanSetupInput["goal"] })}
             value={value.goal}
           >
-            <option value="strength">力量增长</option>
-            <option value="hypertrophy_strength">增肌兼力量</option>
+            <option value="hypertrophy">增肌（Hypertrophy）</option>
+            <option value="fat_loss">减脂（Fat Loss）</option>
+            <option value="body_recomposition">塑形（Body Recomposition）</option>
+            <option value="strength">力量（Strength）</option>
           </select>
         </label>
         <label className="block">
-          <span className="mb-1 block text-sm font-medium">单次时长</span>
+          <span className="mb-1 block text-sm font-medium">训练经验</span>
           <select
-            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
-            onChange={(event) => update({ sessionDurationMinutes: Number(event.target.value) })}
-            value={value.sessionDurationMinutes}
-          >
-            {[45, 60, 75, 90].map((minutes) => <option key={minutes} value={minutes}>{minutes} 分钟</option>)}
-          </select>
-          {errors.sessionDurationMinutes ? <p className="mt-1 text-xs text-red-600">{errors.sessionDurationMinutes}</p> : null}
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">训练经验（可选）</span>
-          <select
+            aria-required="true"
             className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
             onChange={(event) => update({ experienceLevel: event.target.value as PlanSetupInput["experienceLevel"] })}
             value={value.experienceLevel}
           >
+            <option disabled value="">请选择训练经验</option>
             <option value="beginner">新手，0-6 个月</option>
             <option value="novice">初级，6-18 个月</option>
             <option value="intermediate">中级，18 个月以上</option>
           </select>
+          {errors.experienceLevel ? <p className="mt-1 text-xs text-red-600">{errors.experienceLevel}</p> : null}
         </label>
       </div>
-
-      <fieldset className="mt-4">
-        <legend className="mb-2 text-sm font-medium">可训练日</legend>
-        <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
-          {weekdayOptions.map((weekday) => {
-            const active = value.availableWeekdays.includes(weekday.value);
-            return (
-              <button
-                aria-pressed={active}
-                className={`h-10 rounded-lg border text-sm font-semibold ${active ? "border-action bg-action text-white" : "border-line bg-field text-ink"}`}
-                key={weekday.value}
-                onClick={() => toggleWeekday(weekday.value)}
-                type="button"
-              >
-                {weekday.label}
-              </button>
-            );
-          })}
-        </div>
-        {errors.availableWeekdays ? <p className="mt-1 text-xs text-red-600">{errors.availableWeekdays}</p> : null}
-      </fieldset>
 
       <label className="mt-4 block">
         <span className="mb-1 block text-sm font-medium">伤病或禁忌动作（可选）</span>
@@ -1465,6 +1414,14 @@ function getProgramName(templateType: TemplateType) {
   if (templateType === "three_split" || templateType === "three_day_full_body") return "三分化训练循环";
   if (templateType === "five_split" || templateType === "four_day_upper_lower") return "五分化训练循环";
   return "训练循环";
+}
+
+function normalizePlanGoal(goal: string): PlanSetupInput["goal"] {
+  if (goal === "hypertrophy_strength") return "hypertrophy";
+  if (goal === "hypertrophy" || goal === "fat_loss" || goal === "body_recomposition" || goal === "strength") {
+    return goal;
+  }
+  return "strength";
 }
 
 function getScheduleConfig(schedule: ScheduleConfig) {

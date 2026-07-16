@@ -4,7 +4,7 @@ create table if not exists public.athlete_profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   experience_level text not null check (experience_level in ('beginner', 'novice', 'intermediate')),
-  goal text not null check (goal in ('strength', 'hypertrophy_strength')),
+  goal text not null check (goal in ('strength', 'hypertrophy', 'fat_loss', 'body_recomposition')),
   training_days_per_week integer not null check (training_days_per_week in (3, 4, 7)),
   available_weekdays integer[] not null default '{}',
   session_duration_minutes integer not null check (session_duration_minutes in (45, 60, 75, 90)),

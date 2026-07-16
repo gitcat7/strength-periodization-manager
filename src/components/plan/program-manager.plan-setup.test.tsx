@@ -29,12 +29,10 @@ describe("PlanSetupForm", () => {
         mainLifts={[{ id: "bench", slug: "bench_press", name: "卧推", default_increment: 2.5 }]}
         onChange={() => undefined}
         value={{
-          availableWeekdays: [1, 3, 5],
           experienceLevel: "beginner",
           goal: "strength",
           injuryNotes: "",
           lifts: [{ exerciseId: "bench", weightKg: "80", reps: "5" }],
-          sessionDurationMinutes: 60,
           trainingDaysPerWeek: 3
         }}
       />
@@ -43,5 +41,8 @@ describe("PlanSetupForm", () => {
     expect(container.textContent).toContain("训练安排与主项最近工作组");
     expect(container.querySelector('input[aria-label="卧推重量 kg"]')).toHaveProperty("value", "80");
     expect(container.textContent).toContain("至少录入一个主项最近工作组");
+    expect(container.textContent).toContain("增肌（Hypertrophy）");
+    expect(container.textContent).not.toContain("单次时长");
+    expect(container.textContent).not.toContain("可训练日");
   });
 });

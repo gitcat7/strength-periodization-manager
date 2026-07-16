@@ -3,23 +3,21 @@ import { validatePlanSetup, type PlanSetupInput } from "./plan-setup";
 
 function baseInput(overrides: Partial<PlanSetupInput> = {}): PlanSetupInput {
   return {
-    availableWeekdays: [1, 3, 5],
     experienceLevel: "beginner",
     goal: "strength",
     injuryNotes: "",
     lifts: [{ exerciseId: "bench", weightKg: "80", reps: "5" }],
-    sessionDurationMinutes: 60,
     trainingDaysPerWeek: 3,
     ...overrides
   };
 }
 
 describe("validatePlanSetup", () => {
-  it("requires a valid schedule and one positive main-lift working set", () => {
-    expect(validatePlanSetup(baseInput({ availableWeekdays: [], lifts: [] }))).toEqual({
+  it("requires training experience and one positive main-lift working set", () => {
+    expect(validatePlanSetup(baseInput({ experienceLevel: "" as never, lifts: [] }))).toEqual({
       ok: false,
       fieldErrors: {
-        availableWeekdays: "请选择可训练日",
+        experienceLevel: "请选择训练经验",
         lifts: "至少录入一个主项最近工作组"
       }
     });
@@ -32,10 +30,15 @@ describe("validatePlanSetup", () => {
     });
   });
 
-  it("deduplicates weekdays and trims optional injury notes", () => {
-    expect(validatePlanSetup(baseInput({ availableWeekdays: [5, 1, 3, 1], injuryNotes: "  右肩不适  " }))).toMatchObject({
+  it("accepts fat loss and removes retired scheduling fields from the plan payload", () => {
+    const result = validatePlanSetup(baseInput({ goal: "fat_loss" as never, injuryNotes: "  右肩不适  " }));
+    expect(result).toMatchObject({
       ok: true,
-      value: { availableWeekdays: [1, 3, 5], injuryNotes: "右肩不适" }
+      value: { goal: "fat_loss", injuryNotes: "右肩不适" }
     });
+    if (result.ok) {
+      expect(result.value).not.toHaveProperty("availableWeekdays");
+      expect(result.value).not.toHaveProperty("sessionDurationMinutes");
+    }
   });
 });
