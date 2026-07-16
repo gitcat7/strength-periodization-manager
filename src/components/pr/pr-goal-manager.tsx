@@ -12,6 +12,7 @@ import {
   getPrPhaseAdvice,
   getPrPhaseLabel
 } from "@/domain/pr-planner";
+import { calculateTrainingMax, estimateOneRepMax, roundToNearestPlate } from "@/domain/strength";
 import { trackEvent } from "@/lib/analytics";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
@@ -27,6 +28,7 @@ type ExerciseRow = {
 type LiftProfileRow = {
   exercise_id: string;
   estimated_1rm: number;
+  training_max?: number;
 };
 
 type PrGoalRow = {
@@ -65,6 +67,8 @@ export function PrGoalManager() {
   const [targetDate, setTargetDate] = useState(getDefaultTargetDate());
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "error">("loading");
   const [message, setMessage] = useState("");
+  const [workingWeight, setWorkingWeight] = useState("");
+  const [workingReps, setWorkingReps] = useState("5");
 
   useEffect(() => {
     const cached = readClientCache<PrCache>(prCacheKey);
@@ -186,7 +190,7 @@ export function PrGoalManager() {
 
     if (!estimatedOneRm) {
       setStatus("error");
-      setMessage("请先在训练画像中录入该动作的最近工作组。");
+      setMessage("请先保存该动作的最近工作组。");
       return;
     }
 
@@ -245,6 +249,52 @@ export function PrGoalManager() {
 
     setMessage("PR 目标已创建。");
     await loadPrData();
+  }
+
+  async function saveMissingLift() {
+    if (!userId || !selectedExercise) return;
+
+    const workingSet = parseWorkingSet(workingWeight, workingReps);
+    if (!workingSet) {
+      setStatus("error");
+      setMessage("请填写有效的重量 kg 和次数（1-30 次）。");
+      return;
+    }
+
+    setStatus("saving");
+    setMessage("");
+    const estimatedOneRepMax = estimateOneRepMax(workingSet.weightKg, workingSet.reps);
+    const trainingMax = roundToNearestPlate(
+      calculateTrainingMax(estimatedOneRepMax, "beginner"),
+      Number(selectedExercise.default_increment) || 2.5
+    );
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase.from("lift_profiles").upsert(
+      {
+        user_id: userId,
+        exercise_id: selectedExercise.id,
+        estimated_1rm: Number(estimatedOneRepMax.toFixed(2)),
+        training_max: trainingMax,
+        source_type: "working_set"
+      },
+      { onConflict: "user_id,exercise_id" }
+    );
+
+    if (error) {
+      setStatus("error");
+      setMessage(error.message);
+      return;
+    }
+
+    const nextProfile = {
+      exercise_id: selectedExercise.id,
+      estimated_1rm: Number(estimatedOneRepMax.toFixed(2)),
+      training_max: trainingMax
+    };
+    setLiftProfiles((current) => [...current.filter((profile) => profile.exercise_id !== selectedExercise.id), nextProfile]);
+    setTargetWeight(String(roundDisplayWeight(estimatedOneRepMax * 1.05)));
+    setStatus("ready");
+    setMessage("最近工作组已保存，现在可以创建 PR 目标。");
   }
 
   async function updateSingleGoalStatus(goalId: string, nextStatus: "completed" | "cancelled") {
@@ -416,7 +466,11 @@ export function PrGoalManager() {
           <select
             className="h-12 w-full rounded-lg border border-line bg-white px-3 text-base outline-none ring-action/20 transition focus:border-action focus:ring-4"
             value={exerciseId}
-            onChange={(event) => setExerciseId(event.target.value)}
+            onChange={(event) => {
+              setExerciseId(event.target.value);
+              setWorkingWeight("");
+              setWorkingReps("5");
+            }}
             required
           >
             {exercises.map((exercise) => (
@@ -458,7 +512,45 @@ export function PrGoalManager() {
             当前估算 1RM：{Number(selectedLiftProfile.estimated_1rm).toFixed(1)}kg。建议目标设置在当前估算 1RM 的 102%-108%。
           </p>
         ) : (
-          <p className="text-sm text-red-600">该动作还没有训练画像数据，请先回到画像页录入最近工作组。</p>
+          <section className="rounded-lg border border-line bg-field p-3">
+            <p className="font-medium">先补充 {selectedExercise?.name ?? "该动作"} 的最近工作组</p>
+            <p className="mt-1 text-sm text-muted">只需这一项，不需要填写完整计划参数。</p>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="mb-1 block text-xs text-muted">重量 kg</span>
+                <input
+                  aria-label={`${selectedExercise?.name ?? "动作"}重量 kg`}
+                  className="h-11 w-full rounded-md border border-line bg-white px-3 text-sm"
+                  inputMode="decimal"
+                  min="0"
+                  onChange={(event) => setWorkingWeight(event.target.value)}
+                  step="0.5"
+                  type="number"
+                  value={workingWeight}
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs text-muted">次数</span>
+                <input
+                  aria-label={`${selectedExercise?.name ?? "动作"}次数`}
+                  className="h-11 w-full rounded-md border border-line bg-white px-3 text-sm"
+                  inputMode="numeric"
+                  min="1"
+                  onChange={(event) => setWorkingReps(event.target.value)}
+                  type="number"
+                  value={workingReps}
+                />
+              </label>
+            </div>
+            <button
+              className="mt-3 inline-flex h-10 items-center justify-center rounded-md border border-action bg-white px-3 text-sm font-semibold text-action disabled:opacity-60"
+              disabled={status === "saving"}
+              onClick={saveMissingLift}
+              type="button"
+            >
+              保存最近工作组
+            </button>
+          </section>
         )}
 
         <button
@@ -472,6 +564,14 @@ export function PrGoalManager() {
       </form>
     </div>
   );
+}
+
+export function parseWorkingSet(weightKg: string, reps: string) {
+  const parsedWeight = Number(weightKg);
+  const parsedReps = Number(reps);
+  if (!Number.isFinite(parsedWeight) || parsedWeight <= 0 || parsedWeight > 1000) return null;
+  if (!Number.isInteger(parsedReps) || parsedReps < 1 || parsedReps > 30) return null;
+  return { weightKg: parsedWeight, reps: parsedReps };
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
