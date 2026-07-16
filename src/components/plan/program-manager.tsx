@@ -15,6 +15,7 @@ import {
   writeClientCache
 } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { getUserScopedCache } from "@/lib/user-scoped-cache";
 import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 import {
   formatPrescription,
@@ -156,17 +157,6 @@ export function ProgramManager() {
   const firstScheduleItemRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    const cached = readClientCache<PlanCache>(planCacheKey);
-    if (cached) {
-      setUserId(cached.userId);
-      setProgram(cached.program);
-      setWorkouts(cached.workouts);
-      setWorkoutExercises(cached.workoutExercises);
-      setRecommendations(cached.recommendations);
-      setRecommendationWeights(cached.recommendationWeights);
-      setStatus("ready");
-    }
-
     loadCurrentProgram();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -182,7 +172,7 @@ export function ProgramManager() {
 
   async function loadCurrentProgram({
     requireActiveProgram = false,
-    showLoading = !readClientCache<PlanCache>(planCacheKey)
+    showLoading = true
   }: {
     requireActiveProgram?: boolean;
     showLoading?: boolean;
@@ -201,6 +191,8 @@ export function ProgramManager() {
     }
 
     setUserId(userData.user.id);
+    const cached = getUserScopedCache(readClientCache<PlanCache>(planCacheKey), userData.user.id);
+    if (cached) hydratePlanCache(cached);
 
     const [recommendationsResult, programResult] = await Promise.all([
       fetchRecommendations(userData.user.id),
@@ -369,6 +361,15 @@ export function ProgramManager() {
 
   function writePlanCache(cache: PlanCache) {
     writeClientCache<PlanCache>(planCacheKey, cache);
+  }
+
+  function hydratePlanCache(cache: PlanCache) {
+    setProgram(cache.program);
+    setWorkouts(cache.workouts);
+    setWorkoutExercises(cache.workoutExercises);
+    setRecommendations(cache.recommendations);
+    setRecommendationWeights(cache.recommendationWeights);
+    setStatus("ready");
   }
 
   async function acceptRecommendation(recommendation: RecommendationRow) {
