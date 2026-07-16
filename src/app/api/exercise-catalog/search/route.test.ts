@@ -42,6 +42,18 @@ describe("GET /api/exercise-catalog/search", () => {
     expect(response.headers.get("cache-control")).toBe("private, max-age=60");
   });
 
+  it("allows an empty query to load the first catalog page", async () => {
+    getUser.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
+    searchWgerExercises.mockResolvedValue({ hasMore: false, items: [] });
+
+    const response = await GET(new Request("https://app.test/api/exercise-catalog/search?page=1", {
+      headers: { authorization: "Bearer test-token" }
+    }));
+
+    expect(response.status).toBe(200);
+    expect(searchWgerExercises).toHaveBeenCalledWith({ category: undefined, page: 1, query: "" });
+  });
+
   it("returns a stable unavailable error without exposing upstream details", async () => {
     getUser.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
     searchWgerExercises.mockRejectedValue(new Error("untrusted upstream body"));

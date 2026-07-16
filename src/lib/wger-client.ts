@@ -43,7 +43,7 @@ export async function searchWgerExercises(input: {
   query: string;
 }): Promise<{ items: ExternalExerciseReference[]; hasMore: boolean }> {
   const page = clampPage(input.page);
-  const query = input.query.trim().slice(0, 80);
+  const query = normalizeCatalogQuery(input.query);
   const category = sanitizeCategory(input.category);
   const url = upstreamUrl("exerciseinfo/", {
     language__code: "en",
@@ -111,6 +111,20 @@ function wgerBaseUrl() {
 
 function clampPage(page: number) {
   return Number.isInteger(page) ? Math.max(1, Math.min(MAX_PAGE, page)) : 1;
+}
+
+function normalizeCatalogQuery(query: string) {
+  const normalized = query.trim().slice(0, 80).toLowerCase();
+  const aliases: Record<string, string> = {
+    "卧推": "bench",
+    "杠铃卧推": "bench",
+    "深蹲": "squat",
+    "杠铃深蹲": "squat",
+    "硬拉": "deadlift",
+    "划船": "row",
+    "推举": "overhead press"
+  };
+  return aliases[normalized] ?? normalized;
 }
 
 function sanitizeCategory(category: string | undefined) {

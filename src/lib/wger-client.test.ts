@@ -57,6 +57,18 @@ describe("wger client", () => {
     );
   });
 
+  it("maps common Chinese lift names to the English catalog query", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ next: null, results: [] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await searchWgerExercises({ page: 1, query: "卧推" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.objectContaining({ search: expect.stringContaining("name__search=bench") }),
+      expect.anything()
+    );
+  });
+
   it("returns a typed unavailable error when wger times out", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("aborted", "AbortError")));
 

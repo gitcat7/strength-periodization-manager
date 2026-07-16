@@ -50,7 +50,6 @@ export function SingleWorkoutRecorder() {
 
   useEffect(() => {
     const trimmed = query.trim();
-    if (!trimmed) { setResults([]); setSearchError(false); setSearchStatus("idle"); return; }
     setSearchStatus("loading");
     const controller = new AbortController();
     const timer = window.setTimeout(() => {

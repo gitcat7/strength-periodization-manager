@@ -21,7 +21,7 @@ function parseSearchInput(params: URLSearchParams) {
   const query = (params.get("q") ?? "").trim();
   const rawPage = params.get("page") ?? "1";
   const category = params.get("category") ?? undefined;
-  if (!query || query.length > 80 || !/^[1-9]\d?$/.test(rawPage)) return null;
+  if (query.length > 80 || !/^[1-9]\d?$/.test(rawPage)) return null;
   const page = Number(rawPage);
   if (page > 50 || (category !== undefined && !/^[1-9]\d{0,4}$/.test(category))) return null;
   return { category, page, query };
