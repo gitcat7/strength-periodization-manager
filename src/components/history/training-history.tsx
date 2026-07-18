@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Brain, CalendarDays, CheckCircle2, Dumbbell, Loader2, Moon, Save, TrendingUp } from "lucide-react";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
@@ -10,6 +10,7 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 import { resolveWorkoutExerciseName } from "@/lib/workout-exercise-presentation";
 import type { RecommendationType } from "@/domain/fitness-coach";
+import { getHistoryWorkoutFocusId } from "./history-workout-focus";
 
 type WorkoutRow = {
   day_type: "training" | "rest";
@@ -86,6 +87,12 @@ export function TrainingHistory() {
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [message, setMessage] = useState("");
+  const [historySearch, setHistorySearch] = useState("");
+  const focusedWorkoutRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setHistorySearch(window.location.search);
+  }, []);
 
   useEffect(() => {
     async function loadHistory() {
@@ -252,6 +259,20 @@ export function TrainingHistory() {
     }, {});
   }, [recommendations]);
 
+  const focusedWorkoutId = useMemo(() => getHistoryWorkoutFocusId(historySearch, workouts), [historySearch, workouts]);
+
+  useEffect(() => {
+    if (!focusedWorkoutId || status !== "ready" || !focusedWorkoutRef.current) return;
+    const timer = window.setTimeout(() => {
+      focusedWorkoutRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "start"
+      });
+      focusedWorkoutRef.current?.focus({ preventScroll: true });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [focusedWorkoutId, status]);
+
   function updateHistorySetLog(logId: string, patch: Partial<SetLogRow>) {
     setSaveStatus("idle");
     setSetLogs((currentLogs) =>
@@ -392,7 +413,14 @@ export function TrainingHistory() {
           }
 
           return (
-            <article className={`rounded-xl border p-4 ${isRecovery ? "border-line bg-field/60" : "border-line bg-white"}`} key={workout.id}>
+            <article
+              aria-label={workout.id === focusedWorkoutId ? "当前查看的训练记录" : undefined}
+              className={`rounded-xl border p-4 ${isRecovery ? "border-line bg-field/60" : "border-line bg-white"} ${workout.id === focusedWorkoutId ? "ring-2 ring-action/40" : ""}`}
+              id={`history-workout-${workout.id}`}
+              key={workout.id}
+              ref={workout.id === focusedWorkoutId ? focusedWorkoutRef : undefined}
+              tabIndex={workout.id === focusedWorkoutId ? -1 : undefined}
+            >
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div className="flex items-start gap-3">
                   <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${isRecovery ? "bg-[#4a7a9a]/10 text-[#4a7a9a]" : "bg-action/10 text-action"}`}>
