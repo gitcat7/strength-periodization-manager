@@ -78,6 +78,7 @@ type WorkoutExerciseRow = {
   target_weight: number;
   exercises: {
     default_increment: number;
+    is_main_lift: boolean;
     movement_pattern: string | null;
     name: string;
     slug: string;
@@ -87,7 +88,7 @@ type WorkoutExerciseRow = {
 };
 
 const workoutExerciseSelect =
-  "id,exercise_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug,default_increment,training_direction,movement_pattern,substitution_enabled)";
+  "id,exercise_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug,default_increment,is_main_lift,training_direction,movement_pattern,substitution_enabled)";
 
 function normalizeWorkoutExerciseRows(rows: unknown[]): WorkoutExerciseRow[] {
   return (rows as Array<Omit<WorkoutExerciseRow, "exercises"> & { exercises: Partial<WorkoutExerciseRow["exercises"]> | null }>).map(
@@ -96,6 +97,7 @@ function normalizeWorkoutExerciseRows(rows: unknown[]): WorkoutExerciseRow[] {
       exercises: row.exercises
         ? {
             default_increment: row.exercises.default_increment ?? 2.5,
+            is_main_lift: row.exercises.is_main_lift ?? false,
             movement_pattern: row.exercises.movement_pattern ?? null,
             name: row.exercises.name ?? "动作",
             slug: row.exercises.slug ?? "",
@@ -688,10 +690,23 @@ export function TodayWorkout() {
   }
 
   function handleSetCompletionChange(exercise: WorkoutExerciseRow, log: SetLogRow, completed: boolean) {
+    if (completed && requiresRealRpe(exercise) && !isValidRpe(log.rpe)) {
+      setSaveStatus("error");
+      setValidationIssues([
+        {
+          exerciseName: exercise.exercises?.name ?? "动作",
+          message: "请先填写真实 RPE（1–10）后再完成该组。",
+          setIndex: log.set_index,
+          severity: "error"
+        }
+      ]);
+      setMessage("请先填写真实 RPE（1–10）后再完成该组。");
+      return;
+    }
+
     updateSetLog(exercise.id, log.set_index, {
       actual_weight: log.actual_weight ?? log.target_weight,
       actual_reps: log.actual_reps ?? log.target_reps,
-      rpe: completed ? getCompletedSetRpe(exercise, log.rpe) : log.rpe,
       completed
     });
 
@@ -710,9 +725,7 @@ export function TodayWorkout() {
           (current[exercise.id] ?? []).map((log) => ({
             ...log,
             actual_weight: log.target_weight,
-            actual_reps: log.target_reps,
-            rpe: getCompletedSetRpe(exercise, log.rpe),
-            completed: true
+            actual_reps: log.target_reps
           }))
         ])
       );
@@ -731,9 +744,7 @@ export function TodayWorkout() {
         [exerciseId]: (current[exerciseId] ?? []).map((log) => ({
           ...log,
           actual_weight: log.target_weight,
-          actual_reps: log.target_reps,
-          rpe: exercise ? getCompletedSetRpe(exercise, log.rpe) : log.rpe,
-          completed: true
+          actual_reps: log.target_reps
         }))
       };
       writeDraftLogs(workout?.id, nextLogs);
@@ -750,7 +761,7 @@ export function TodayWorkout() {
     }
 
     const allLogs = Object.values(setLogs).flat();
-    const nextValidationIssues = validateTrainingLogs({ completeWorkout, exercises, setLogs });
+    const nextValidationIssues = validateTrainingLogs({ exercises, setLogs });
     const blockingIssues = nextValidationIssues.filter((issue) => issue.severity === "error");
     if (blockingIssues.length > 0) {
       setSaveStatus("error");
@@ -863,7 +874,7 @@ export function TodayWorkout() {
         supabase,
         userId
       });
-      setMessage("训练已完成。Fitness Coach 已生成下次重量建议。");
+      setMessage("训练已完成。下次训练建议仍待你在计划页明确应用，当前计划尚未更新。");
     } else {
       clearDraftLogs(workout.id);
       clearTrainingDataCaches();
@@ -891,6 +902,7 @@ export function TodayWorkout() {
       const recommendation = buildExerciseCoachRecommendation({
         exerciseName: exercise.exercises?.name ?? "动作",
         increment: Number(exercise.exercises?.default_increment) || 2.5,
+        isMainLift: exercise.exercises?.is_main_lift ?? false,
         logs: (setLogs[exercise.id] ?? []).map((log) => ({
           targetWeight: Number(log.target_weight),
           targetReps: Number(log.target_reps),
@@ -1276,6 +1288,7 @@ export function TodayWorkout() {
                 {item.suggestedWeight > 0 ? (
                   <p className="mt-1 font-semibold text-ink">建议下次：{item.suggestedWeight}kg</p>
                 ) : null}
+                <p className="mt-1 text-xs text-muted">待处理 · 请在计划页明确应用后，才会更新下次训练。</p>
               </div>
             ))}
           </div>
@@ -1330,7 +1343,7 @@ export function TodayWorkout() {
                         onClick={() => fillExerciseByPlan(exercise.id)}
                         type="button"
                       >
-                        本动作按计划
+                        填入计划
                       </button>
                     </div>
                   </div>
@@ -1870,11 +1883,9 @@ function getWorkoutSummaryHeadline({
 }
 
 function validateTrainingLogs({
-  completeWorkout,
   exercises,
   setLogs
 }: {
-  completeWorkout: boolean;
   exercises: WorkoutExerciseRow[];
   setLogs: Record<string, SetLogRow[]>;
 }) {
@@ -1884,7 +1895,7 @@ function validateTrainingLogs({
   for (const [exerciseId, logs] of Object.entries(setLogs)) {
     const exercise = exerciseById.get(exerciseId);
     const exerciseName = exercise?.exercises?.name ?? "动作";
-    const isCardio = exercise?.exercises?.slug === "cardio_zone2";
+    const isCardio = !requiresRealRpe(exercise);
 
     for (const log of logs) {
       if (!log.completed) continue;
@@ -1910,16 +1921,16 @@ function validateTrainingLogs({
         });
       }
 
-      if (!isCardio && completeWorkout && log.rpe === null) {
+      if (requiresRealRpe(exercise) && !isValidRpe(log.rpe)) {
         issues.push({
           exerciseName,
-          message: "完成训练前建议填写 RPE，后续重量建议会更准确。",
+          message: "完成力量组需要填写真实 RPE（1–10）。",
           setIndex: log.set_index,
           severity: "error"
         });
       }
 
-      if (log.rpe !== null && (log.rpe < 1 || log.rpe > 10)) {
+      if (log.rpe !== null && !isValidRpe(log.rpe)) {
         issues.push({
           exerciseName,
           message: "RPE 应在 1 到 10 之间。",
@@ -1968,15 +1979,18 @@ function isExtremeWeight(actualWeight: number, targetWeight: number) {
 }
 
 function getWeightIncrement(exercise: WorkoutExerciseRow) {
-  if (exercise.exercises?.slug === "cardio_zone2") return 1;
+  if (!requiresRealRpe(exercise)) return 1;
 
   const increment = Number(exercise.exercises?.default_increment);
   return increment > 0 ? increment : 2.5;
 }
 
-function getCompletedSetRpe(exercise: WorkoutExerciseRow, currentRpe: number | null) {
-  if (exercise.exercises?.slug === "cardio_zone2") return currentRpe;
-  return currentRpe ?? 8;
+function requiresRealRpe(exercise: WorkoutExerciseRow | undefined) {
+  return exercise?.exercises?.slug !== "cardio_zone2" && exercise?.exercises?.training_direction !== "cardio";
+}
+
+function isValidRpe(rpe: number | null) {
+  return typeof rpe === "number" && Number.isFinite(rpe) && rpe >= 1 && rpe <= 10;
 }
 
 function roundToHalf(value: number) {

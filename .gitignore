@@ -13,3 +13,5 @@ __pycache__/
 *.py[cod]
 tsconfig.tsbuildinfo
 .worktrees/
+supabase/.branches/
+supabase/.temp/

@@ -78,4 +78,37 @@ describe("SingleWorkoutRecorder", () => {
     expect(container.querySelector('a[href="/"]')).toBeTruthy();
     expect(clearTrainingDataCaches).toHaveBeenCalledOnce();
   });
+
+  it("allows an audited cardio exercise to finish without an RPE value", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => root?.render(<SingleWorkoutRecorder />));
+    const search = container.querySelector<HTMLInputElement>('input[type="search"]');
+    await act(async () => setInputValue(search!, "跑步机"));
+
+    const treadmill = [...container.querySelectorAll("details")].find((item) => item.textContent?.includes("跑步机跑步"));
+    const add = [...(treadmill?.querySelectorAll("button") ?? [])].find((button) => button.textContent?.includes("添加"));
+    await act(async () => add?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    const inputs = container.querySelectorAll<HTMLInputElement>("input");
+    await act(async () => {
+      [5, 8, 11].forEach((index) => setInputValue(inputs[index]!, "30"));
+    });
+    const completeSetButtons = container.querySelectorAll<HTMLButtonElement>('button[aria-label="完成本组"]');
+    await act(async () => completeSetButtons.forEach((button) => button.dispatchEvent(new MouseEvent("click", { bubbles: true }))));
+    const completeWorkout = [...container.querySelectorAll("button")].find((button) => button.textContent === "完成训练");
+    await act(async () => completeWorkout?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    expect(container.textContent).toContain("本次训练摘要");
+    expect(container.textContent).not.toContain("RPE 需为 1–10。");
+  });
 });
+
+function setInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  setter?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}

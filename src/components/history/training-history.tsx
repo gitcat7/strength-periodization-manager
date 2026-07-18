@@ -5,11 +5,12 @@ import Link from "next/link";
 import { Brain, CalendarDays, CheckCircle2, Dumbbell, Loader2, Moon, Save, TrendingUp } from "lucide-react";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
 import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
+import { requiresRpeForWorkoutExercise, resolveCompletedSetValues, resolveSetLoadType, validateRecordedSet } from "@/domain/workout-recording";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 import { resolveWorkoutExerciseName } from "@/lib/workout-exercise-presentation";
-import type { RecommendationType } from "@/domain/fitness-coach";
+import { getRecommendationStatusLabel, type RecommendationType } from "@/domain/fitness-coach";
 import { getHistoryWorkoutFocusId } from "./history-workout-focus";
 
 type WorkoutRow = {
@@ -27,10 +28,14 @@ type WorkoutExerciseRow = {
   target_sets: number;
   target_reps: number;
   target_weight: number;
+  exercise_provider?: string | null;
+  external_exercise_id?: string | null;
   exercise_name_snapshot?: string | null;
+  exercise_metadata_snapshot?: { loadType?: string; movementPattern?: string } | null;
   exercises: {
     name: string;
     slug: string;
+    training_direction: string | null;
   } | null;
 };
 
@@ -150,7 +155,7 @@ export function TrainingHistory() {
           withTimeout(
             supabase
               .from("workout_exercises")
-              .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercise_name_snapshot,exercise_provider,external_exercise_id,exercises(name,slug)")
+              .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercise_name_snapshot,exercise_metadata_snapshot,exercise_provider,external_exercise_id,exercises(name,slug,training_direction)")
               .in("workout_id", workoutIds)
               .order("order_index", { ascending: true }),
             "历史动作读取超时，请刷新页面后重试。"
@@ -280,11 +285,56 @@ export function TrainingHistory() {
     );
   }
 
+  function updateHistorySetCompletion(log: SetLogRow, completed: boolean) {
+    const exercise = workoutExercises.find((item) => item.id === log.workout_exercise_id);
+    if (completed && requiresRealRpe(exercise) && !isValidRpe(log.rpe)) {
+      setSaveStatus("error");
+      setMessage(`${getExerciseName(exercise)} 第 ${log.set_index} 组：请先填写真实 RPE（1–10）后再完成该组。`);
+      return;
+    }
+
+    updateHistorySetLog(log.id, { completed });
+  }
+
   async function saveWorkoutEdits(workoutId: string) {
     const workoutExerciseIds = (exercisesByWorkoutId[workoutId] ?? []).map((exercise) => exercise.id);
     const logsToSave = setLogs.filter((log) => workoutExerciseIds.includes(log.workout_exercise_id));
 
     if (logsToSave.length === 0) return;
+
+    const exerciseById = new Map(workoutExercises.map((exercise) => [exercise.id, exercise]));
+    const normalizedLogs = logsToSave.map((log) => {
+      const values = resolveCompletedSetValues({
+        actualReps: log.actual_reps,
+        actualWeight: log.actual_weight,
+        completed: log.completed,
+        targetReps: log.target_reps,
+        targetWeight: log.target_weight
+      });
+      return { ...log, actual_reps: values.actualReps, actual_weight: values.actualWeight };
+    });
+    const invalidLog = normalizedLogs.find((log) => {
+      const exercise = exerciseById.get(log.workout_exercise_id);
+      return Object.keys(validateRecordedSet({
+        completed: log.completed,
+        reps: log.actual_reps === null ? "" : String(log.actual_reps),
+        rpe: log.rpe === null ? "" : String(log.rpe),
+        weight: log.actual_weight === null ? "" : String(log.actual_weight)
+      }, getHistoryLoadType(exercise), { requiresRpe: requiresRealRpe(exercise) })).length > 0;
+    });
+
+    if (invalidLog) {
+      const exercise = exerciseById.get(invalidLog.workout_exercise_id);
+      const errors = validateRecordedSet({
+        completed: invalidLog.completed,
+        reps: invalidLog.actual_reps === null ? "" : String(invalidLog.actual_reps),
+        rpe: invalidLog.rpe === null ? "" : String(invalidLog.rpe),
+        weight: invalidLog.actual_weight === null ? "" : String(invalidLog.actual_weight)
+      }, getHistoryLoadType(exercise), { requiresRpe: requiresRealRpe(exercise) });
+      setSaveStatus("error");
+      setMessage(`${getExerciseName(exercise)} 第 ${invalidLog.set_index} 组：${Object.values(errors).join(" ")}`);
+      return;
+    }
 
     setSaveStatus("saving");
     setMessage("");
@@ -293,7 +343,7 @@ export function TrainingHistory() {
     const { error } = await supabase
       .from("set_logs")
       .upsert(
-        logsToSave.map((log) => ({
+        normalizedLogs.map((log) => ({
           workout_exercise_id: log.workout_exercise_id,
           set_index: log.set_index,
           target_weight: log.target_weight,
@@ -314,6 +364,8 @@ export function TrainingHistory() {
     }
 
     clearTrainingDataCaches();
+    const normalizedById = new Map(normalizedLogs.map((log) => [log.id, log]));
+    setSetLogs((current) => current.map((log) => normalizedById.get(log.id) ?? log));
     setSaveStatus("saved");
     setMessage("历史训练已保存。进展页会按新的记录重新计算。");
   }
@@ -506,7 +558,7 @@ export function TrainingHistory() {
                                 aria-label={`第 ${log.set_index} 组完成`}
                                 checked={log.completed}
                                 className="h-4 w-4 accent-action"
-                                onChange={(event) => updateHistorySetLog(log.id, { completed: event.target.checked })}
+                                onChange={(event) => updateHistorySetCompletion(log, event.target.checked)}
                                 type="checkbox"
                               />
                             </label>
@@ -540,7 +592,7 @@ export function TrainingHistory() {
                         <div className="flex items-center justify-between gap-3">
                           <span className="font-semibold">{recommendation.exercises?.name ?? "动作"}</span>
                           <span className="rounded-full bg-field px-2 py-1 text-xs text-muted">
-                            {formatRecommendationStatus(recommendation.status)}
+                            {getRecommendationStatusLabel(recommendation.status)}
                           </span>
                         </div>
                         <p className="mt-1 text-muted">
@@ -669,18 +721,36 @@ function getBestSet(logs: SetLogRow[]) {
     .sort((a, b) => Number(b.actual_weight ?? 0) * Number(b.actual_reps ?? 0) - Number(a.actual_weight ?? 0) * Number(a.actual_reps ?? 0))[0];
 }
 
+function requiresRealRpe(exercise: WorkoutExerciseRow | undefined) {
+  return requiresRpeForWorkoutExercise({
+    movementPattern: exercise?.exercise_metadata_snapshot?.movementPattern,
+    provider: exercise?.exercise_provider,
+    referenceId: exercise?.external_exercise_id,
+    slug: exercise?.exercises?.slug,
+    trainingDirection: exercise?.exercises?.training_direction
+  });
+}
+
+function isValidRpe(rpe: number | null) {
+  return typeof rpe === "number" && Number.isFinite(rpe) && rpe >= 1 && rpe <= 10;
+}
+
+function getHistoryLoadType(exercise: WorkoutExerciseRow | undefined) {
+  return resolveSetLoadType({
+    snapshotLoadType: exercise?.exercise_metadata_snapshot?.loadType,
+    targetWeight: exercise?.target_weight
+  });
+}
+
+function getExerciseName(exercise: WorkoutExerciseRow | undefined) {
+  return exercise?.exercises?.name ?? exercise?.exercise_name_snapshot ?? "动作";
+}
+
 function formatRecommendationType(type: RecommendationType) {
   if (type === "increase") return "加重";
   if (type === "decrease") return "降重";
   if (type === "deload") return "减量恢复";
   return "保持";
-}
-
-function formatRecommendationStatus(status: string) {
-  if (status === "accepted") return "已应用";
-  if (status === "rejected") return "已忽略";
-  if (status === "modified") return "已修改";
-  return "待处理";
 }
 
 function withTimeout<T>(promise: PromiseLike<T>, message: string, timeoutMs = 10000) {

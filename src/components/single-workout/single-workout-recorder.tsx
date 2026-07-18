@@ -7,7 +7,7 @@ import type { ExternalExerciseReference } from "@/domain/external-exercise";
 import { filterAddableExternalExercises } from "@/domain/exercise-selection";
 import { reviewedExerciseSections, searchReviewedExercises, type ExerciseLoadType, type ReviewedExercise, type ReviewedExerciseSection } from "@/domain/reviewed-exercise-library";
 import { buildStandaloneWorkoutSavePayload, type ManualExerciseReference, type StandaloneSetDraft } from "@/domain/single-workout";
-import { buildCompletionSummary, validateRecordedSet, type RecordedSetErrors } from "@/domain/workout-recording";
+import { buildCompletionSummary, requiresRpeForStandaloneExercise, validateRecordedSet, type RecordedSetErrors } from "@/domain/workout-recording";
 import { clearTrainingDataCaches } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
@@ -94,7 +94,10 @@ export function SingleWorkoutRecorder() {
   function name(item: SelectedExercise) { return item.kind === "reviewed" ? item.reviewed.nameZh : item.kind === "manual" ? item.manual.name : item.reference.name; }
   function requestComplete() {
     const next: Record<string, RecordedSetErrors> = {};
-    selected.forEach((exercise) => exercise.sets.forEach((set, index) => { const result = validateRecordedSet(set, loadType(exercise)); if (Object.keys(result).length) next[`${exercise.id}:${index}`] = result; }));
+    selected.forEach((exercise) => exercise.sets.forEach((set, index) => {
+      const result = validateRecordedSet(set, loadType(exercise), { requiresRpe: requiresRealRpe(exercise) });
+      if (Object.keys(result).length) next[`${exercise.id}:${index}`] = result;
+    }));
     setErrors(next);
     if (Object.keys(next).length) { setMessage("请修正已完成组的字段后再结束训练。输入内容已保留。"); return; }
     const allRecordedSets = selected.flatMap((exercise) => exercise.sets.map((set) => ({ ...set, loadType: loadType(exercise) })));
@@ -158,6 +161,18 @@ export function SingleWorkoutRecorder() {
     <div className="mt-6 flex items-center justify-between gap-3"><button className="pressable rounded-md border border-action px-3 py-2 text-sm font-semibold text-action" disabled={saving !== null} onClick={() => void save("draft")} type="button">{saving === "draft" ? "保存中…" : "保存草稿"}</button><p aria-live="polite" className="text-sm text-muted">{message}</p></div>
     {summary ? <div className="fixed inset-0 z-50 grid place-items-end bg-black/30 p-4 sm:place-items-center" role="dialog" aria-modal="true"><div className="w-full max-w-md rounded-lg bg-white p-4"><h2 className="text-lg font-bold">本次训练摘要</h2><dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-muted">已完成组</dt><dd className="font-semibold">{summary.completedSetCount} 组</dd></div><div><dt className="text-muted">漏记组</dt><dd className="font-semibold">{summary.incompleteSetCount} 组</dd></div><div><dt className="text-muted">总吨位</dt><dd className="font-semibold">{summary.totalTonnage === null ? "不适用" : `${summary.totalTonnage} kg`}</dd></div><div><dt className="text-muted">最高 e1RM</dt><dd className="font-semibold">{summary.bestE1rm === null ? "不适用" : `${summary.bestE1rm} kg`}</dd></div></dl><p className="mt-3 text-sm text-muted">自由训练会保存到历史与进展，不会自动调整周期计划。</p><div className="mt-4 flex gap-2"><button className="rounded-md border border-line px-3 py-2 text-sm font-semibold" onClick={() => setSummary(null)} type="button">返回继续记录</button><button className="rounded-md bg-action px-3 py-2 text-sm font-semibold text-white" disabled={saving !== null} onClick={() => void save("completed")} type="button">{summary.incompleteSetCount ? "仍然结束训练" : "确认完成"}</button></div></div></div> : null}
   </main>;
+}
+
+function requiresRealRpe(exercise: SelectedExercise) {
+  if (exercise.kind === "reviewed") {
+    return requiresRpeForStandaloneExercise({
+      movementPattern: exercise.reviewed.movementPattern,
+      provider: "reviewed",
+      referenceId: `reviewed:${exercise.reviewed.id}`
+    });
+  }
+
+  return true;
 }
 
 function split(value: string) { return value.split(/[，,]/).map((item) => item.trim()).filter(Boolean).slice(0, 6); }
