@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCompletionSummary, validateRecordedSet } from "./workout-recording";
+import { buildCompletionSummary, requiresRpeForStandaloneExercise, requiresRpeForWorkoutExercise, resolveCompletedSetValues, resolveSetLoadType, validateRecordedSet } from "./workout-recording";
 
 describe("workout recording", () => {
   it("requires reps, weight, and RPE for a completed weighted set", () => {
@@ -18,6 +18,54 @@ describe("workout recording", () => {
 
   it("allows a completed bodyweight set without a kg value", () => {
     expect(validateRecordedSet({ completed: true, reps: "12", rpe: "7", weight: "" }, "bodyweight")).toEqual({});
+  });
+
+  it("allows a completed cardio or recovery set without RPE", () => {
+    expect(
+      validateRecordedSet(
+        { completed: true, reps: "30", rpe: "", weight: "" },
+        "bodyweight",
+        { requiresRpe: false }
+      )
+    ).toEqual({});
+  });
+
+  it("still requires a valid load when a weighted recovery set omits RPE", () => {
+    expect(
+      validateRecordedSet(
+        { completed: true, reps: "30", rpe: "", weight: "" },
+        "weighted",
+        { requiresRpe: false }
+      )
+    ).toEqual({ weight: "负重动作完成时需填写正数重量（kg）。" });
+  });
+
+  it("keeps an external weighted snapshot weighted even when its planned weight is zero", () => {
+    expect(resolveSetLoadType({ snapshotLoadType: "weighted", targetWeight: 0 })).toBe("weighted");
+  });
+
+  it("only exempts the finite audited cardio references from standalone RPE", () => {
+    expect(requiresRpeForStandaloneExercise({ provider: "reviewed", referenceId: "reviewed:treadmill-run", movementPattern: "有氧跑步" })).toBe(false);
+    expect(requiresRpeForStandaloneExercise({ provider: "wger", referenceId: "42", movementPattern: "cardio" })).toBe(true);
+    expect(requiresRpeForStandaloneExercise({ provider: "manual", referenceId: "manual:cardio", movementPattern: "有氧跑步" })).toBe(true);
+  });
+
+  it("keeps approved cardio snapshots exempt when a saved workout is edited in history", () => {
+    expect(requiresRpeForWorkoutExercise({ provider: "reviewed", referenceId: "reviewed:treadmill-run", movementPattern: "有氧跑步" })).toBe(false);
+    expect(requiresRpeForWorkoutExercise({ trainingDirection: "cardio" })).toBe(false);
+    expect(requiresRpeForWorkoutExercise({ provider: "reviewed", referenceId: "reviewed:barbell-bench-press", movementPattern: "水平推" })).toBe(true);
+  });
+
+  it("normalizes legacy completed rows from their displayed planned values", () => {
+    expect(
+      resolveCompletedSetValues({
+        actualReps: null,
+        actualWeight: null,
+        completed: true,
+        targetReps: 5,
+        targetWeight: 100
+      })
+    ).toEqual({ actualReps: 5, actualWeight: 100 });
   });
 
   it("summarizes valid weighted sets while retaining incomplete counts", () => {

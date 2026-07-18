@@ -1,6 +1,6 @@
 begin;
 
-select plan(18);
+select plan(21);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values
@@ -71,6 +71,20 @@ select throws_ok(
   $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"completed","exercises":[{"exercise_provider":"manual","external_exercise_id":"manual:00000000-0000-4000-8000-000000000001","exercise_name_snapshot":"徒手划船","exercise_metadata_snapshot":{"equipment":[],"muscles":[],"loadType":"bodyweight"},"sets":[{"weight":"","reps":"","rpe":"7","completed":true}]}]}'::jsonb)$$,
   'P0001',
   'completed standalone set requires repetitions'
+);
+select lives_ok(
+  $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"completed","exercises":[{"exercise_provider":"reviewed","external_exercise_id":"reviewed:treadmill-run","exercise_name_snapshot":"跑步机跑步","exercise_metadata_snapshot":{"equipment":["跑步机"],"muscles":["股四头肌"],"loadType":"bodyweight","movementPattern":"有氧跑步","riskLevel":"standard"},"sets":[{"weight":"","reps":"30","rpe":"","completed":true}]}]}'::jsonb)$$,
+  'reviewed cardio can omit RPE'
+);
+select throws_ok(
+  $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"completed","exercises":[{"exercise_provider":"reviewed","external_exercise_id":"reviewed:treadmill-run","exercise_name_snapshot":"跑步机跑步","exercise_metadata_snapshot":{"equipment":["跑步机"],"muscles":["股四头肌"],"loadType":"bodyweight","movementPattern":"水平推","riskLevel":"standard"},"sets":[{"weight":"","reps":"30","rpe":"","completed":true}]}]}'::jsonb)$$,
+  'P0001',
+  'untrusted reviewed metadata cannot omit RPE'
+);
+select throws_ok(
+  $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"completed","exercises":[{"exercise_provider":"reviewed","external_exercise_id":"reviewed:barbell-bench-press","exercise_name_snapshot":"杠铃卧推","exercise_metadata_snapshot":{"equipment":["杠铃"],"muscles":["胸大肌"],"loadType":"bodyweight","movementPattern":"水平推","riskLevel":"technical"},"sets":[{"weight":"","reps":"8","rpe":"7","completed":true}]}]}'::jsonb)$$,
+  'P0001',
+  'reviewed strength action cannot spoof a bodyweight load type'
 );
 reset role;
 

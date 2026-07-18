@@ -17,6 +17,13 @@ export type ExerciseCoachRecommendation = {
   reason: string;
 };
 
+export function getRecommendationStatusLabel(status: string) {
+  if (status === "accepted") return "已更新下次训练";
+  if (status === "modified") return "修改后已更新下次训练";
+  if (status === "rejected") return "已忽略";
+  return "待处理 · 尚未更新下次训练";
+}
+
 export function getInterruptionAdvice({
   lastCompletedDate,
   scheduledDate
@@ -109,11 +116,13 @@ export function summarizeSetLogs(logs: CoachSetLog[]) {
 export function buildExerciseCoachRecommendation({
   exerciseName,
   increment,
+  isMainLift = false,
   logs,
   targetWeight
 }: {
   exerciseName: string;
   increment: number;
+  isMainLift?: boolean;
   logs: CoachSetLog[];
   targetWeight: number;
 }): ExerciseCoachRecommendation {
@@ -144,42 +153,43 @@ export function buildExerciseCoachRecommendation({
     };
   }
 
-  if (summary.averageRpe === null) {
+  const finalRpe = logs.at(-1)?.rpe;
+  if (typeof finalRpe !== "number" || !Number.isFinite(finalRpe) || finalRpe < 1 || finalRpe > 10) {
     return {
       type: "hold",
       suggestedWeight: targetWeight,
-      reason: `${exerciseName} 已完成，但缺少 RPE。先保持重量，再记录体感用于下次判断。`
+      reason: `${exerciseName} 已完成，但末组缺少有效 RPE。先保持重量，再记录真实体感用于下次判断。`
     };
   }
 
-  if (summary.averageRpe >= 9.5) {
-    return {
-      type: "decrease",
-      suggestedWeight: roundToNearestPlate(targetWeight - plateIncrement, plateIncrement),
-      reason: `${exerciseName} 平均 RPE ${summary.averageRpe.toFixed(1)} 偏高，下次降一档，避免恢复被打穿。`
-    };
-  }
-
-  if (summary.averageRpe >= 8.5) {
+  if (finalRpe >= 9) {
     return {
       type: "hold",
       suggestedWeight: targetWeight,
-      reason: `${exerciseName} 平均 RPE ${summary.averageRpe.toFixed(1)}，刺激足够，下次先保持重量。`
+      reason: `${exerciseName} 末组 RPE ${finalRpe.toFixed(1)} 偏高，下次先保持重量，优先保证恢复和动作质量。`
     };
   }
 
-  if (summary.averageRpe <= 7.5) {
+  if (!isMainLift) {
+    return {
+      type: "hold",
+      suggestedWeight: targetWeight,
+      reason: `${exerciseName} 已完成。默认加重只用于主项，辅助动作先保持重量并观察下次完成质量。`
+    };
+  }
+
+  if (finalRpe <= 8) {
     return {
       type: "increase",
       suggestedWeight: roundToNearestPlate(targetWeight + plateIncrement, plateIncrement),
-      reason: `${exerciseName} 全部完成且平均 RPE ${summary.averageRpe.toFixed(1)}，下次可小幅加重。`
+      reason: `${exerciseName} 全部完成且末组 RPE ${finalRpe.toFixed(1)}，下次可按默认增量小幅加重。`
     };
   }
 
   return {
     type: "hold",
     suggestedWeight: targetWeight,
-    reason: `${exerciseName} 完成质量合适，继续按当前重量巩固。`
+    reason: `${exerciseName} 末组 RPE ${finalRpe.toFixed(1)}，完成质量合适，继续按当前重量巩固。`
   };
 }
 
