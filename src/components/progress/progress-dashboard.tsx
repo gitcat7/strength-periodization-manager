@@ -244,9 +244,14 @@ export function ProgressDashboard() {
             <p className="text-sm text-muted">完成至少 2 次训练后，这里会开始显示趋势。现在先把训练记录沉淀起来。</p>
           </div>
         </div>
-        <Link className="inline-flex rounded-lg bg-action px-4 py-2 font-semibold text-white" href="/today">
-          去训练
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link className="inline-flex rounded-lg bg-action px-4 py-2 font-semibold text-white" href="/today">
+            去训练
+          </Link>
+          <Link className="inline-flex rounded-lg border border-line bg-white px-4 py-2 font-semibold text-ink" href="/pr">
+            查看 PR 目标
+          </Link>
+        </div>
       </section>
     );
   }
@@ -260,6 +265,10 @@ export function ProgressDashboard() {
         <Metric icon={<BarChart3 size={16} />} label="总训练量" value={`${Math.round(progress.totalVolume).toLocaleString()} kg`} />
         <Metric icon={<TrendingUp size={16} />} label="完成率" value={`${Math.round(progress.completionRate * 100)}%`} />
       </section>
+
+      <Link className="inline-flex min-h-10 items-center rounded-md border border-action px-3 text-sm font-semibold text-action" href="/pr">
+        查看 PR 目标
+      </Link>
 
       <section className="rounded-xl border border-line bg-white p-4">
         <div className="mb-4 flex items-center justify-between gap-3">
