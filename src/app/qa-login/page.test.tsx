@@ -16,4 +16,13 @@ describe("QaLoginPage", () => {
     await expect(QaLoginPage()).rejects.toThrow("NOT_FOUND");
     expect(mocks.notFound).toHaveBeenCalledOnce();
   });
+
+  it("does not expose the local QA page to a development request on a remote host", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    mocks.notFound.mockClear();
+    mocks.headers.mockResolvedValue({ get: () => "192.168.1.20:3000" });
+
+    await expect(QaLoginPage()).rejects.toThrow("NOT_FOUND");
+    expect(mocks.notFound).toHaveBeenCalledOnce();
+  });
 });

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { isLocalDevelopmentHost, isLocalQaSessionEnabled } from "./dev-qa-auth";
 
@@ -34,5 +35,13 @@ describe("isLocalDevelopmentHost", () => {
     expect(isLocalDevelopmentHost({ nodeEnv: "development", hostname: "127.0.0.1" })).toBe(true);
     expect(isLocalDevelopmentHost({ nodeEnv: "production", hostname: "localhost" })).toBe(false);
     expect(isLocalDevelopmentHost({ nodeEnv: "development", hostname: "preview.vercel.app" })).toBe(false);
+  });
+});
+
+describe("local QA server binding", () => {
+  it("binds the supported development command to loopback only", () => {
+    const packageJson = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { scripts: { dev: string } };
+
+    expect(packageJson.scripts.dev).toContain("--hostname 127.0.0.1");
   });
 });

@@ -4,11 +4,11 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ replace: vi.fn(), setSession: vi.fn() }));
+const mocks = vi.hoisted(() => ({ replace: vi.fn(), search: "next=/history", setSession: vi.fn() }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: mocks.replace }),
-  useSearchParams: () => new URLSearchParams("next=/history")
+  useSearchParams: () => new URLSearchParams(mocks.search)
 }));
 
 vi.mock("@/lib/supabase/browser", () => ({
@@ -24,6 +24,7 @@ let root: Root | null = null;
 
 beforeEach(() => {
   mocks.replace.mockReset();
+  mocks.search = "next=/history";
   mocks.setSession.mockReset();
 });
 
@@ -54,6 +55,16 @@ describe("LocalQaLogin", () => {
     expect(container?.textContent).toContain("本地 QA 登录不可用");
     expect(container?.textContent).not.toContain("DEV_BROWSER_QA_PASSWORD");
     expect(mocks.setSession).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the home page for an external next parameter", async () => {
+    mocks.search = "next=//attacker.example";
+    mocks.setSession.mockResolvedValue({ error: null });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ access_token: "access", refresh_token: "refresh" })));
+
+    await renderLogin();
+
+    expect(mocks.replace).toHaveBeenCalledWith("/");
   });
 });
 

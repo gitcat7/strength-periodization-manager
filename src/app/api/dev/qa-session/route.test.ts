@@ -25,6 +25,15 @@ describe("POST /api/dev/qa-session", () => {
     expect(signInWithPassword).not.toHaveBeenCalled();
   });
 
+  it("is not available when the private QA configuration is incomplete", async () => {
+    vi.stubEnv("DEV_BROWSER_QA_PASSWORD", "");
+
+    const response = await POST(new Request("http://localhost/api/dev/qa-session", { method: "POST" }));
+
+    expect(response.status).toBe(404);
+    expect(signInWithPassword).not.toHaveBeenCalled();
+  });
+
   it("does not accept credentials or user identity from the request", async () => {
     signInWithPassword.mockResolvedValue({
       data: { session: { access_token: "access-token", refresh_token: "refresh-token" } },

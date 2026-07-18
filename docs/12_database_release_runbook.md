@@ -146,4 +146,4 @@ where w.day_type = 'rest';
 
 # 本地 QA 浏览器登录（不属于发布配置）
 
-仅为本机内置浏览器验收时，可在未提交的 `.env.local` 中设置 `DEV_BROWSER_QA_EMAIL` 与 `DEV_BROWSER_QA_PASSWORD`，再访问 `/qa-login?next=/history`。两项变量绝不填入 Vercel、Supabase Dashboard 或仓库；该入口仅 localhost/127.0.0.1 的 development 服务有效，生产与 Preview 会返回 404。QA 账号保持普通用户权限，仍由 RLS 隔离数据。
+仅为本机内置浏览器验收时，可在未提交的 `.env.local` 中设置 `DEV_BROWSER_QA_EMAIL` 与 `DEV_BROWSER_QA_PASSWORD`，用 `pnpm dev` 启动后再访问 `/qa-login?next=/history`。该命令只绑定 `127.0.0.1`，不可改为 `--hostname 0.0.0.0`。两项变量绝不填入 Vercel、Supabase Dashboard 或仓库；该入口仅 localhost/127.0.0.1 的 development 服务有效，生产与 Preview 会返回 404。QA 账号保持普通用户权限，仍由 RLS 隔离数据。

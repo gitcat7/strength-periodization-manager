@@ -7,7 +7,7 @@
 ## 边界与安全约束
 
 - QA 账号不是产品管理员，也不拥有越过 RLS 的权限；它只是专门用于本地验收的普通 Supabase 用户。
-- 仅当 `NODE_ENV === "development"`、请求主机是 `localhost` 或 `127.0.0.1`、且本机同时设置 `DEV_BROWSER_QA_EMAIL` 与 `DEV_BROWSER_QA_PASSWORD` 时可用。
+- 仅当 `NODE_ENV === "development"`、请求主机是 `localhost` 或 `127.0.0.1`、且本机同时设置 `DEV_BROWSER_QA_EMAIL` 与 `DEV_BROWSER_QA_PASSWORD` 时可用。项目支持的 `pnpm dev` 命令必须绑定 `127.0.0.1`，以网络边界而非可伪造的 `Host` 请求头保证局域网无法访问。
 - 凭据只存在于未提交的 `.env.local`。不在代码、测试、日志、URL、前端公开环境变量或文档中写入其值。
 - 非上述条件的请求统一返回 404；生产构建不展示入口、按钮或提示。
 - 服务端以 Supabase anon key 调用密码登录取得该 QA 用户的正常会话；浏览器再以既有 Supabase client 的 `setSession` 保存会话。因此后续所有数据请求仍受 Supabase RLS 约束。

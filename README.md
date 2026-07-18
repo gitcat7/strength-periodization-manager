@@ -69,7 +69,7 @@ DEV_BROWSER_QA_EMAIL=
 DEV_BROWSER_QA_PASSWORD=
 ```
 
-随后启动本地开发服务器并访问 `/qa-login?next=/history`。此入口只在 `localhost` 或 `127.0.0.1` 的 development 服务生效；生产、Preview 与 Vercel 一律不可用。QA 账号必须是普通 Supabase 用户，所有请求仍遵循 RLS；不要填写真实用户或管理员账号。
+使用 `pnpm dev` 启动本地开发服务器并访问 `/qa-login?next=/history`。该命令会把服务器绑定到 `127.0.0.1`，避免 QA 会话暴露给局域网；不要改用 `--hostname 0.0.0.0`。此入口只在 `localhost` 或 `127.0.0.1` 的 development 服务生效；生产、Preview 与 Vercel 一律不可用。QA 账号必须是普通 Supabase 用户，所有请求仍遵循 RLS；不要填写真实用户或管理员账号。
 
 ## MVP 不做什么
 
