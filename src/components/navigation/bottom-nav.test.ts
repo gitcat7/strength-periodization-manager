@@ -18,4 +18,13 @@ describe("bottom navigation touch feedback", () => {
       /@media \(hover: hover\)[\s\S]*?\.bottom-nav-item:not\(\.bottom-nav-item-active\):hover\s*\{\s*background-color: rgb\(.*?\);/
     );
   });
+
+  it("keeps exactly five primary tabs, including history and excluding PR", async () => {
+    const component = await readFile(componentPath, "utf8");
+
+    expect(component).toContain('href: "/history", label: "历史"');
+    expect(component).not.toContain('href: "/pr", label: "PR"');
+    expect(component).toMatch(/export const bottomNavItems = \[[\s\S]*?\] as const;/);
+    expect((component.match(/href: \"\//g) ?? []).length).toBe(5);
+  });
 });

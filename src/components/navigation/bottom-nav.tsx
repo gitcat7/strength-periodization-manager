@@ -2,27 +2,27 @@
 
 import { useCallback, useEffect } from "react";
 import Link from "next/link";
-import { BarChart3, CalendarDays, Dumbbell, Settings, Trophy } from "lucide-react";
+import { BarChart3, CalendarDays, Dumbbell, History, Settings } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { isNavigationItemActive } from "./navigation-state";
 
 const hiddenPrefixes = ["/login", "/auth"];
 
-const navItems = [
+export const bottomNavItems = [
   { href: "/", label: "今日", icon: Dumbbell },
   { href: "/plan", label: "计划", icon: CalendarDays },
+  { href: "/history", label: "历史", icon: History },
   { href: "/progress", label: "进展", icon: BarChart3 },
-  { href: "/pr", label: "PR", icon: Trophy },
   { href: "/settings", label: "设置", icon: Settings }
-];
+] as const;
 
 export function BottomNav() {
   const pathname = usePathname();
   const router = useRouter();
 
   const prefetchTabs = useCallback(() => {
-    for (const item of navItems) {
+    for (const item of bottomNavItems) {
       router.prefetch(item.href);
     }
   }, [router]);
@@ -45,7 +45,7 @@ export function BottomNav() {
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-[0_-6px_18px_rgba(23,33,27,0.08)]">
       <div className="mx-auto grid max-w-3xl grid-cols-5 gap-1 text-xs text-muted">
-        {navItems.map((item) => {
+        {bottomNavItems.map((item) => {
           const Icon = item.icon;
           const active = isNavigationItemActive(pathname, item.href);
 
