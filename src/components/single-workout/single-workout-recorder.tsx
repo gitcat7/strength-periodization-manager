@@ -109,7 +109,7 @@ export function SingleWorkoutRecorder() {
     if (error) { setMessage("保存失败，请检查网络或字段后重试。输入内容已保留。"); return; }
     if (status === "completed") {
       const workoutId = typeof data === "string" ? data : null;
-      if (!workoutId || !summary) { setMessage("训练已保存，但暂时无法定位该次记录。请前往全部历史查看。 "); return; }
+      if (!workoutId || !summary) { setMessage("训练已保存，但暂时无法定位该次记录。请前往全部历史查看。"); return; }
       clearTrainingDataCaches();
       setDraftWorkoutId(null);
       setSelected([]);

@@ -11,9 +11,11 @@ vi.mock("@/lib/supabase/browser", () => ({
     rpc: async () => ({ data: null, error: null })
   }))
 }));
+vi.mock("@/lib/client-cache", () => ({ clearTrainingDataCaches: vi.fn() }));
 
 import { SingleWorkoutRecorder } from "./single-workout-recorder";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
+import { clearTrainingDataCaches } from "@/lib/client-cache";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -74,5 +76,6 @@ describe("SingleWorkoutRecorder", () => {
     expect(container.querySelector('a[href="/history?workout=workout-completed"]')).toBeTruthy();
     expect(container.querySelector('a[href="/history"]')).toBeTruthy();
     expect(container.querySelector('a[href="/"]')).toBeTruthy();
+    expect(clearTrainingDataCaches).toHaveBeenCalledOnce();
   });
 });
