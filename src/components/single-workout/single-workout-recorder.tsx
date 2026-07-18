@@ -8,6 +8,7 @@ import { filterAddableExternalExercises } from "@/domain/exercise-selection";
 import { reviewedExerciseSections, searchReviewedExercises, type ExerciseLoadType, type ReviewedExercise, type ReviewedExerciseSection } from "@/domain/reviewed-exercise-library";
 import { buildStandaloneWorkoutSavePayload, type ManualExerciseReference, type StandaloneSetDraft } from "@/domain/single-workout";
 import { buildCompletionSummary, validateRecordedSet, type RecordedSetErrors } from "@/domain/workout-recording";
+import { clearTrainingDataCaches } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type Source =
@@ -16,6 +17,7 @@ type Source =
   | { kind: "manual"; manual: ManualExerciseReference };
 type SelectedExercise = Source & { id: string; sets: StandaloneSetDraft[] };
 type Summary = ReturnType<typeof buildCompletionSummary>;
+type CompletedWorkout = { id: string; summary: Summary };
 
 const createSet = (): StandaloneSetDraft => ({ completed: false, reps: "", rpe: "", weight: "" });
 const defaultSets = () => [createSet(), createSet(), createSet()];
@@ -31,6 +33,7 @@ export function SingleWorkoutRecorder() {
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState<Record<string, RecordedSetErrors>>({});
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [completedWorkout, setCompletedWorkout] = useState<CompletedWorkout | null>(null);
   const [manualName, setManualName] = useState("");
   const [manualEquipment, setManualEquipment] = useState("");
   const [manualMuscles, setManualMuscles] = useState("");
@@ -104,7 +107,16 @@ export function SingleWorkoutRecorder() {
     const { data, error } = await createBrowserSupabaseClient().rpc("save_standalone_workout", { p_payload: { ...buildStandaloneWorkoutSavePayload(today, payloadItems, draftWorkoutId ?? undefined), status } });
     setSaving(null);
     if (error) { setMessage("保存失败，请检查网络或字段后重试。输入内容已保留。"); return; }
-    if (status === "completed") { setDraftWorkoutId(null); setSelected([]); setSummary(null); setMessage("自由训练已完成，已计入历史与进展，周期计划未被修改。"); return; }
+    if (status === "completed") {
+      const workoutId = typeof data === "string" ? data : null;
+      if (!workoutId || !summary) { setMessage("训练已保存，但暂时无法定位该次记录。请前往全部历史查看。 "); return; }
+      clearTrainingDataCaches();
+      setDraftWorkoutId(null);
+      setSelected([]);
+      setSummary(null);
+      setCompletedWorkout({ id: workoutId, summary });
+      return;
+    }
     setDraftWorkoutId(typeof data === "string" ? data : draftWorkoutId); setMessage("草稿已保存，可随时继续编辑。");
   }
   function addManual() {
@@ -115,6 +127,29 @@ export function SingleWorkoutRecorder() {
   }
 
   const noResult = Boolean(query.trim()) && !reviewed.length && !supplemental.length;
+  if (completedWorkout) {
+    const completedSummary = completedWorkout.summary;
+    return <main className="mx-auto max-w-3xl px-4 py-5 pb-[calc(6rem+env(safe-area-inset-bottom))]">
+      <Link href="/" className="inline-flex items-center gap-1 text-sm text-muted"><ArrowLeft size={16} />返回首页</Link>
+      <section className="mt-5 border border-line bg-white p-4">
+        <p className="page-kicker">自由训练 · 已完成</p>
+        <h1 className="mt-1 text-2xl font-bold">自由训练已完成</h1>
+        <p className="mt-2 text-sm text-muted">完成日期：{today}</p>
+        <dl className="mt-5 grid grid-cols-2 gap-3 border-y border-line py-4 text-sm">
+          <div><dt className="text-muted">训练类型</dt><dd className="mt-1 font-semibold">自由训练</dd></div>
+          <div><dt className="text-muted">完成组数</dt><dd className="mt-1 font-semibold">{completedSummary.completedSetCount} 组</dd></div>
+          <div><dt className="text-muted">总吨位</dt><dd className="mt-1 font-semibold">{completedSummary.totalTonnage === null ? "不适用" : `${completedSummary.totalTonnage} kg`}</dd></div>
+          <div><dt className="text-muted">最高 e1RM</dt><dd className="mt-1 font-semibold">{completedSummary.bestE1rm === null ? "不适用" : `${completedSummary.bestE1rm} kg`}</dd></div>
+        </dl>
+        <p className="mt-4 text-sm text-muted">已保存到历史与进展，不会自动调整周期计划。</p>
+        <div className="mt-5 grid gap-2 sm:grid-cols-3">
+          <Link className="pressable inline-flex min-h-11 items-center justify-center rounded-md bg-action px-3 py-2 text-sm font-semibold text-white" href={`/history?workout=${completedWorkout.id}`}>查看本次记录</Link>
+          <Link className="pressable inline-flex min-h-11 items-center justify-center rounded-md border border-action px-3 py-2 text-sm font-semibold text-action" href="/history">查看全部历史</Link>
+          <Link className="pressable inline-flex min-h-11 items-center justify-center rounded-md border border-line px-3 py-2 text-sm font-semibold text-ink" href="/">返回首页</Link>
+        </div>
+      </section>
+    </main>;
+  }
   return <main className="mx-auto max-w-3xl px-4 py-5 pb-[calc(6rem+env(safe-area-inset-bottom))]">
     <Link href="/" className="inline-flex items-center gap-1 text-sm text-muted"><ArrowLeft size={16} />返回首页</Link>
     <header className="mt-4 flex items-start justify-between gap-3"><div><p className="page-kicker">自由训练 · {today}</p><h1 className="text-2xl font-bold">记录今日训练</h1><p className="mt-1 text-sm text-muted">本次记录会保存到历史与进展，不会自动调整你的周期计划。</p></div><button disabled={saving !== null} onClick={requestComplete} className="pressable shrink-0 rounded-md bg-action px-3 py-2 text-sm font-semibold text-white disabled:opacity-60">完成训练</button></header>
