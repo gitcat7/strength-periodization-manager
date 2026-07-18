@@ -143,3 +143,7 @@ where w.day_type = 'rest';
 2. 在 Vercel Production 与 Preview 设置可选环境变量 `WGER_API_BASE_URL=https://wger.de/api/v2/`；不需要 wger token。未设置时使用同一官方默认地址。
 3. 部署代码后，登录并在“记录今日训练”中搜索、添加一个 wger 动作，保存草稿、刷新并完成；确认历史与 CSV 显示名称和 `wger` provider/ID。
 4. 临时阻断上游时，确认动作搜索可重试，且已选动作和训练组仍保留；再确认本地推/拉/蹲计划、替代和 PR 不依赖 wger。
+
+# 本地 QA 浏览器登录（不属于发布配置）
+
+仅为本机内置浏览器验收时，可在未提交的 `.env.local` 中设置 `DEV_BROWSER_QA_EMAIL` 与 `DEV_BROWSER_QA_PASSWORD`，用 `pnpm dev` 启动后再访问 `/qa-login?next=/history`。该命令只绑定 `127.0.0.1`，不可改为 `--hostname 0.0.0.0`。两项变量绝不填入 Vercel、Supabase Dashboard 或仓库；该入口仅 localhost/127.0.0.1 的 development 服务有效，生产与 Preview 会返回 404。QA 账号保持普通用户权限，仍由 RLS 隔离数据。

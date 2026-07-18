@@ -60,6 +60,17 @@ pnpm release:check
 
 `release:check` 会执行类型检查、生产构建、临时启动生产服务并跑冒烟测试。
 
+## 内置浏览器本地 QA 登录（仅开发）
+
+如需让 Codex 内置浏览器验收真实的登录态，可在**未提交**的 `.env.local` 中配置专用测试账号：
+
+```text
+DEV_BROWSER_QA_EMAIL=
+DEV_BROWSER_QA_PASSWORD=
+```
+
+使用 `pnpm dev` 启动本地开发服务器并访问 `/qa-login?next=/history`。该命令会把服务器绑定到 `127.0.0.1`，避免 QA 会话暴露给局域网；不要改用 `--hostname 0.0.0.0`。此入口只在 `localhost` 或 `127.0.0.1` 的 development 服务生效；生产、Preview 与 Vercel 一律不可用。QA 账号必须是普通 Supabase 用户，所有请求仍遵循 RLS；不要填写真实用户或管理员账号。
+
 ## MVP 不做什么
 
 - 不做复杂社交社区。
