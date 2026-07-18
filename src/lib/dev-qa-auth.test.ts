@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isLocalQaSessionEnabled } from "./dev-qa-auth";
+import { isLocalDevelopmentHost, isLocalQaSessionEnabled } from "./dev-qa-auth";
 
 const completeConfig = {
   nodeEnv: "development",
@@ -25,5 +25,14 @@ describe("isLocalQaSessionEnabled", () => {
     expect(isLocalQaSessionEnabled({ ...completeConfig, hostname: "127.0.0.1" })).toBe(true);
     expect(isLocalQaSessionEnabled({ ...completeConfig, qaEmail: "" })).toBe(false);
     expect(isLocalQaSessionEnabled({ ...completeConfig, qaPassword: "" })).toBe(false);
+  });
+});
+
+describe("isLocalDevelopmentHost", () => {
+  it("allows only development requests made to localhost", () => {
+    expect(isLocalDevelopmentHost({ nodeEnv: "development", hostname: "localhost" })).toBe(true);
+    expect(isLocalDevelopmentHost({ nodeEnv: "development", hostname: "127.0.0.1" })).toBe(true);
+    expect(isLocalDevelopmentHost({ nodeEnv: "production", hostname: "localhost" })).toBe(false);
+    expect(isLocalDevelopmentHost({ nodeEnv: "development", hostname: "preview.vercel.app" })).toBe(false);
   });
 });

@@ -7,10 +7,13 @@ export type LocalQaSessionConfig = {
   supabaseUrl: string | undefined;
 };
 
+export function isLocalDevelopmentHost({ hostname, nodeEnv }: Pick<LocalQaSessionConfig, "hostname" | "nodeEnv">) {
+  return nodeEnv === "development" && (hostname === "localhost" || hostname === "127.0.0.1");
+}
+
 export function isLocalQaSessionEnabled(config: LocalQaSessionConfig) {
   return (
-    config.nodeEnv === "development" &&
-    (config.hostname === "localhost" || config.hostname === "127.0.0.1") &&
+    isLocalDevelopmentHost(config) &&
     Boolean(config.qaEmail && config.qaPassword && config.supabaseUrl && config.supabaseAnonKey)
   );
 }
