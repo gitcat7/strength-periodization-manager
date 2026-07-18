@@ -19,4 +19,11 @@ describe("home dashboard next workout source contract", () => {
     expect(source).toContain("创建周期计划");
     expect(source).not.toContain("训练画像");
   });
+
+  test("shows a recent completed training link only from completed training details", async () => {
+    const source = await readFile(sourcePath, "utf8");
+    expect(source).toContain("selectRecentTraining");
+    expect(source).toContain("最近一次训练");
+    expect(source).toContain('href={`/history?workout=${recentTraining.id}`}');
+  });
 });

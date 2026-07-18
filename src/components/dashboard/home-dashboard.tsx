@@ -19,6 +19,7 @@ import { getNextWorkoutState } from "@/domain/next-workout";
 import { selectNextProgramWorkout } from "@/domain/next-program-workout";
 import { formatPrescription, getWorkoutMeta } from "@/domain/training-format";
 import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
+import { selectRecentTraining } from "@/domain/recent-training";
 import { readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
@@ -141,6 +142,11 @@ export function HomeDashboard() {
       workouts: trainingWorkouts.length
     };
   }, [completedExercises, completedWorkouts, prGoals, setLogs]);
+
+  const recentTraining = useMemo(
+    () => selectRecentTraining(completedWorkouts, completedExercises, setLogs),
+    [completedExercises, completedWorkouts, setLogs]
+  );
 
   async function loadDashboard() {
     if (!readClientCache<HomeDashboardCache>(homeDashboardCacheKey)) {
@@ -426,6 +432,20 @@ export function HomeDashboard() {
           <Metric icon={<Activity size={16} />} label="训练量" value={`${Math.round(summary.volume).toLocaleString()} kg`} />
           <Metric icon={<Trophy size={16} />} label="PR 目标" value={`${prGoals.length} 个`} />
         </section>
+
+        {recentTraining ? (
+          <Link className="block rounded-lg border border-line bg-white p-4 transition hover:border-action/50 focus:outline-none focus:ring-2 focus:ring-action/40" href={`/history?workout=${recentTraining.id}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="page-kicker">最近一次训练</p>
+                <h2 className="mt-1 font-semibold">{recentTraining.trainingType}</h2>
+                <p className="mt-1 text-sm text-muted">{recentTraining.scheduledDate}</p>
+              </div>
+              <ArrowRight className="mt-1 shrink-0 text-action" size={18} />
+            </div>
+            <p className="mt-3 text-sm text-muted">{recentTraining.completedSets} 组 · {Math.round(recentTraining.volume).toLocaleString()} kg</p>
+          </Link>
+        ) : null}
 
         <section className={`action-surface p-4 ${nextWorkoutMeta?.intent === "强度" ? "tone-intensity" : ""}`}>
           <div className="mb-4 flex items-center justify-between gap-3">
