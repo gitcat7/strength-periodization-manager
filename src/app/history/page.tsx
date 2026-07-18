@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { ChevronLeft, History } from "lucide-react";
 import { TrainingHistory } from "@/components/history/training-history";
 
@@ -21,7 +22,9 @@ export default function HistoryPage() {
           </div>
         </div>
 
-        <TrainingHistory />
+        <Suspense fallback={<p className="text-sm text-muted">正在加载训练历史</p>}>
+          <TrainingHistory />
+        </Suspense>
       </section>
     </main>
   );

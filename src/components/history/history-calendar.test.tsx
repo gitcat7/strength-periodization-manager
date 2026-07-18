@@ -27,4 +27,12 @@ describe("history calendar month boundaries", () => {
     expect(component).toContain("getHistoryWorkoutFocusId(historySearch, workouts)");
     expect(component).toContain('href={`/history?workout=${workout.id}`}');
   });
+
+  it("preserves the last loaded month while a new month is loading or retried", async () => {
+    const component = await readFile(componentPath, "utf8");
+
+    expect(component).toContain("const [loadedMonth, setLoadedMonth]");
+    expect(component).toContain("setLoadedMonth(visibleMonth)");
+    expect(component).toContain("重新加载本月");
+  });
 });
