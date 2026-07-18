@@ -80,3 +80,12 @@
 - [ ] **Step 2: Run an authenticated browser smoke** for completion, deep link, and home refresh when a logged-in browser session is available; otherwise record the unavailable prerequisite without fabricating evidence.
 - [ ] **Step 3: Append exact verification outcomes and remaining risks** to this plan.
 - [ ] **Step 4: Commit** verification evidence.
+
+## Implementation evidence
+
+- 2026-07-18: Completion success state implemented in `361a89b`. The recorder preserves the authoritative RPC workout ID, clears training caches after a successful completion, and replaces the editable recorder with a read-only result view. A separate completion domain module was deliberately not added because the completion object has one consumer and extracting it would duplicate the recorder's existing summary type.
+- 2026-07-18: RLS-safe history focus implemented in `36bbd60`. `workout` is matched only against completed rows already returned for the current session; it never drives a direct database lookup.
+- 2026-07-18: Recent training selector and home card implemented in `6c95154`. It derives from existing completed-workout details and returns `null` with no completed training, so the UI never displays placeholder history.
+- Automated verification: `pnpm test` passed with 48 files / 184 tests passing and 1 existing skipped test; `pnpm lint`, `pnpm typecheck`, `pnpm build`, and `pnpm release:check` passed. The release check also passed every public route and `/api/health` locally.
+- Authenticated browser smoke: not run. This session exposes no browser-control tool or authenticated browser session, so completion, deep-link scrolling, and cache refresh need a short manual signed-in smoke after merge/deploy.
+- Database migration: none. This feature reuses the existing `save_standalone_workout` result, existing RLS queries, and existing training-cache invalidation.
