@@ -1,3 +1,4 @@
+import { DB_TABLE } from "../../../../lib/supabase/table-names";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authenticateAgentRequest } from "@/lib/agent-auth";
@@ -79,7 +80,7 @@ async function loadToday(userId: string, requestedDate?: string) {
   const supabase = createAdminSupabaseClient();
   const date = requestedDate ?? formatDate(new Date());
   const { data: program, error: programError } = await supabase
-    .from("programs")
+    .from(DB_TABLE.programs)
     .select("id,name,start_date,end_date")
     .eq("user_id", userId)
     .eq("status", "active")
@@ -91,7 +92,7 @@ async function loadToday(userId: string, requestedDate?: string) {
   if (!program) return { message: "当前没有进行中的训练计划。", program: null, workout: null };
 
   const { data: workout, error: workoutError } = await supabase
-    .from("workouts")
+    .from(DB_TABLE.workouts)
     .select("id,scheduled_date,sequence_index,name,status,completed_at")
     .eq("user_id", userId)
     .eq("program_id", program.id)
@@ -114,7 +115,7 @@ async function loadToday(userId: string, requestedDate?: string) {
 async function loadPlan(userId: string) {
   const supabase = createAdminSupabaseClient();
   const { data: program, error: programError } = await supabase
-    .from("programs")
+    .from(DB_TABLE.programs)
     .select("id,name,template_type,status,start_date,end_date")
     .eq("user_id", userId)
     .eq("status", "active")
@@ -126,8 +127,8 @@ async function loadPlan(userId: string) {
   if (!program) return { message: "当前没有进行中的训练计划。", program: null, workouts: [] };
 
   const { data: workouts, error: workoutsError } = await loadWorkoutsWithDayTypeFallback(
-    () => supabase.from("workouts").select("id,scheduled_date,sequence_index,schedule_index,day_type,name,status,completed_at").eq("user_id", userId).eq("program_id", program.id).order("schedule_index", { ascending: true }),
-    () => supabase.from("workouts").select("id,scheduled_date,sequence_index,name,status,completed_at").eq("user_id", userId).eq("program_id", program.id).order("sequence_index", { ascending: true })
+    () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,schedule_index,day_type,name,status,completed_at").eq("user_id", userId).eq("program_id", program.id).order("schedule_index", { ascending: true }),
+    () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,name,status,completed_at").eq("user_id", userId).eq("program_id", program.id).order("sequence_index", { ascending: true })
   );
 
   if (workoutsError) throw new Error(workoutsError.message);
@@ -141,8 +142,8 @@ async function loadPlan(userId: string) {
 async function loadHistory(userId: string, limit: number) {
   const supabase = createAdminSupabaseClient();
   const { data: workouts, error } = await loadWorkoutsWithDayTypeFallback(
-    () => supabase.from("workouts").select("id,scheduled_date,name,status,completed_at,day_type").eq("user_id", userId).eq("status", "completed").eq("day_type", "training").order("scheduled_date", { ascending: false }).limit(limit),
-    () => supabase.from("workouts").select("id,scheduled_date,name,status,completed_at").eq("user_id", userId).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(limit)
+    () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,status,completed_at,day_type").eq("user_id", userId).eq("status", "completed").eq("day_type", "training").order("scheduled_date", { ascending: false }).limit(limit),
+    () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,status,completed_at").eq("user_id", userId).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(limit)
   );
 
   if (error) throw new Error(error.message);
@@ -185,7 +186,7 @@ async function loadProgress(userId: string) {
 async function loadPrGoals(userId: string) {
   const supabase = createAdminSupabaseClient();
   const { data, error } = await supabase
-    .from("pr_goals")
+    .from(DB_TABLE.prGoals)
     .select("id,current_estimated_1rm,target_weight,target_date,status,created_at,exercises(name,slug)")
     .eq("user_id", userId)
     .order("target_date", { ascending: true });
@@ -204,7 +205,7 @@ async function recordSet(userId: string, request: AgentRequest) {
 
   const supabase = createAdminSupabaseClient();
   const { data: exercise, error: exerciseError } = await supabase
-    .from("workout_exercises")
+    .from(DB_TABLE.workoutExercises)
     .select("id,workout_id,target_sets,target_reps,target_weight")
     .eq("id", request.workout_exercise_id)
     .maybeSingle();
@@ -215,7 +216,7 @@ async function recordSet(userId: string, request: AgentRequest) {
   if (request.set_index > exercise.target_sets) throw new Error("组序号超过该动作的计划组数。");
 
   const { data, error } = await supabase
-    .from("set_logs")
+    .from(DB_TABLE.setLogs)
     .upsert(
       {
         actual_reps: request.actual_reps,
@@ -242,8 +243,8 @@ async function completeWorkout(userId: string, workoutId?: string) {
   await assertWorkoutOwnership(userId, workoutId);
 
   const supabase = createAdminSupabaseClient();
-  const primary = () => supabase.from("workouts").update({ completed_at: new Date().toISOString(), status: "completed", updated_at: new Date().toISOString() }).eq("id", workoutId).eq("user_id", userId).eq("day_type", "training").select("id,name,scheduled_date,status,completed_at,day_type").single();
-  const legacy = () => supabase.from("workouts").update({ completed_at: new Date().toISOString(), status: "completed", updated_at: new Date().toISOString() }).eq("id", workoutId).eq("user_id", userId).select("id,name,scheduled_date,status,completed_at").single();
+  const primary = () => supabase.from(DB_TABLE.workouts).update({ completed_at: new Date().toISOString(), status: "completed", updated_at: new Date().toISOString() }).eq("id", workoutId).eq("user_id", userId).eq("day_type", "training").select("id,name,scheduled_date,status,completed_at,day_type").single();
+  const legacy = () => supabase.from(DB_TABLE.workouts).update({ completed_at: new Date().toISOString(), status: "completed", updated_at: new Date().toISOString() }).eq("id", workoutId).eq("user_id", userId).select("id,name,scheduled_date,status,completed_at").single();
   const { data, error } = await loadWorkoutsWithDayTypeFallback(primary, legacy);
 
   if (error) throw new Error(error.message);
@@ -257,7 +258,7 @@ async function loadWorkoutDetail(
   await assertWorkoutOwnership(userId, workout.id);
   const supabase = createAdminSupabaseClient();
   const { data: exercises, error: exerciseError } = await supabase
-    .from("workout_exercises")
+    .from(DB_TABLE.workoutExercises)
     .select("id,exercise_id,exercise_provider,external_exercise_id,exercise_name_snapshot,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
     .eq("workout_id", workout.id)
     .order("order_index", { ascending: true });
@@ -266,7 +267,7 @@ async function loadWorkoutDetail(
   const exerciseIds = (exercises ?? []).map((exercise) => exercise.id);
   const { data: setLogs, error: logsError } = exerciseIds.length
     ? await supabase
-        .from("set_logs")
+        .from(DB_TABLE.setLogs)
         .select("id,workout_exercise_id,set_index,target_weight,target_reps,actual_weight,actual_reps,rpe,completed")
         .in("workout_exercise_id", exerciseIds)
         .order("set_index", { ascending: true })
@@ -289,7 +290,7 @@ async function loadWorkoutDetail(
 async function assertWorkoutOwnership(userId: string, workoutId: string) {
   const supabase = createAdminSupabaseClient();
   const { data, error } = await supabase
-    .from("workouts")
+    .from(DB_TABLE.workouts)
     .select("id")
     .eq("id", workoutId)
     .eq("user_id", userId)

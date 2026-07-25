@@ -1,5 +1,7 @@
 "use client";
 
+import { DB_TABLE } from "../../lib/supabase/table-names";
+
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Activity, BarChart3, CalendarDays, Loader2, TrendingUp } from "lucide-react";
@@ -97,8 +99,8 @@ export function ProgressDashboard() {
 
         const { data: workoutData, error: workoutError } = await withTimeout(
           loadWorkoutsWithDayTypeFallback(
-            () => supabase.from("workouts").select("id,scheduled_date,name,day_type").eq("user_id", user.id).eq("status", "completed").eq("day_type", "training").order("scheduled_date", { ascending: true }).limit(60),
-            () => supabase.from("workouts").select("id,scheduled_date,name").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: true }).limit(60)
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,day_type").eq("user_id", user.id).eq("status", "completed").eq("day_type", "training").order("scheduled_date", { ascending: true }).limit(60),
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: true }).limit(60)
           ),
           "训练数据读取超时，请刷新页面后重试。"
         );
@@ -127,7 +129,7 @@ export function ProgressDashboard() {
 
         const { data: exerciseData, error: exerciseError } = await withTimeout(
           supabase
-            .from("workout_exercises")
+            .from(DB_TABLE.workoutExercises)
             .select("id,workout_id,target_sets,exercise_name_snapshot,exercise_provider,external_exercise_id,exercises(name,slug,is_main_lift)")
             .in("workout_id", workoutIds),
           "动作数据读取超时，请刷新页面后重试。"
@@ -156,7 +158,7 @@ export function ProgressDashboard() {
 
         const { data: logData, error: logError } = await withTimeout(
           supabase
-            .from("set_logs")
+            .from(DB_TABLE.setLogs)
             .select("id,workout_exercise_id,actual_weight,actual_reps,completed")
             .in("workout_exercise_id", workoutExerciseIds),
           "组记录读取超时，请刷新页面后重试。"

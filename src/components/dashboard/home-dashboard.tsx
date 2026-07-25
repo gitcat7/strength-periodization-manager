@@ -1,5 +1,7 @@
 "use client";
 
+import { DB_TABLE } from "../../lib/supabase/table-names";
+
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -171,7 +173,7 @@ export function HomeDashboard() {
 
       const { data: activeProgram, error: activeProgramError } = await withTimeout(
         supabase
-          .from("programs")
+          .from(DB_TABLE.programs)
           .select("id")
           .eq("user_id", user.id)
           .eq("status", "active")
@@ -190,16 +192,16 @@ export function HomeDashboard() {
         withTimeout(
           activeProgram
             ? loadWorkoutsWithDayTypeFallback(
-                () => supabase.from("workouts").select("id,program_id,scheduled_date,sequence_index,name,status,day_type").eq("program_id", activeProgram.id).eq("day_type", "training").in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle(),
-                () => supabase.from("workouts").select("id,program_id,scheduled_date,sequence_index,name,status").eq("program_id", activeProgram.id).in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle()
+                () => supabase.from(DB_TABLE.workouts).select("id,program_id,scheduled_date,sequence_index,name,status,day_type").eq("program_id", activeProgram.id).eq("day_type", "training").in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle(),
+                () => supabase.from(DB_TABLE.workouts).select("id,program_id,scheduled_date,sequence_index,name,status").eq("program_id", activeProgram.id).in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle()
               )
             : Promise.resolve({ data: null, error: null, usedLegacySchema: false }),
           "训练计划读取超时，请刷新页面后重试。"
         ),
         withTimeout(
           loadWorkoutsWithDayTypeFallback(
-            () => supabase.from("workouts").select("id,program_id,scheduled_date,name,status,day_type").eq("user_id", user.id).eq("status", "completed").eq("day_type", "training").order("scheduled_date", { ascending: false }).limit(12),
-            () => supabase.from("workouts").select("id,program_id,scheduled_date,name,status").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12)
+            () => supabase.from(DB_TABLE.workouts).select("id,program_id,scheduled_date,name,status,day_type").eq("user_id", user.id).eq("status", "completed").eq("day_type", "training").order("scheduled_date", { ascending: false }).limit(12),
+            () => supabase.from(DB_TABLE.workouts).select("id,program_id,scheduled_date,name,status").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12)
           ),
           "训练历史读取超时，请刷新页面后重试。"
         )
@@ -260,7 +262,7 @@ export function HomeDashboard() {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await withTimeout(
       supabase
-        .from("workout_exercises")
+        .from(DB_TABLE.workoutExercises)
         .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
         .eq("workout_id", workoutId)
         .order("order_index", { ascending: true }),
@@ -285,7 +287,7 @@ export function HomeDashboard() {
     const workoutIds = workouts.map((workout) => workout.id);
     const { data: exerciseData, error: exerciseError } = await withTimeout(
       supabase
-        .from("workout_exercises")
+        .from(DB_TABLE.workoutExercises)
         .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
         .in("workout_id", workoutIds),
       "历史动作读取超时，请刷新页面后重试。"
@@ -304,7 +306,7 @@ export function HomeDashboard() {
 
     const { data: logData, error: logError } = await withTimeout(
       supabase
-        .from("set_logs")
+        .from(DB_TABLE.setLogs)
         .select("workout_exercise_id,actual_weight,actual_reps,completed")
         .in("workout_exercise_id", exerciseIds),
       "历史组记录读取超时，请刷新页面后重试。"
@@ -321,7 +323,7 @@ export function HomeDashboard() {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await withTimeout(
       supabase
-        .from("recommendations")
+        .from(DB_TABLE.recommendations)
         .select("id,recommendation_type,previous_weight,suggested_weight,reason,exercises(name)")
         .eq("user_id", userId)
         .eq("status", "pending")
@@ -341,7 +343,7 @@ export function HomeDashboard() {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await withTimeout(
       supabase
-        .from("pr_goals")
+        .from(DB_TABLE.prGoals)
         .select("id,target_weight,target_date,exercises(name)")
         .eq("user_id", userId)
         .eq("status", "active")

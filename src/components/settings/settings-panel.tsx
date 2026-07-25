@@ -1,5 +1,7 @@
 "use client";
 
+import { DB_TABLE } from "../../lib/supabase/table-names";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { BookOpen, Copy, Download, KeyRound, Loader2, LogOut, RefreshCcw, ShieldAlert, Trash2, UserRound, Wrench } from "lucide-react";
@@ -130,8 +132,8 @@ export function SettingsPanel() {
 
       const { data: workoutData, error: workoutError } = await withTimeout(
         loadWorkoutsWithDayTypeFallback(
-          () => supabase.from("workouts").select("id,scheduled_date,name,status,day_type").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: true }),
-          () => supabase.from("workouts").select("id,scheduled_date,name,status").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: true })
+          () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,status,day_type").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: true }),
+          () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,status").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: true })
         ),
         "训练数据读取超时，请稍后重试。"
       );
@@ -214,7 +216,7 @@ export function SettingsPanel() {
   async function loadAgentTokens() {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await supabase
-      .from("agent_access_tokens")
+      .from(DB_TABLE.agentAccessTokens)
       .select("id,name,created_at,last_used_at,expires_at,revoked_at")
       .order("created_at", { ascending: false });
 
@@ -244,7 +246,7 @@ export function SettingsPanel() {
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 180);
       const supabase = createBrowserSupabaseClient();
-      const { error } = await supabase.from("agent_access_tokens").insert({
+      const { error } = await supabase.from(DB_TABLE.agentAccessTokens).insert({
         expires_at: expiresAt.toISOString(),
         name: "训练 Agent",
         token_hash: tokenHash,
@@ -266,7 +268,7 @@ export function SettingsPanel() {
     setAgentMessage("");
     const supabase = createBrowserSupabaseClient();
     const { error } = await supabase
-      .from("agent_access_tokens")
+      .from(DB_TABLE.agentAccessTokens)
       .update({ revoked_at: new Date().toISOString() })
       .eq("id", tokenId)
       .eq("user_id", userId);
@@ -477,7 +479,7 @@ async function loadWorkoutExercises(workoutIds: string[]) {
   const supabase = createBrowserSupabaseClient();
   const { data, error } = await withTimeout(
     supabase
-      .from("workout_exercises")
+      .from(DB_TABLE.workoutExercises)
       .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercise_name_snapshot,exercise_provider,external_exercise_id,exercises(name,slug)")
       .in("workout_id", workoutIds)
       .order("order_index", { ascending: true }),
@@ -495,7 +497,7 @@ async function loadSetLogs(workoutExerciseIds: string[]) {
   const supabase = createBrowserSupabaseClient();
   const { data, error } = await withTimeout(
     supabase
-      .from("set_logs")
+      .from(DB_TABLE.setLogs)
       .select("id,workout_exercise_id,set_index,target_weight,target_reps,actual_weight,actual_reps,rpe,completed")
       .in("workout_exercise_id", workoutExerciseIds)
       .order("set_index", { ascending: true }),

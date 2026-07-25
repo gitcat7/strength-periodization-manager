@@ -1,3 +1,4 @@
+import { DB_TABLE } from "../../lib/supabase/table-names";
 import { canCompleteRestDay, type RestScheduleItem } from "./rest-day-state";
 
 type RestCompletionResult = {
@@ -22,14 +23,14 @@ export function getCurrentRestItem(item: RestScheduleItem | null | undefined, to
 }
 
 export async function completeRestDayCheckIn(input: {
-  from: (table: "workouts") => unknown;
+  from: (table: typeof DB_TABLE.workouts) => unknown;
   item: RestScheduleItem;
   today: string;
   userId: string;
 }): Promise<RestCompletionResult> {
   if (!getCurrentRestItem(input.item, input.today)) return { data: null, error: null };
 
-  const workouts = input.from("workouts") as WorkoutsQuery;
+  const workouts = input.from(DB_TABLE.workouts) as WorkoutsQuery;
 
   return await workouts
     .update({ completed_at: new Date().toISOString(), status: "completed" })

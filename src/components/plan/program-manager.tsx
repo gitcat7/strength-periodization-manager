@@ -1,5 +1,7 @@
 "use client";
 
+import { DB_TABLE } from "../../lib/supabase/table-names";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -220,7 +222,7 @@ export function ProgramManager() {
     const [recommendationsResult, programResult] = await Promise.all([
       fetchRecommendations(userData.user.id),
       supabase
-        .from("programs")
+        .from(DB_TABLE.programs)
         .select("id,name,template_type,schedule_mode,schedule_config,custom_template_name,status,start_date,end_date")
         .eq("user_id", userData.user.id)
         .eq("status", "active")
@@ -302,12 +304,12 @@ export function ProgramManager() {
     const supabase = createBrowserSupabaseClient();
     const [profileResult, mainLiftsResult] = await Promise.all([
       supabase
-        .from("athlete_profiles")
+        .from(DB_TABLE.athleteProfiles)
         .select("experience_level,goal,training_days_per_week,available_weekdays,session_duration_minutes,injury_notes")
         .eq("user_id", targetUserId)
         .maybeSingle(),
       supabase
-        .from("exercises")
+        .from(DB_TABLE.exercises)
         .select("id,slug,name,default_increment,is_main_lift")
         .eq("is_main_lift", true)
         .order("created_at", { ascending: true })
@@ -336,7 +338,7 @@ export function ProgramManager() {
 
     const profile = profileResult.data;
     const { data: liftRows, error: liftError } = await supabase
-      .from("lift_profiles")
+      .from(DB_TABLE.liftProfiles)
       .select("exercise_id,estimated_1rm")
       .eq("user_id", targetUserId)
       .in("exercise_id", loadedMainLifts.map((exercise) => exercise.id));
@@ -384,7 +386,7 @@ export function ProgramManager() {
 
     setPlanSetupErrors({});
     const supabase = createBrowserSupabaseClient();
-    const { error: profileError } = await supabase.from("athlete_profiles").upsert(
+    const { error: profileError } = await supabase.from(DB_TABLE.athleteProfiles).upsert(
       {
         user_id: userId,
         experience_level: parsed.value.experienceLevel,
@@ -420,7 +422,7 @@ export function ProgramManager() {
       };
     });
     const { error: liftError } = await supabase
-      .from("lift_profiles")
+      .from(DB_TABLE.liftProfiles)
       .upsert(liftPayload, { onConflict: "user_id,exercise_id" });
 
     if (liftError) {
@@ -455,7 +457,7 @@ export function ProgramManager() {
   > {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await supabase
-      .from("recommendations")
+      .from(DB_TABLE.recommendations)
       .select("id,exercise_id,workout_id,recommendation_type,previous_weight,suggested_weight,reason,status,exercises(name,slug),workouts(scheduled_date,sequence_index,name)")
       .eq("user_id", targetUserId)
       .eq("status", "pending")
@@ -475,8 +477,8 @@ export function ProgramManager() {
   > {
     const supabase = createBrowserSupabaseClient();
     const { data: workoutData, error: workoutError, usedLegacySchema } = await loadWorkoutsWithDayTypeFallback(
-      () => supabase.from("workouts").select("id,scheduled_date,sequence_index,schedule_index,day_type,name,status").eq("program_id", programId).order("schedule_index", { ascending: true }),
-      () => supabase.from("workouts").select("id,scheduled_date,sequence_index,name,status").eq("program_id", programId).order("sequence_index", { ascending: true })
+      () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,schedule_index,day_type,name,status").eq("program_id", programId).order("schedule_index", { ascending: true }),
+      () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,name,status").eq("program_id", programId).order("sequence_index", { ascending: true })
     );
 
     if (workoutError) {
@@ -501,7 +503,7 @@ export function ProgramManager() {
     }
 
     const { data: exerciseData, error: exerciseError } = await supabase
-      .from("workout_exercises")
+      .from(DB_TABLE.workoutExercises)
       .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
       .in("workout_id", workoutIds)
       .order("order_index", { ascending: true });
@@ -545,7 +547,7 @@ export function ProgramManager() {
 
     const supabase = createBrowserSupabaseClient();
     let futureWorkoutsQuery = supabase
-      .from("workouts")
+      .from(DB_TABLE.workouts)
       .select("id")
       .eq("program_id", program.id)
       .neq("status", "completed");
@@ -572,7 +574,7 @@ export function ProgramManager() {
     }
 
     const { error: updateExerciseError } = await supabase
-      .from("workout_exercises")
+      .from(DB_TABLE.workoutExercises)
       .update({
         target_weight: appliedWeight
       })
@@ -589,7 +591,7 @@ export function ProgramManager() {
     const recommendationStatus =
       Number(appliedWeight) === Number(recommendation.suggested_weight) ? "accepted" : "modified";
     const { error: updateRecommendationError } = await supabase
-      .from("recommendations")
+      .from(DB_TABLE.recommendations)
       .update({
         status: recommendationStatus,
         suggested_weight: appliedWeight,
@@ -629,7 +631,7 @@ export function ProgramManager() {
 
     const supabase = createBrowserSupabaseClient();
     const { error } = await supabase
-      .from("recommendations")
+      .from(DB_TABLE.recommendations)
       .update({
         status: "rejected",
         updated_at: new Date().toISOString()
@@ -694,7 +696,7 @@ export function ProgramManager() {
             : { mode: "flexible" };
 
       const { data: exercises, error: exercisesError } = await supabase
-        .from("exercises")
+        .from(DB_TABLE.exercises)
         .select("id,slug,name,default_increment");
 
       if (exercisesError || !exercises) {
@@ -704,7 +706,7 @@ export function ProgramManager() {
       }
 
       const { data: liftProfiles, error: liftError } = await supabase
-        .from("lift_profiles")
+        .from(DB_TABLE.liftProfiles)
         .select("exercise_id,estimated_1rm,training_max")
         .eq("user_id", userId);
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { DB_TABLE } from "../../lib/supabase/table-names";
+
 import { useEffect, useState } from "react";
 import { Loader2, Send } from "lucide-react";
 import { trackEvent } from "@/lib/analytics";
@@ -59,7 +61,7 @@ export function FeedbackForm() {
     setNotice("");
 
     const supabase = createBrowserSupabaseClient();
-    const { error } = await supabase.from("feedback_reports").insert({
+    const { error } = await supabase.from(DB_TABLE.feedbackReports).insert({
       category,
       email,
       message: message.trim(),

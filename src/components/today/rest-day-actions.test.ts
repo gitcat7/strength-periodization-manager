@@ -41,7 +41,7 @@ describe("completeRestDayCheckIn", () => {
   it("sends only status and completed_at through an owned, date-exact rest update", async () => {
     const { calls, query } = createUpdateQuery({ data: { id: "rest-today" }, error: null });
     const from = (table: string) => {
-      expect(table).toBe("workouts");
+        expect(table).toBe("plan_workouts");
       return query;
     };
 

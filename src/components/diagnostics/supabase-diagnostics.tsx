@@ -1,5 +1,7 @@
 "use client";
 
+import { DB_TABLE } from "../../lib/supabase/table-names";
+
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, CircleAlert, Loader2 } from "lucide-react";
@@ -71,7 +73,7 @@ export function SupabaseDiagnostics() {
           });
 
           const { data, error } = await supabase
-            .from("exercises")
+            .from(DB_TABLE.exercises)
             .select("slug,name")
             .limit(20);
 
@@ -95,19 +97,19 @@ export function SupabaseDiagnostics() {
           nextChecks.push(
             await checkReadableTable({
               label: "反馈表",
-              missingMessage: "feedback_reports 表不可读，请确认 20260704_feedback_reports.sql 已执行",
+              missingMessage: "运营反馈表不可读，请确认数据库迁移已执行",
               selectColumns: "id",
               supabase,
-              tableName: "feedback_reports"
+              tableName: DB_TABLE.feedbackReports
             })
           );
           nextChecks.push(
             await checkReadableTable({
               label: "行为埋点表",
-              missingMessage: "analytics_events 表不可读，请确认 20260704_analytics_events.sql 已执行",
+              missingMessage: "行为埋点表不可读，请确认数据库迁移已执行",
               selectColumns: "id,event_name",
               supabase,
-              tableName: "analytics_events"
+              tableName: DB_TABLE.analyticsEvents
             })
           );
         } else {
@@ -124,7 +126,7 @@ export function SupabaseDiagnostics() {
           nextChecks.push({
             label: "反馈表",
             state: "info",
-            message: "feedback_reports 表仅允许已登录用户读取，登录后再刷新本页"
+            message: "运营反馈表仅允许已登录用户读取，登录后再刷新本页"
           });
           nextChecks.push({
             label: "行为埋点表",
@@ -210,7 +212,7 @@ async function checkReadableTable({
   missingMessage: string;
   selectColumns: string;
   supabase: ReturnType<typeof createBrowserSupabaseClient>;
-  tableName: "analytics_events" | "feedback_reports";
+  tableName: typeof DB_TABLE.analyticsEvents | typeof DB_TABLE.feedbackReports;
 }): Promise<DiagnosticItem> {
   const { error } = await supabase.from(tableName).select(selectColumns).limit(1);
 
@@ -225,7 +227,7 @@ async function checkReadableTable({
   return {
     label,
     state: "pass",
-    message: `${tableName} 表已接入`
+    message: `${label}已接入`
   };
 }
 

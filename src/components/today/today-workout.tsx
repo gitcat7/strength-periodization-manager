@@ -1,5 +1,7 @@
 "use client";
 
+import { DB_TABLE } from "../../lib/supabase/table-names";
+
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -176,7 +178,7 @@ const restTimerOptions = [60, 90, 120, 180];
 async function loadCoreExercises(): Promise<CoreExerciseRow[]> {
   const supabase = createBrowserSupabaseClient();
   const { data, error } = await supabase
-    .from("exercises")
+    .from(DB_TABLE.exercises)
     .select("id,name,slug,training_direction,movement_pattern,substitution_enabled")
     .eq("substitution_enabled", true);
 
@@ -193,7 +195,7 @@ async function loadWorkoutIdsForExercises(workoutExerciseIds: string[]): Promise
 
   const supabase = createBrowserSupabaseClient();
   const { data, error } = await supabase
-    .from("workout_exercises")
+    .from(DB_TABLE.workoutExercises)
     .select("workout_id")
     .in("id", workoutExerciseIds);
 
@@ -351,7 +353,7 @@ export function TodayWorkout() {
 
         const { data: program, error: programError } = await withTimeout(
           supabase
-            .from("programs")
+            .from(DB_TABLE.programs)
             .select("id")
             .eq("user_id", user.id)
             .eq("status", "active")
@@ -386,7 +388,7 @@ export function TodayWorkout() {
         const today = formatDate(new Date());
         const restItems = withTimeout(
           loadWorkoutsWithDayTypeFallback(
-            () => supabase.from("workouts").select("id,scheduled_date,status,day_type").eq("program_id", program.id).eq("day_type", "rest").eq("scheduled_date", today).in("status", ["scheduled", "draft"]).limit(1).maybeSingle(),
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,status,day_type").eq("program_id", program.id).eq("day_type", "rest").eq("scheduled_date", today).in("status", ["scheduled", "draft"]).limit(1).maybeSingle(),
             () => Promise.resolve({ data: null, error: null })
           ),
           "今日恢复日读取超时，请刷新页面后重试。"
@@ -399,8 +401,8 @@ export function TodayWorkout() {
 
         const trainingItems = withTimeout(
           loadWorkoutsWithDayTypeFallback(
-            () => supabase.from("workouts").select("id,scheduled_date,sequence_index,name,status,day_type").eq("program_id", program.id).eq("day_type", "training").in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle(),
-            () => supabase.from("workouts").select("id,scheduled_date,sequence_index,name,status").eq("program_id", program.id).in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle()
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,name,status,day_type").eq("program_id", program.id).eq("day_type", "training").in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle(),
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,name,status").eq("program_id", program.id).in("status", ["scheduled", "draft"]).order("sequence_index", { ascending: true }).limit(1).maybeSingle()
           ),
           "下一节训练读取超时，请刷新页面后重试。"
         ).then(({ data, error }) => {
@@ -476,7 +478,7 @@ export function TodayWorkout() {
 
         const catalogExerciseResult = await withTimeout(
           supabase
-            .from("workout_exercises")
+            .from(DB_TABLE.workoutExercises)
             .select(workoutExerciseSelect)
             .eq("workout_id", workoutData.id)
             .order("order_index", { ascending: true }),
@@ -556,8 +558,8 @@ export function TodayWorkout() {
   async function loadLastCompletedWorkout(programId: string, scheduledDate: string) {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await loadWorkoutsWithDayTypeFallback(
-      () => supabase.from("workouts").select("scheduled_date,name,day_type").eq("program_id", programId).eq("status", "completed").eq("day_type", "training").lt("scheduled_date", scheduledDate).order("scheduled_date", { ascending: false }).limit(1).maybeSingle(),
-      () => supabase.from("workouts").select("scheduled_date,name").eq("program_id", programId).eq("status", "completed").lt("scheduled_date", scheduledDate).order("scheduled_date", { ascending: false }).limit(1).maybeSingle()
+      () => supabase.from(DB_TABLE.workouts).select("scheduled_date,name,day_type").eq("program_id", programId).eq("status", "completed").eq("day_type", "training").lt("scheduled_date", scheduledDate).order("scheduled_date", { ascending: false }).limit(1).maybeSingle(),
+      () => supabase.from(DB_TABLE.workouts).select("scheduled_date,name").eq("program_id", programId).eq("status", "completed").lt("scheduled_date", scheduledDate).order("scheduled_date", { ascending: false }).limit(1).maybeSingle()
     );
 
     if (error) {
@@ -580,7 +582,7 @@ export function TodayWorkout() {
     const supabase = createBrowserSupabaseClient();
     const exerciseIds = exerciseRows.map((exercise) => exercise.id);
     const { data: existingLogs, error: logsError } = await supabase
-      .from("set_logs")
+      .from(DB_TABLE.setLogs)
       .select("id,workout_exercise_id,set_index,target_weight,target_reps,actual_weight,actual_reps,rpe,completed")
       .in("workout_exercise_id", exerciseIds)
       .order("set_index", { ascending: true });
@@ -618,7 +620,7 @@ export function TodayWorkout() {
 
     if (missingPayload.length > 0) {
       const { error: insertError } = await supabase
-        .from("set_logs")
+        .from(DB_TABLE.setLogs)
         .upsert(missingPayload, { onConflict: "workout_exercise_id,set_index" });
       if (insertError) {
         setStatus("error");
@@ -628,7 +630,7 @@ export function TodayWorkout() {
     }
 
     const { data: refreshedLogs, error: refreshError } = await supabase
-      .from("set_logs")
+      .from(DB_TABLE.setLogs)
       .select("id,workout_exercise_id,set_index,target_weight,target_reps,actual_weight,actual_reps,rpe,completed")
       .in("workout_exercise_id", exerciseIds)
       .order("set_index", { ascending: true });
@@ -801,7 +803,7 @@ export function TodayWorkout() {
       }));
 
     const { error: upsertError } = await supabase
-      .from("set_logs")
+      .from(DB_TABLE.setLogs)
       .upsert(payload, { onConflict: "workout_exercise_id,set_index" });
 
     if (upsertError) {
@@ -814,7 +816,7 @@ export function TodayWorkout() {
       clearDraftLogs(workout.id);
       clearTrainingDataCaches();
       const { error: workoutError } = await supabase
-        .from("workouts")
+        .from(DB_TABLE.workouts)
         .update({
           status: "completed",
           completed_at: new Date().toISOString(),
@@ -843,7 +845,7 @@ export function TodayWorkout() {
         }));
 
       if (recommendationPayload.length > 0) {
-        const { error: recommendationError } = await supabase.from("recommendations").insert(recommendationPayload);
+        const { error: recommendationError } = await supabase.from(DB_TABLE.recommendations).insert(recommendationPayload);
         if (recommendationError) {
           setSaveStatus("error");
           setMessage(recommendationError.message);
