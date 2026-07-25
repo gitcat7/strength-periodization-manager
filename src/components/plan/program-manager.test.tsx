@@ -9,10 +9,10 @@ import { writeClientCache } from "@/lib/client-cache";
 const router = { replace: vi.fn() };
 
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
+let supabaseClient: ReturnType<typeof createSupabaseClient> = createSupabaseClient({ pendingAuth: true });
+
 vi.mock("@/lib/supabase/browser", () => ({
-  createBrowserSupabaseClient: () => ({
-    auth: { getUser: () => new Promise(() => {}) }
-  })
+  createBrowserSupabaseClient: () => supabaseClient
 }));
 
 import { ProgramManager } from "./program-manager";
@@ -29,6 +29,7 @@ afterEach(() => {
   container = null;
   window.localStorage.clear();
   window.sessionStorage.clear();
+  supabaseClient = createSupabaseClient({ pendingAuth: true });
 });
 
 describe("ProgramManager cache hydration", () => {
@@ -61,4 +62,90 @@ describe("ProgramManager cache hydration", () => {
     expect(container.textContent).toContain("正在读取当前训练计划");
     expect(container.textContent).not.toContain("另一账户的训练计划");
   });
+
+  it("keeps the plan form usable when saving setup fails to load", async () => {
+    supabaseClient = createSupabaseClient({ profileUpsertError: new TypeError("Load failed") });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    const view = container;
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const generateButton = Array.from(view.querySelectorAll("button")).find((button) => button.textContent?.includes("生成 4 周训练计划"));
+    expect(generateButton).toBeTruthy();
+
+    await act(async () => {
+      selectValue(view.querySelector("select[aria-required='true']")!, "beginner");
+      setInputValue(view.querySelector("input[aria-label='深蹲重量 kg']")!, "130");
+      setInputValue(view.querySelector("input[aria-label='卧推重量 kg']")!, "90");
+      setInputValue(view.querySelector("input[aria-label='硬拉重量 kg']")!, "150");
+      setInputValue(view.querySelector("input[aria-label='推举重量 kg']")!, "50");
+      generateButton?.click();
+      await Promise.resolve();
+    });
+
+    expect(view.textContent).toContain("网络连接失败，请检查网络后重试。已填写的计划参数仍会保留。");
+    expect(view.textContent).not.toContain("TypeError: Load failed");
+    expect(generateButton).not.toHaveProperty("disabled", true);
+  });
 });
+
+function createSupabaseClient({
+  pendingAuth = false,
+  profileUpsertError
+}: {
+  pendingAuth?: boolean;
+  profileUpsertError?: Error;
+}) {
+  const mainLifts = [
+    { default_increment: 2.5, id: "squat", is_main_lift: true, name: "深蹲", slug: "squat" },
+    { default_increment: 2.5, id: "bench", is_main_lift: true, name: "卧推", slug: "bench_press" },
+    { default_increment: 2.5, id: "deadlift", is_main_lift: true, name: "硬拉", slug: "deadlift" },
+    { default_increment: 2.5, id: "press", is_main_lift: true, name: "推举", slug: "overhead_press" }
+  ];
+  const createQuery = (result: unknown) => {
+    const promise = Promise.resolve(result);
+    const query = Object.assign(promise, {
+      eq: () => query,
+      in: () => query,
+      limit: () => query,
+      maybeSingle: () => query,
+      order: () => query,
+      select: () => query
+    });
+    return query;
+  };
+  const profileTable = Object.assign(createQuery({ data: null, error: null }), {
+    upsert: () => profileUpsertError ? Promise.reject(profileUpsertError) : Promise.resolve({ error: null })
+  });
+
+  return {
+    auth: { getUser: () => pendingAuth ? new Promise(() => {}) : Promise.resolve({ data: { user: { id: "user-1" } }, error: null }) },
+    from: (table: string) => {
+      if (table === "athlete_profiles") return profileTable;
+      if (table === "exercises") return createQuery({ data: mainLifts, error: null });
+      if (table === "recommendations") return createQuery({ data: [], error: null });
+      if (table === "programs") return createQuery({ data: null, error: null });
+      if (table === "lift_profiles") return Object.assign(createQuery({ data: [], error: null }), { upsert: () => Promise.resolve({ error: null }) });
+      return createQuery({ data: [], error: null });
+    }
+  };
+}
+
+function setInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  setter?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function selectValue(select: HTMLSelectElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
+  setter?.call(select, value);
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+}
