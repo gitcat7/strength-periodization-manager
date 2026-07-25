@@ -4,48 +4,30 @@ import { describe, expect, test } from "vitest";
 const migrationPath = new URL("../supabase/migrations/20260725120000_database_schema_organization.sql", import.meta.url);
 const schemaPath = new URL("../supabase/schema.sql", import.meta.url);
 
-const physicalTables = [
-  "cfg_exercises",
-  "usr_athlete_profiles",
-  "usr_lift_profiles",
-  "plan_programs",
-  "plan_workouts",
-  "plan_workout_exercises",
-  "log_set_logs",
-  "log_recommendations",
-  "log_pr_goals",
-  "ops_feedback_reports",
-  "ops_analytics_events",
-  "ops_agent_access_tokens"
-];
-
-const legacyNames = [
-  "exercises",
-  "athlete_profiles",
-  "lift_profiles",
-  "programs",
-  "workouts",
-  "workout_exercises",
-  "set_logs",
-  "recommendations",
-  "pr_goals",
-  "feedback_reports",
-  "analytics_events",
-  "agent_access_tokens"
-];
+const renamedTables = {
+  athlete_profiles: "usr_athlete_profiles",
+  exercises: "cfg_exercises",
+  lift_profiles: "usr_lift_profiles",
+  programs: "plan_programs",
+  workouts: "plan_workouts",
+  workout_exercises: "plan_workout_exercises",
+  set_logs: "log_set_logs",
+  recommendations: "log_recommendations",
+  pr_goals: "log_pr_goals",
+  feedback_reports: "ops_feedback_reports",
+  analytics_events: "ops_analytics_events",
+  agent_access_tokens: "ops_agent_access_tokens"
+};
 
 describe("database schema organization", () => {
   test("defines prefixed physical tables and read-only legacy views", async () => {
     const migration = await readFile(migrationPath, "utf8");
 
-    for (const table of physicalTables) {
-      expect(migration).toMatch(new RegExp(`rename to ${table}`, "i"));
+    for (const [legacyName, table] of Object.entries(renamedTables)) {
+      expect(migration).toMatch(new RegExp(`\\('${legacyName}', '${table}'\\)`, "i"));
       expect(migration).toMatch(new RegExp(`comment on table public\\.${table}`, "i"));
-    }
-
-    for (const legacyName of legacyNames) {
       expect(migration).toMatch(new RegExp(`create or replace view public\\.${legacyName}\\s+with \\(security_invoker = true\\)`, "i"));
-      expect(migration).toMatch(new RegExp(`revoke insert, update, delete on public\\.${legacyName}`, "i"));
+      expect(migration).toMatch(new RegExp(`revoke insert, update, delete on[\\s\\S]*public\\.${legacyName}`, "i"));
     }
   });
 
