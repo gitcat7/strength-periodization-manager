@@ -9,15 +9,15 @@ describe("initial database baseline", () => {
     const sql = await readFile(baselinePath, "utf8");
 
     for (const table of [
-      "usr_athlete_profiles",
-      "cfg_exercises",
-      "usr_lift_profiles",
-      "plan_programs",
-      "plan_workouts",
-      "plan_workout_exercises",
-      "log_set_logs",
-      "log_recommendations",
-      "log_pr_goals"
+      "athlete_profiles",
+      "exercises",
+      "lift_profiles",
+      "programs",
+      "workouts",
+      "workout_exercises",
+      "set_logs",
+      "recommendations",
+      "pr_goals"
     ]) {
       expect(sql).toMatch(new RegExp(`create table if not exists public\\.${table}`, "i"));
     }
