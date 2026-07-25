@@ -128,11 +128,11 @@ function createSupabaseClient({
   return {
     auth: { getUser: () => pendingAuth ? new Promise(() => {}) : Promise.resolve({ data: { user: { id: "user-1" } }, error: null }) },
     from: (table: string) => {
-      if (table === "athlete_profiles") return profileTable;
-      if (table === "exercises") return createQuery({ data: mainLifts, error: null });
-      if (table === "recommendations") return createQuery({ data: [], error: null });
-      if (table === "programs") return createQuery({ data: null, error: null });
-      if (table === "lift_profiles") return Object.assign(createQuery({ data: [], error: null }), { upsert: () => Promise.resolve({ error: null }) });
+      if (table === "usr_athlete_profiles") return profileTable;
+      if (table === "cfg_exercises") return createQuery({ data: mainLifts, error: null });
+      if (table === "log_recommendations") return createQuery({ data: [], error: null });
+      if (table === "plan_programs") return createQuery({ data: null, error: null });
+      if (table === "usr_lift_profiles") return Object.assign(createQuery({ data: [], error: null }), { upsert: () => Promise.resolve({ error: null }) });
       return createQuery({ data: [], error: null });
     }
   };

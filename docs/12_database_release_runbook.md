@@ -12,17 +12,18 @@
 
 核心表：
 
-- `athlete_profiles`
-- `lift_profiles`
-- `programs`
-- `workouts`
-- `workout_exercises`
-- `set_logs`
-- `recommendations`
-- `pr_goals`
-- `feedback_reports`
-- `analytics_events`
-- `agent_access_tokens`
+- `cfg_exercises`
+- `usr_athlete_profiles`
+- `usr_lift_profiles`
+- `plan_programs`
+- `plan_workouts`
+- `plan_workout_exercises`
+- `log_set_logs`
+- `log_recommendations`
+- `log_pr_goals`
+- `ops_feedback_reports`
+- `ops_analytics_events`
+- `ops_agent_access_tokens`
 
 备份记录：
 
@@ -49,8 +50,24 @@
 日常发布：
 
 1. 先读 SQL，确认是否含 destructive 操作。
-2. 先在 Supabase SQL Editor 手动执行。
-3. 执行后立即打开 `/diagnostics`。
+2. 对 `20260725120000_database_schema_organization.sql`，先完成备份并安排短维护窗口：表改名会获取对象锁，但不会复制或删除数据。
+3. 先在 Supabase SQL Editor 手动执行。
+4. 执行后立即打开 `/diagnostics`。
+
+表前缀迁移后，旧表名保留为仅供读取的兼容视图；新应用代码必须只访问带前缀的物理表。不要向旧名称写入，也不要在验证完成前删除这些兼容视图。
+
+结构与备注验收（不读取用户训练数据）：
+
+```sql
+select c.relname, c.relkind, obj_description(c.oid, 'pg_class') as description
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relname in ('cfg_exercises', 'plan_workouts', 'log_set_logs', 'ops_agent_access_tokens', 'exercises', 'workouts')
+order by c.relname;
+```
+
+预期：带前缀的对象 `relkind` 为 `r`（表）且有说明；旧名称的对象 `relkind` 为 `v`（兼容视图）。
 
 ## 3. 发布后验收
 
@@ -97,29 +114,29 @@ where w.day_type = 'rest';
 
 ## 4. RLS 验收
 
-确认以下表已开启 RLS：
+确认以下带前缀物理表已开启 RLS：
 
-- `athlete_profiles`
-- `lift_profiles`
-- `programs`
-- `workouts`
-- `workout_exercises`
-- `set_logs`
-- `recommendations`
-- `pr_goals`
-- `feedback_reports`
-- `analytics_events`
-- `exercises`
-- `agent_access_tokens`
+- `usr_athlete_profiles`
+- `usr_lift_profiles`
+- `plan_programs`
+- `plan_workouts`
+- `plan_workout_exercises`
+- `log_set_logs`
+- `log_recommendations`
+- `log_pr_goals`
+- `ops_feedback_reports`
+- `ops_analytics_events`
+- `cfg_exercises`
+- `ops_agent_access_tokens`
 
 策略原则：
 
-- `exercises` 允许已登录用户读取。
+- `cfg_exercises` 允许已登录用户读取。
 - 所有用户数据表只允许 `auth.uid() = user_id` 的用户访问。
-- `workout_exercises` 和 `set_logs` 通过所属 workout 间接判断用户。
-- `feedback_reports` 允许登录用户创建和读取自己的反馈。
-- `analytics_events` 允许登录用户创建和读取自己的行为事件。
-- `agent_access_tokens` 只允许用户管理自己的令牌元数据，匿名角色无权读取；数据库只保存 SHA-256 哈希，不保存原始令牌。
+- `plan_workout_exercises` 和 `log_set_logs` 通过所属训练单元间接判断用户。
+- `ops_feedback_reports` 允许登录用户创建和读取自己的反馈。
+- `ops_analytics_events` 允许登录用户创建和读取自己的行为事件。
+- `ops_agent_access_tokens` 只允许用户管理自己的令牌元数据，匿名角色无权读取；数据库只保存 SHA-256 哈希，不保存原始令牌。
 
 ## 5. 回滚策略
 
