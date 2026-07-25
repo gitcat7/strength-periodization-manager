@@ -681,68 +681,68 @@ export function ProgramManager() {
     setStatus("generating");
     setMessage("");
 
-    const saved = await persistPlanSetup();
-    if (!saved) return;
-
-    const supabase = createBrowserSupabaseClient();
-    const schedule: ScheduleConfig =
-      scheduleMode === "fixed_weekdays"
-        ? { mode: "fixed_weekdays", weekdays: selectedWeekdays }
-        : scheduleMode === "cadence"
-          ? { mode: "cadence", trainDays: cadenceTrainDays, restDays: cadenceRestDays }
-          : { mode: "flexible" };
-
-    const { data: exercises, error: exercisesError } = await supabase
-      .from("exercises")
-      .select("id,slug,name,default_increment");
-
-    if (exercisesError || !exercises) {
-      setStatus("error");
-      setMessage(exercisesError?.message ?? "动作数据读取失败。");
-      return;
-    }
-
-    const { data: liftProfiles, error: liftError } = await supabase
-      .from("lift_profiles")
-      .select("exercise_id,estimated_1rm,training_max")
-      .eq("user_id", userId);
-
-    if (liftError || !liftProfiles) {
-      setStatus("error");
-      setMessage(liftError?.message ?? "主项水平读取失败。");
-      return;
-    }
-
-    const exerciseRows = exercises as ExerciseRow[];
-    const exerciseById = new Map(exerciseRows.map((exercise) => [exercise.id, exercise]));
-    const liftRows = liftProfiles as LiftProfileRow[];
-    const exerciseProfiles: ExerciseProfile[] = liftRows
-      .map((lift) => {
-        const exercise = exerciseById.get(lift.exercise_id);
-        if (!exercise) return null;
-
-        return {
-          id: exercise.id,
-          slug: exercise.slug,
-          workingWeight: inferFiveRepWorkingWeight(
-            Number(lift.estimated_1rm),
-            Number(exercise.default_increment) || 2.5
-          ),
-          increment: Number(exercise.default_increment) || 2.5
-        };
-      })
-      .filter(Boolean) as ExerciseProfile[];
-
-    const accessoryProfiles: ExerciseProfile[] = deriveAccessoryProfiles(exerciseRows, exerciseProfiles);
-    const plannedWorkouts = buildFourWeekProgram({
-      templateType,
-      schedule,
-      exerciseProfiles: [...exerciseProfiles, ...accessoryProfiles],
-      weekCount: planSetup.weekCount,
-      trainingDaysPerWeek: planSetup.trainingDaysPerWeek
-    });
-
     try {
+      const saved = await persistPlanSetup();
+      if (!saved) return;
+
+      const supabase = createBrowserSupabaseClient();
+      const schedule: ScheduleConfig =
+        scheduleMode === "fixed_weekdays"
+          ? { mode: "fixed_weekdays", weekdays: selectedWeekdays }
+          : scheduleMode === "cadence"
+            ? { mode: "cadence", trainDays: cadenceTrainDays, restDays: cadenceRestDays }
+            : { mode: "flexible" };
+
+      const { data: exercises, error: exercisesError } = await supabase
+        .from("exercises")
+        .select("id,slug,name,default_increment");
+
+      if (exercisesError || !exercises) {
+        setStatus("error");
+        setMessage(exercisesError?.message ?? "动作数据读取失败。");
+        return;
+      }
+
+      const { data: liftProfiles, error: liftError } = await supabase
+        .from("lift_profiles")
+        .select("exercise_id,estimated_1rm,training_max")
+        .eq("user_id", userId);
+
+      if (liftError || !liftProfiles) {
+        setStatus("error");
+        setMessage(liftError?.message ?? "主项水平读取失败。");
+        return;
+      }
+
+      const exerciseRows = exercises as ExerciseRow[];
+      const exerciseById = new Map(exerciseRows.map((exercise) => [exercise.id, exercise]));
+      const liftRows = liftProfiles as LiftProfileRow[];
+      const exerciseProfiles: ExerciseProfile[] = liftRows
+        .map((lift) => {
+          const exercise = exerciseById.get(lift.exercise_id);
+          if (!exercise) return null;
+
+          return {
+            id: exercise.id,
+            slug: exercise.slug,
+            workingWeight: inferFiveRepWorkingWeight(
+              Number(lift.estimated_1rm),
+              Number(exercise.default_increment) || 2.5
+            ),
+            increment: Number(exercise.default_increment) || 2.5
+          };
+        })
+        .filter(Boolean) as ExerciseProfile[];
+
+      const accessoryProfiles: ExerciseProfile[] = deriveAccessoryProfiles(exerciseRows, exerciseProfiles);
+      const plannedWorkouts = buildFourWeekProgram({
+        templateType,
+        schedule,
+        exerciseProfiles: [...exerciseProfiles, ...accessoryProfiles],
+        weekCount: planSetup.weekCount,
+        trainingDaysPerWeek: planSetup.trainingDaysPerWeek
+      });
+
       const payload = buildProgramReplacementPayload({
         customTemplateName: useCustomName ? customTemplateName.trim() : null,
         exerciseIdsBySlug: new Map(exerciseRows.map((exercise) => [exercise.slug, exercise.id])),
@@ -768,9 +768,9 @@ export function ProgramManager() {
         })
       );
       setStatus("ready");
-    } catch {
+    } catch (error) {
       setStatus("error");
-      setMessage("计划预览生成失败，请检查训练设置后重试。");
+      setMessage(getPlanGenerationErrorMessage(error));
     }
   }
 
@@ -1446,6 +1446,13 @@ function normalizePlanGoal(goal: string): PlanSetupInput["goal"] {
     return goal;
   }
   return "strength";
+}
+
+function getPlanGenerationErrorMessage(error: unknown) {
+  if (error instanceof TypeError && /load failed|failed to fetch/i.test(error.message)) {
+    return "网络连接失败，请检查网络后重试。已填写的计划参数仍会保留。";
+  }
+  return "计划预览生成失败，请检查训练设置后重试。";
 }
 
 function getScheduleConfig(schedule: ScheduleConfig) {
