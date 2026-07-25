@@ -1,5 +1,5 @@
 export type PlanExperienceLevel = "beginner" | "novice" | "intermediate";
-export type PlanGoal = "hypertrophy" | "fat_loss" | "body_recomposition" | "strength";
+export type PlanGoal = "hypertrophy" | "hypertrophy_strength" | "fat_loss" | "body_recomposition" | "strength";
 
 export type PlanSetupInput = {
   experienceLevel: PlanExperienceLevel | "";

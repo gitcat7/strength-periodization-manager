@@ -1206,6 +1206,7 @@ export function PlanSetupForm({
             value={value.goal}
           >
             <option value="hypertrophy">增肌（Hypertrophy）</option>
+            <option value="hypertrophy_strength">力型兼备（Hypertrophy + Strength）</option>
             <option value="fat_loss">减脂（Fat Loss）</option>
             <option value="body_recomposition">塑形（Body Recomposition）</option>
             <option value="strength">力量（Strength）</option>
@@ -1441,8 +1442,7 @@ function getProgramName(templateType: TemplateType) {
 }
 
 function normalizePlanGoal(goal: string): PlanSetupInput["goal"] {
-  if (goal === "hypertrophy_strength") return "hypertrophy";
-  if (goal === "hypertrophy" || goal === "fat_loss" || goal === "body_recomposition" || goal === "strength") {
+  if (goal === "hypertrophy" || goal === "hypertrophy_strength" || goal === "fat_loss" || goal === "body_recomposition" || goal === "strength") {
     return goal;
   }
   return "strength";
