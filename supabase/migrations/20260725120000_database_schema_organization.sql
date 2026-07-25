@@ -261,4 +261,3 @@ revoke insert, update, delete on public.athlete_profiles, public.exercises, publ
   public.programs, public.workouts, public.workout_exercises, public.set_logs,
   public.recommendations, public.pr_goals, public.feedback_reports,
   public.analytics_events, public.agent_access_tokens from authenticated, anon;
-

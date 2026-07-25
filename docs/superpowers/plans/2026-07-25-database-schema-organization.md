@@ -235,4 +235,3 @@ git commit -m "docs: document prefixed database schema rollout"
 - All confirmed requirements map to Tasks 1–5: prefixes, comments, time semantics, compatibility, indexes, RLS/RPC safety, app cutover and rollout checks.
 - Relation names are identical across test, migration, baseline and registry tasks.
 - The plan contains no placeholders and does not authorize production execution.
-
