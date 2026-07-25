@@ -53,4 +53,11 @@ describe("database schema organization", () => {
     expect(migration).toMatch(/create unique index if not exists plan_workout_exercises_workout_order_key/i);
     expect(migration).toMatch(/create index if not exists log_recommendations_user_status_created_idx/i);
   });
+
+  test("only creates updated-at triggers for tables that actually have that column", async () => {
+    const migration = await readFile(migrationPath, "utf8");
+
+    expect(migration).toMatch(/information_schema\.columns/i);
+    expect(migration).toMatch(/column_name\s*=\s*'updated_at'/i);
+  });
 });

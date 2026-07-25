@@ -34,6 +34,19 @@ begin
 end;
 $$;
 
+-- Older deployed databases can predate this audit column. Preserve the original
+-- creation time for historical rows, then let the common trigger maintain it.
+alter table public.plan_workout_exercises
+  add column if not exists updated_at timestamptz;
+
+update public.plan_workout_exercises
+set updated_at = created_at
+where updated_at is null;
+
+alter table public.plan_workout_exercises
+  alter column updated_at set default now(),
+  alter column updated_at set not null;
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -55,7 +68,14 @@ begin
     'log_recommendations', 'log_pr_goals', 'ops_feedback_reports'
   ]
   loop
-    if to_regclass('public.' || relation_name) is not null then
+    if to_regclass('public.' || relation_name) is not null
+      and exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'public'
+          and table_name = relation_name
+          and column_name = 'updated_at'
+      ) then
       execute format('drop trigger if exists %I on public.%I', relation_name || '_set_updated_at', relation_name);
       execute format(
         'create trigger %I before update on public.%I for each row execute function public.set_updated_at()',
