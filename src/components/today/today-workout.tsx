@@ -813,22 +813,18 @@ export function TodayWorkout() {
     }
 
     if (completeWorkout) {
-      clearDraftLogs(workout.id);
-      clearTrainingDataCaches();
-      const { error: workoutError } = await supabase
-        .from(DB_TABLE.workouts)
-        .update({
-          status: "completed",
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", workout.id);
+      const { error: workoutError } = await supabase.rpc("complete_training_workout", {
+        p_workout_id: workout.id
+      });
 
       if (workoutError) {
         setSaveStatus("error");
         setMessage(workoutError.message);
         return;
       }
+
+      clearDraftLogs(workout.id);
+      clearTrainingDataCaches();
 
       const recommendations = buildCoachRecommendationsFromCurrentLogs();
       const recommendationPayload = recommendations

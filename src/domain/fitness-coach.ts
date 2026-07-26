@@ -95,6 +95,13 @@ export function getWorkoutCoachCue(workoutName: string) {
 
 export function summarizeSetLogs(logs: CoachSetLog[]) {
   const completedLogs = logs.filter((log) => log.completed);
+  const targetAttainedLogs = completedLogs.filter(
+    (log) =>
+      typeof log.actualWeight === "number" &&
+      typeof log.actualReps === "number" &&
+      log.actualWeight >= log.targetWeight &&
+      log.actualReps >= log.targetReps
+  );
   const rpeValues = completedLogs
     .map((log) => log.rpe)
     .filter((rpe): rpe is number => typeof rpe === "number");
@@ -106,6 +113,7 @@ export function summarizeSetLogs(logs: CoachSetLog[]) {
   return {
     averageRpe,
     completionRatio,
+    targetAttainmentRatio: logs.length > 0 ? targetAttainedLogs.length / logs.length : 0,
     completedSets: completedLogs.length,
     totalSets: logs.length,
     totalActualReps,
@@ -150,6 +158,14 @@ export function buildExerciseCoachRecommendation({
       type: "hold",
       suggestedWeight: targetWeight,
       reason: `${exerciseName} 本次没有全部完成，下次先保持重量，目标是补齐计划组数。`
+    };
+  }
+
+  if (summary.targetAttainmentRatio < 1) {
+    return {
+      type: "hold",
+      suggestedWeight: targetWeight,
+      reason: `${exerciseName} 虽已勾选完成，但未达到全部计划重量和次数。下次先保持重量，优先完成目标。`
     };
   }
 

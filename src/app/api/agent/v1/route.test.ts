@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   authenticateAgentRequest: vi.fn(),
-  from: vi.fn()
+  from: vi.fn(),
+  rpc: vi.fn()
 }));
 
 vi.mock("@/lib/agent-auth", () => ({
@@ -10,7 +11,7 @@ vi.mock("@/lib/agent-auth", () => ({
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
-  createAdminSupabaseClient: () => ({ from: mocks.from })
+  createAdminSupabaseClient: () => ({ from: mocks.from, rpc: mocks.rpc })
 }));
 
 import { POST } from "./route";
@@ -88,19 +89,21 @@ describe("Agent API rest-day boundaries", () => {
     expect(workouts.calls).toContainEqual(["order", ["schedule_index", { ascending: true }]]);
   });
 
-  it("only completes a training workout through the strength completion action", async () => {
-    const ownership = createQuery({ data: { id: "11111111-1111-4111-8111-111111111111" }, error: null });
-    const completion = createQuery({
-      data: { id: "11111111-1111-4111-8111-111111111111", name: "推 A", scheduled_date: "2026-07-16", status: "completed" },
+  it("completes a workout through the same protected database action as the web client", async () => {
+    const workoutId = "11111111-1111-4111-8111-111111111111";
+    mocks.authenticateAgentRequest.mockResolvedValue({ tokenId: "token-1", userId: "user-1" });
+    mocks.rpc.mockResolvedValue({
+      data: { status: "completed", workout_id: workoutId },
       error: null
     });
-    mocks.authenticateAgentRequest.mockResolvedValue({ tokenId: "token-1", userId: "user-1" });
-    mocks.from.mockImplementationOnce(() => ownership.query).mockImplementationOnce(() => completion.query);
 
     await expect(
-      POST(authorizedRequest({ action: "complete_workout", workout_id: "11111111-1111-4111-8111-111111111111" }))
+      POST(authorizedRequest({ action: "complete_workout", workout_id: workoutId }))
     ).resolves.toHaveProperty("status", 200);
 
-    expect(completion.calls).toContainEqual(["eq", ["day_type", "training"]]);
+    expect(mocks.rpc).toHaveBeenCalledWith("complete_training_workout", {
+      p_user_id: "user-1",
+      p_workout_id: workoutId
+    });
   });
 });

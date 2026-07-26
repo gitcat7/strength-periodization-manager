@@ -30,6 +30,9 @@ export type ExerciseProfile = {
   increment: number;
 };
 
+export type PlanGoal = "strength" | "hypertrophy" | "hypertrophy_strength" | "fat_loss" | "body_recomposition";
+export type ExperienceLevel = "beginner" | "novice" | "intermediate";
+
 export type PlannedWorkoutExercise = {
   exerciseSlug: string;
   targetSets: number;
@@ -239,6 +242,30 @@ const fiveSplitTemplate: TemplateWorkout[] = [
 
 const weekIntensityBumps = [0, 0.025, 0.05, -0.075];
 
+const goalAdjustments: Record<PlanGoal, { intensity: number; reps: number; sets: number }> = {
+  strength: { intensity: 0, reps: 0, sets: 0 },
+  hypertrophy: { intensity: -0.05, reps: 2, sets: 1 },
+  hypertrophy_strength: { intensity: -0.025, reps: 1, sets: 0 },
+  fat_loss: { intensity: -0.075, reps: 3, sets: 0 },
+  body_recomposition: { intensity: -0.05, reps: 2, sets: 0 }
+};
+
+const experienceAdjustments: Record<ExperienceLevel, { intensity: number; sets: number }> = {
+  beginner: { intensity: -0.05, sets: -1 },
+  novice: { intensity: -0.025, sets: 0 },
+  intermediate: { intensity: 0, sets: 0 }
+};
+
+export function resolveProfileWorkingWeight({
+  estimatedOneRepMax,
+  trainingMax
+}: {
+  estimatedOneRepMax: number;
+  trainingMax: number;
+}) {
+  return Number.isFinite(trainingMax) && trainingMax > 0 ? trainingMax : estimatedOneRepMax;
+}
+
 export function chooseTemplate(type: TemplateType) {
   if (type === "push_pull_squat") return pushPullSquatTemplate;
   if (type === "one_split") return oneSplitTemplate;
@@ -253,7 +280,9 @@ export function buildFourWeekProgram({
   exerciseProfiles,
   startDate = new Date(),
   weekCount = 4,
-  trainingDaysPerWeek
+  trainingDaysPerWeek,
+  goal = "strength",
+  experienceLevel = "intermediate"
 }: {
   templateType: TemplateType;
   availableWeekdays?: number[];
@@ -262,10 +291,14 @@ export function buildFourWeekProgram({
   startDate?: Date;
   weekCount?: number;
   trainingDaysPerWeek?: number;
+  goal?: PlanGoal;
+  experienceLevel?: ExperienceLevel;
 }) {
   const template = chooseTemplate(templateType);
   const profileBySlug = new Map(exerciseProfiles.map((profile) => [profile.slug, profile]));
   const normalizedWeekCount = normalizeWeekCount(weekCount);
+  const goalAdjustment = goalAdjustments[goal];
+  const experienceAdjustment = experienceAdjustments[experienceLevel];
   const workoutDates = buildWorkoutDates(
     startDate,
     schedule ?? { mode: "fixed_weekdays", weekdays: availableWeekdays ?? [1, 3, 5] },
@@ -286,13 +319,16 @@ export function buildFourWeekProgram({
         const profile = profileBySlug.get(item.slug);
         const targetWeight =
           profile && item.intensity > 0
-            ? roundToNearestPlate(profile.workingWeight * (item.intensity + bump), profile.increment)
+            ? roundToNearestPlate(
+                profile.workingWeight * (item.intensity + bump + goalAdjustment.intensity + experienceAdjustment.intensity),
+                profile.increment
+              )
             : 0;
 
         return {
           exerciseSlug: item.slug,
-          targetSets: item.sets,
-          targetReps: item.reps,
+          targetSets: Math.max(2, item.sets + goalAdjustment.sets + experienceAdjustment.sets),
+          targetReps: item.reps + goalAdjustment.reps,
           targetWeight
         };
       })

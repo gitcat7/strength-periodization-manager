@@ -72,6 +72,30 @@ describe("exercise coach recommendation safety gate", () => {
     ).not.toMatchObject({ type: "increase" });
   });
 
+  it("does not increase when completed sets miss the planned weight", () => {
+    expect(
+      buildExerciseCoachRecommendation({
+        exerciseName: "杠铃卧推",
+        increment: 2.5,
+        isMainLift: true,
+        logs: [{ ...completedSet(7), actualWeight: 50, actualReps: 1 }, { ...completedSet(7), actualWeight: 50, actualReps: 1 }],
+        targetWeight: 100
+      })
+    ).toMatchObject({ suggestedWeight: 100, type: "hold" });
+  });
+
+  it("does not increase when completed sets miss the planned repetitions", () => {
+    expect(
+      buildExerciseCoachRecommendation({
+        exerciseName: "杠铃卧推",
+        increment: 2.5,
+        isMainLift: true,
+        logs: [{ ...completedSet(7), actualReps: 4 }, { ...completedSet(7), actualReps: 4 }],
+        targetWeight: 100
+      })
+    ).toMatchObject({ suggestedWeight: 100, type: "hold" });
+  });
+
   it("never gives a default increase to a non-main lift", () => {
     expect(
       buildExerciseCoachRecommendation({

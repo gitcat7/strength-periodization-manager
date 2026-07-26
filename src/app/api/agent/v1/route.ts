@@ -240,12 +240,11 @@ async function recordSet(userId: string, request: AgentRequest) {
 
 async function completeWorkout(userId: string, workoutId?: string) {
   if (!workoutId) throw new Error("完成训练需要 workout_id。");
-  await assertWorkoutOwnership(userId, workoutId);
-
   const supabase = createAdminSupabaseClient();
-  const primary = () => supabase.from(DB_TABLE.workouts).update({ completed_at: new Date().toISOString(), status: "completed", updated_at: new Date().toISOString() }).eq("id", workoutId).eq("user_id", userId).eq("day_type", "training").select("id,name,scheduled_date,status,completed_at,day_type").single();
-  const legacy = () => supabase.from(DB_TABLE.workouts).update({ completed_at: new Date().toISOString(), status: "completed", updated_at: new Date().toISOString() }).eq("id", workoutId).eq("user_id", userId).select("id,name,scheduled_date,status,completed_at").single();
-  const { data, error } = await loadWorkoutsWithDayTypeFallback(primary, legacy);
+  const { data, error } = await supabase.rpc("complete_training_workout", {
+    p_user_id: userId,
+    p_workout_id: workoutId
+  });
 
   if (error) throw new Error(error.message);
   return { message: "训练已完成。", workout: data };

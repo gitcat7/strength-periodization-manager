@@ -15,6 +15,7 @@ import {
   type PlanSetupValidationResult
 } from "@/domain/plan-setup";
 import { calculateTrainingMax, estimateOneRepMax, roundToNearestPlate } from "@/domain/strength";
+import { applyRecommendationWeight } from "@/domain/recommendation-application";
 import { trackEvent } from "@/lib/analytics";
 import {
   clearProgramRegenerationCaches,
@@ -31,6 +32,7 @@ import {
 } from "@/domain/training-format";
 import {
   buildFourWeekProgram,
+  resolveProfileWorkingWeight,
   type ExerciseProfile,
   templateOptions,
   type ProgramTemplateType,
@@ -573,14 +575,27 @@ export function ProgramManager() {
       return;
     }
 
-    const { error: updateExerciseError } = await supabase
+    const { data: futureExercises, error: futureExerciseError } = await supabase
       .from(DB_TABLE.workoutExercises)
-      .update({
-        target_weight: appliedWeight
-      })
+      .select("id,target_weight,exercises(default_increment)")
       .eq("exercise_id", recommendation.exercise_id)
       .in("workout_id", workoutIds);
 
+    if (futureExerciseError) {
+      setStatus("error");
+      setMessage(futureExerciseError.message);
+      return;
+    }
+
+    const updateResults = await Promise.all((futureExercises ?? []).map((exercise) => {
+      const relatedExercise = Array.isArray(exercise.exercises) ? exercise.exercises[0] : exercise.exercises;
+      const increment = Number(relatedExercise?.default_increment) || 2.5;
+      return supabase
+        .from(DB_TABLE.workoutExercises)
+        .update({ target_weight: applyRecommendationWeight({ currentWeight: Number(exercise.target_weight), previousWeight: recommendation.previous_weight, appliedWeight, increment }) })
+        .eq("id", exercise.id);
+    }));
+    const updateExerciseError = updateResults.find((result) => result.error)?.error;
     if (updateExerciseError) {
       setStatus("error");
       setMessage(updateExerciseError.message);
@@ -617,7 +632,7 @@ export function ProgramManager() {
       userId
     });
 
-    setMessage(`${recommendation.exercises?.name ?? "动作"} 的后续计划已更新为 ${appliedWeight}kg。`);
+    setMessage(`${recommendation.exercises?.name ?? "动作"} 的后续计划已按原有强度、容量和减量差异同步调整。`);
     await loadRecommendations(userId);
     await loadWorkouts(program.id);
     setStatus("ready");
@@ -728,7 +743,10 @@ export function ProgramManager() {
             id: exercise.id,
             slug: exercise.slug,
             workingWeight: inferFiveRepWorkingWeight(
-              Number(lift.estimated_1rm),
+              resolveProfileWorkingWeight({
+                estimatedOneRepMax: Number(lift.estimated_1rm),
+                trainingMax: Number(lift.training_max)
+              }),
               Number(exercise.default_increment) || 2.5
             ),
             increment: Number(exercise.default_increment) || 2.5
@@ -741,6 +759,8 @@ export function ProgramManager() {
         templateType,
         schedule,
         exerciseProfiles: [...exerciseProfiles, ...accessoryProfiles],
+        experienceLevel: planSetup.experienceLevel || "novice",
+        goal: planSetup.goal,
         weekCount: planSetup.weekCount,
         trainingDaysPerWeek: planSetup.trainingDaysPerWeek
       });
@@ -1240,6 +1260,9 @@ export function PlanSetupForm({
           placeholder="例如：右肩不适，暂时不做过顶推"
           value={value.injuryNotes}
         />
+        {value.injuryNotes.trim() ? (
+          <p className="mt-2 text-xs text-amber-700">已记录限制说明。系统不会自动进行医疗判断或规避动作；请遵医嘱，并在生成后手动替换不适动作。</p>
+        ) : null}
       </label>
 
       <div className="mt-5">

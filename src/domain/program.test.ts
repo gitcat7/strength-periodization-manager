@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildFourWeekProgram, buildSchedulePreview } from "./program";
+import { buildFourWeekProgram, buildSchedulePreview, resolveProfileWorkingWeight } from "./program";
 
 const profiles = [
   { id: "bench", slug: "bench_press", workingWeight: 100, increment: 2.5 },
@@ -9,6 +9,40 @@ const profiles = [
 ];
 
 describe("buildFourWeekProgram", () => {
+  it("uses training max instead of a higher estimated 1RM", () => {
+    expect(resolveProfileWorkingWeight({ estimatedOneRepMax: 120, trainingMax: 100 })).toBe(100);
+  });
+
+  it("prescribes a more conservative beginner hypertrophy plan than an intermediate strength plan", () => {
+    const baseInput = {
+      templateType: "push_pull_squat" as const,
+      schedule: { mode: "fixed_weekdays" as const, weekdays: [1, 3, 5] },
+      exerciseProfiles: profiles,
+      startDate: new Date("2026-07-13T00:00:00")
+    };
+
+    const beginnerHypertrophy = buildFourWeekProgram({
+      ...baseInput,
+      experienceLevel: "beginner",
+      goal: "hypertrophy"
+    });
+    const intermediateStrength = buildFourWeekProgram({
+      ...baseInput,
+      experienceLevel: "intermediate",
+      goal: "strength"
+    });
+
+    const beginnerBench = beginnerHypertrophy[0].dayType === "training"
+      ? beginnerHypertrophy[0].exercises.find((exercise) => exercise.exerciseSlug === "bench_press")
+      : undefined;
+    const intermediateBench = intermediateStrength[0].dayType === "training"
+      ? intermediateStrength[0].exercises.find((exercise) => exercise.exerciseSlug === "bench_press")
+      : undefined;
+
+    expect(beginnerBench).toMatchObject({ targetReps: 7, targetSets: 4, targetWeight: 85 });
+    expect(intermediateBench).toMatchObject({ targetReps: 5, targetSets: 4, targetWeight: 95 });
+  });
+
   it("assigns a stable zero-based sequence index without changing fixed-weekday dates", () => {
     const workouts = buildFourWeekProgram({
       templateType: "three_day_full_body",
