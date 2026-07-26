@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect } from "react";
 import Link from "next/link";
-import { BarChart3, CalendarDays, Dumbbell, Settings, Trophy } from "lucide-react";
+import { BarChart3, CalendarDays, Dumbbell, History, Settings } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { isNavigationItemActive } from "./navigation-state";
@@ -13,7 +13,7 @@ const navItems = [
   { href: "/", label: "今日", icon: Dumbbell },
   { href: "/plan", label: "计划", icon: CalendarDays },
   { href: "/progress", label: "进展", icon: BarChart3 },
-  { href: "/pr", label: "PR", icon: Trophy },
+  { href: "/history", label: "历史", icon: History },
   { href: "/settings", label: "设置", icon: Settings }
 ];
 

@@ -18,4 +18,12 @@ describe("bottom navigation touch feedback", () => {
       /@media \(hover: hover\)[\s\S]*?\.bottom-nav-item:not\(\.bottom-nav-item-active\):hover\s*\{\s*background-color: rgb\(.*?\);/
     );
   });
+
+  it("makes history a primary tab without removing the PR route", async () => {
+    const component = await readFile(componentPath, "utf8");
+
+    expect(component).toContain('href: "/history", label: "历史", icon: History');
+    expect(component).not.toContain('href: "/pr", label: "PR", icon: Trophy');
+    expect(component).toContain("grid-cols-5");
+  });
 });
