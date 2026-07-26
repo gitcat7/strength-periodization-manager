@@ -43,6 +43,14 @@ describe("validatePlanSetup", () => {
     }
   });
 
+  it("accepts the combined hypertrophy_strength goal", () => {
+    const result = validatePlanSetup(baseInput({ goal: "hypertrophy_strength" as never }));
+    expect(result).toMatchObject({
+      ok: true,
+      value: { goal: "hypertrophy_strength" }
+    });
+  });
+
   it("rejects a plan period longer than twelve weeks", () => {
     expect(validatePlanSetup(baseInput({ weekCount: 13 }))).toEqual({
       ok: false,
