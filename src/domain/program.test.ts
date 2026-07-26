@@ -64,6 +64,44 @@ describe("buildFourWeekProgram", () => {
     expect(firstBench(hypertrophy)).toMatchObject({ targetSets: 5, targetReps: 8, targetWeight: 87.5 });
   });
 
+  it("reduces fat-loss volume only when the user's deficit trend and recovery indicate high strain", () => {
+    const baseInput = {
+      templateType: "push_pull_squat" as const,
+      schedule: { mode: "fixed_weekdays" as const, weekdays: [1, 3, 5] },
+      exerciseProfiles: profiles,
+      experienceLevel: "novice" as const,
+      goal: "fat_loss" as const,
+      startDate: new Date("2026-07-13T00:00:00")
+    };
+    const sustainable = buildFourWeekProgram({
+      ...baseInput,
+      nutritionAdherence: "high",
+      proteinTargetMet: true,
+      recoveryStatus: "normal",
+      currentBodyWeightKg: 80,
+      targetWeightChangeKgPerWeek: -0.3,
+      weightChangeLast14DaysKg: -0.6
+    });
+    const highStrain = buildFourWeekProgram({
+      ...baseInput,
+      nutritionAdherence: "low",
+      proteinTargetMet: false,
+      recoveryStatus: "low",
+      currentBodyWeightKg: 80,
+      targetWeightChangeKgPerWeek: -0.8,
+      weightChangeLast14DaysKg: -1.6
+    });
+    const firstBench = (items: typeof sustainable) => {
+      const workout = items[0];
+      return workout.dayType === "training"
+        ? workout.exercises.find((exercise) => exercise.exerciseSlug === "bench_press")
+        : undefined;
+    };
+
+    expect(firstBench(sustainable)).toMatchObject({ targetSets: 3 });
+    expect(firstBench(highStrain)).toMatchObject({ targetSets: 2 });
+  });
+
   it("assigns a stable zero-based sequence index without changing fixed-weekday dates", () => {
     const workouts = buildFourWeekProgram({
       templateType: "three_day_full_body",

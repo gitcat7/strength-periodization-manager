@@ -14,6 +14,34 @@ function baseInput(overrides: Partial<PlanSetupInput> = {}): PlanSetupInput {
 }
 
 describe("validatePlanSetup", () => {
+  it("keeps evidence inputs that determine energy availability and recovery", () => {
+    const result = validatePlanSetup({
+      experienceLevel: "novice",
+      goal: "fat_loss",
+      injuryNotes: "",
+      lifts: [{ exerciseId: "bench", weightKg: "80", reps: "5" }],
+      nutritionAdherence: "high",
+      proteinTargetMet: true,
+      recoveryStatus: "low",
+      currentBodyWeightKg: "80",
+      targetWeightChangeKgPerWeek: "-0.4",
+      weightChangeLast14DaysKg: "-0.8",
+      weekCount: 4,
+      trainingDaysPerWeek: 3
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        nutritionAdherence: "high",
+        proteinTargetMet: true,
+        recoveryStatus: "low",
+        currentBodyWeightKg: 80,
+        targetWeightChangeKgPerWeek: -0.4,
+        weightChangeLast14DaysKg: -0.8
+      }
+    });
+  });
   it("requires training experience and one positive main-lift working set", () => {
     expect(validatePlanSetup(baseInput({ experienceLevel: "" as never, lifts: [] }))).toEqual({
       ok: false,

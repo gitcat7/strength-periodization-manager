@@ -148,6 +148,12 @@ const defaultPlanSetup: PlanSetupInput = {
   goal: "strength",
   injuryNotes: "",
   lifts: [],
+  nutritionAdherence: "moderate",
+  proteinTargetMet: false,
+  recoveryStatus: "normal",
+  currentBodyWeightKg: "",
+  targetWeightChangeKgPerWeek: "",
+  weightChangeLast14DaysKg: "",
   weekCount: 4,
   trainingDaysPerWeek: 3
 };
@@ -307,7 +313,7 @@ export function ProgramManager() {
     const [profileResult, mainLiftsResult] = await Promise.all([
       supabase
         .from(DB_TABLE.athleteProfiles)
-        .select("experience_level,goal,training_days_per_week,available_weekdays,session_duration_minutes,injury_notes")
+        .select("experience_level,goal,training_days_per_week,available_weekdays,session_duration_minutes,injury_notes,current_body_weight_kg,target_weight_change_kg_per_week,weight_change_last_14_days_kg,nutrition_adherence,protein_target_met,recovery_status")
         .eq("user_id", targetUserId)
         .maybeSingle(),
       supabase
@@ -366,6 +372,16 @@ export function ProgramManager() {
       experienceLevel: profile.experience_level as PlanSetupInput["experienceLevel"],
       goal: normalizePlanGoal(profile.goal),
       injuryNotes: profile.injury_notes ?? "",
+      nutritionAdherence: profile.nutrition_adherence === "low" || profile.nutrition_adherence === "high"
+        ? profile.nutrition_adherence
+        : "moderate",
+      proteinTargetMet: Boolean(profile.protein_target_met),
+      recoveryStatus: profile.recovery_status === "low" || profile.recovery_status === "high"
+        ? profile.recovery_status
+        : "normal",
+      currentBodyWeightKg: profile.current_body_weight_kg ? String(profile.current_body_weight_kg) : "",
+      targetWeightChangeKgPerWeek: profile.target_weight_change_kg_per_week ? String(profile.target_weight_change_kg_per_week) : "",
+      weightChangeLast14DaysKg: profile.weight_change_last_14_days_kg ? String(profile.weight_change_last_14_days_kg) : "",
       lifts: loadedMainLifts.map((exercise) => {
         const estimatedOneRepMax = estimatedByExerciseId.get(exercise.id) ?? 0;
         const workingWeight = inferFiveRepWorkingWeight(estimatedOneRepMax, Number(exercise.default_increment) || 2.5);
@@ -397,6 +413,12 @@ export function ProgramManager() {
         available_weekdays: selectedWeekdays,
         session_duration_minutes: persistedSessionDuration,
         injury_notes: parsed.value.injuryNotes || null,
+        current_body_weight_kg: parsed.value.currentBodyWeightKg,
+        target_weight_change_kg_per_week: parsed.value.targetWeightChangeKgPerWeek,
+        weight_change_last_14_days_kg: parsed.value.weightChangeLast14DaysKg,
+        nutrition_adherence: parsed.value.nutritionAdherence,
+        protein_target_met: parsed.value.proteinTargetMet,
+        recovery_status: parsed.value.recoveryStatus,
         unit: "kg",
         updated_at: new Date().toISOString()
       },
@@ -762,7 +784,13 @@ export function ProgramManager() {
         experienceLevel: planSetup.experienceLevel || "novice",
         goal: planSetup.goal,
         weekCount: planSetup.weekCount,
-        trainingDaysPerWeek: planSetup.trainingDaysPerWeek
+        trainingDaysPerWeek: planSetup.trainingDaysPerWeek,
+        nutritionAdherence: planSetup.nutritionAdherence,
+        proteinTargetMet: planSetup.proteinTargetMet,
+        recoveryStatus: planSetup.recoveryStatus,
+        currentBodyWeightKg: Number(planSetup.currentBodyWeightKg) || null,
+        targetWeightChangeKgPerWeek: Number(planSetup.targetWeightChangeKgPerWeek) || null,
+        weightChangeLast14DaysKg: Number(planSetup.weightChangeLast14DaysKg) || null
       });
 
       const payload = buildProgramReplacementPayload({
@@ -1264,6 +1292,96 @@ export function PlanSetupForm({
           <p className="mt-2 text-xs text-amber-700">已记录限制说明。系统不会自动进行医疗判断或规避动作；请遵医嘱，并在生成后手动替换不适动作。</p>
         ) : null}
       </label>
+
+      <div className="mt-5 rounded-lg border border-line bg-slate-50 p-3">
+        <h3 className="font-semibold">体重、饮食与恢复</h3>
+        <p className="mt-1 text-xs leading-5 text-muted">减脂与塑形会根据体重变化率、饮食执行和恢复状态保护训练量；其他目标也会参考恢复状态。数据只用于训练处方，不构成医疗或营养诊断。</p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">当前体重（可选）</span>
+            <input
+              aria-label="当前体重 kg"
+              className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+              inputMode="decimal"
+              min="30"
+              max="300"
+              onChange={(event) => update({ currentBodyWeightKg: event.target.value })}
+              placeholder="例如 75"
+              step="0.1"
+              type="number"
+              value={value.currentBodyWeightKg ?? ""}
+            />
+            {errors.currentBodyWeightKg ? <p className="mt-1 text-xs text-red-600">{errors.currentBodyWeightKg}</p> : null}
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">目标体重变化（可选）</span>
+            <input
+              aria-label="目标每周体重变化 kg"
+              className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+              inputMode="decimal"
+              min="-1.5"
+              max="1"
+              onChange={(event) => update({ targetWeightChangeKgPerWeek: event.target.value })}
+              placeholder="减脂填负数，例如 -0.3"
+              step="0.1"
+              type="number"
+              value={value.targetWeightChangeKgPerWeek ?? ""}
+            />
+            {errors.targetWeightChangeKgPerWeek ? <p className="mt-1 text-xs text-red-600">{errors.targetWeightChangeKgPerWeek}</p> : null}
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">近 14 天体重变化（可选）</span>
+            <input
+              aria-label="近14天体重变化 kg"
+              className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+              inputMode="decimal"
+              min="-3"
+              max="3"
+              onChange={(event) => update({ weightChangeLast14DaysKg: event.target.value })}
+              placeholder="当前体重 - 14 天前体重"
+              step="0.1"
+              type="number"
+              value={value.weightChangeLast14DaysKg ?? ""}
+            />
+            {errors.weightChangeLast14DaysKg ? <p className="mt-1 text-xs text-red-600">{errors.weightChangeLast14DaysKg}</p> : null}
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">饮食执行度</span>
+            <select
+              aria-label="饮食执行度"
+              className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+              onChange={(event) => update({ nutritionAdherence: event.target.value as PlanSetupInput["nutritionAdherence"] })}
+              value={value.nutritionAdherence ?? "moderate"}
+            >
+              <option value="high">高：大部分时间按计划执行</option>
+              <option value="moderate">中：有少量偏离</option>
+              <option value="low">低：近期难以稳定执行</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">恢复状态</span>
+            <select
+              aria-label="恢复状态"
+              className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+              onChange={(event) => update({ recoveryStatus: event.target.value as PlanSetupInput["recoveryStatus"] })}
+              value={value.recoveryStatus ?? "normal"}
+            >
+              <option value="high">良好：睡眠、精力和酸痛都可控</option>
+              <option value="normal">一般：可正常训练</option>
+              <option value="low">偏低：疲劳、睡眠或酸痛影响训练</option>
+            </select>
+          </label>
+        </div>
+        <label className="mt-3 flex items-start gap-2 text-sm">
+          <input
+            checked={value.proteinTargetMet ?? false}
+            className="mt-1 h-4 w-4"
+            onChange={(event) => update({ proteinTargetMet: event.target.checked })}
+            type="checkbox"
+          />
+          <span>近期大多数日子达到自己的蛋白质目标</span>
+        </label>
+      </div>
 
       <div className="mt-5">
         <h3 className="font-semibold">主项最近工作组</h3>

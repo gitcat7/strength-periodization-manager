@@ -44,6 +44,9 @@ describe("PlanSetupForm", () => {
     expect(container.textContent).toContain("至少录入一个主项最近工作组");
     expect(container.textContent).toContain("增肌（Hypertrophy）");
     expect(container.textContent).toContain("力型兼备（Hypertrophy + Strength）");
+    expect(container.textContent).toContain("体重、饮食与恢复");
+    expect(container.querySelector('input[aria-label="当前体重 kg"]')).not.toBeNull();
+    expect(container.querySelector('select[aria-label="恢复状态"]')).not.toBeNull();
     expect(container.textContent).toContain("计划周期");
     expect(container.querySelector('select[aria-label="计划周期"]')).toHaveProperty("value", "4");
     expect(container.querySelectorAll('select[aria-label="计划周期"] option')).toHaveLength(12);

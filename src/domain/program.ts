@@ -32,6 +32,8 @@ export type ExerciseProfile = {
 
 export type PlanGoal = "strength" | "hypertrophy" | "hypertrophy_strength" | "fat_loss" | "body_recomposition";
 export type ExperienceLevel = "beginner" | "novice" | "intermediate";
+export type NutritionAdherence = "low" | "moderate" | "high";
+export type RecoveryStatus = "low" | "normal" | "high";
 
 export type PlannedWorkoutExercise = {
   exerciseSlug: string;
@@ -282,7 +284,13 @@ export function buildFourWeekProgram({
   weekCount = 4,
   trainingDaysPerWeek,
   goal = "strength",
-  experienceLevel = "intermediate"
+  experienceLevel = "intermediate",
+  nutritionAdherence = "moderate",
+  proteinTargetMet = false,
+  recoveryStatus = "normal",
+  currentBodyWeightKg = null,
+  targetWeightChangeKgPerWeek = null,
+  weightChangeLast14DaysKg = null
 }: {
   templateType: TemplateType;
   availableWeekdays?: number[];
@@ -293,12 +301,27 @@ export function buildFourWeekProgram({
   trainingDaysPerWeek?: number;
   goal?: PlanGoal;
   experienceLevel?: ExperienceLevel;
+  nutritionAdherence?: NutritionAdherence;
+  proteinTargetMet?: boolean;
+  recoveryStatus?: RecoveryStatus;
+  currentBodyWeightKg?: number | null;
+  targetWeightChangeKgPerWeek?: number | null;
+  weightChangeLast14DaysKg?: number | null;
 }) {
   const template = chooseTemplate(templateType);
   const profileBySlug = new Map(exerciseProfiles.map((profile) => [profile.slug, profile]));
   const normalizedWeekCount = normalizeWeekCount(weekCount);
   const goalAdjustment = goalAdjustments[goal];
   const experienceAdjustment = experienceAdjustments[experienceLevel];
+  const contextAdjustment = getGoalContextAdjustment({
+    goal,
+    nutritionAdherence,
+    proteinTargetMet,
+    recoveryStatus,
+    currentBodyWeightKg,
+    targetWeightChangeKgPerWeek,
+    weightChangeLast14DaysKg
+  });
   const workoutDates = buildWorkoutDates(
     startDate,
     schedule ?? { mode: "fixed_weekdays", weekdays: availableWeekdays ?? [1, 3, 5] },
@@ -327,7 +350,7 @@ export function buildFourWeekProgram({
 
         return {
           exerciseSlug: item.slug,
-          targetSets: Math.max(2, item.sets + goalAdjustment.sets + experienceAdjustment.sets),
+          targetSets: Math.max(2, item.sets + goalAdjustment.sets + experienceAdjustment.sets + contextAdjustment.sets),
           targetReps: item.reps + goalAdjustment.reps,
           targetWeight
         };
@@ -339,6 +362,40 @@ export function buildFourWeekProgram({
     trainingWorkouts,
     schedule ?? { mode: "fixed_weekdays", weekdays: availableWeekdays ?? [1, 3, 5] }
   );
+}
+
+function getGoalContextAdjustment({
+  goal,
+  nutritionAdherence,
+  proteinTargetMet,
+  recoveryStatus,
+  currentBodyWeightKg,
+  targetWeightChangeKgPerWeek,
+  weightChangeLast14DaysKg
+}: {
+  goal: PlanGoal;
+  nutritionAdherence: NutritionAdherence;
+  proteinTargetMet: boolean;
+  recoveryStatus: RecoveryStatus;
+  currentBodyWeightKg: number | null;
+  targetWeightChangeKgPerWeek: number | null;
+  weightChangeLast14DaysKg: number | null;
+}) {
+  const recoverySets = recoveryStatus === "low" ? -1 : 0;
+  const targetWeeklyLossRate = currentBodyWeightKg && targetWeightChangeKgPerWeek
+    ? Math.abs(targetWeightChangeKgPerWeek / currentBodyWeightKg)
+    : 0;
+  const actualWeeklyLossRate = currentBodyWeightKg && weightChangeLast14DaysKg
+    ? Math.abs(weightChangeLast14DaysKg / 2 / currentBodyWeightKg)
+    : 0;
+  const aggressiveDeficit = targetWeeklyLossRate >= 0.0075 || actualWeeklyLossRate >= 0.0075;
+  const nutritionRisk = nutritionAdherence === "low" || !proteinTargetMet;
+  const energyAvailabilitySets =
+    (goal === "fat_loss" || goal === "body_recomposition") && aggressiveDeficit && nutritionRisk
+      ? -1
+      : 0;
+
+  return { sets: recoverySets + energyAvailabilitySets };
 }
 
 export function getTemplateType(trainingDaysPerWeek: number): TemplateType {
