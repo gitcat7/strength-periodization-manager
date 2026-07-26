@@ -1,0 +1,5 @@
+# Docker Desktop on Windows does not expose its daemon over TCP by default.
+# The local analytics stack depends on that optional endpoint, while this project
+# does not use local analytics for application or database tests.
+[analytics]
+enabled = false
