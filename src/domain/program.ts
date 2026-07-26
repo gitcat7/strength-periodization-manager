@@ -243,10 +243,10 @@ const fiveSplitTemplate: TemplateWorkout[] = [
 const weekIntensityBumps = [0, 0.025, 0.05, -0.075];
 
 const goalAdjustments: Record<PlanGoal, { intensity: number; reps: number; sets: number }> = {
-  strength: { intensity: 0, reps: 0, sets: 0 },
-  hypertrophy: { intensity: -0.05, reps: 2, sets: 1 },
-  hypertrophy_strength: { intensity: -0.025, reps: 1, sets: 0 },
-  fat_loss: { intensity: -0.075, reps: 3, sets: 0 },
+  strength: { intensity: 0.025, reps: 0, sets: 1 },
+  hypertrophy: { intensity: -0.075, reps: 3, sets: 1 },
+  hypertrophy_strength: { intensity: -0.025, reps: 1, sets: 1 },
+  fat_loss: { intensity: -0.1, reps: 2, sets: -1 },
   body_recomposition: { intensity: -0.05, reps: 2, sets: 0 }
 };
 

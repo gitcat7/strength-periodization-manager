@@ -1231,7 +1231,7 @@ export function PlanSetupForm({
             <option value="hypertrophy_strength">力型兼备（Hypertrophy + Strength）</option>
             <option value="fat_loss">减脂（Fat Loss）</option>
             <option value="body_recomposition">塑形（Body Recomposition）</option>
-            <option value="strength">力量（Strength）</option>
+            <option value="strength">力量举（Powerlifting）</option>
           </select>
         </label>
         <label className="block">

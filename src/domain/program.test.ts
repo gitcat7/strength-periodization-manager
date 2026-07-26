@@ -39,8 +39,29 @@ describe("buildFourWeekProgram", () => {
       ? intermediateStrength[0].exercises.find((exercise) => exercise.exerciseSlug === "bench_press")
       : undefined;
 
-    expect(beginnerBench).toMatchObject({ targetReps: 7, targetSets: 4, targetWeight: 85 });
-    expect(intermediateBench).toMatchObject({ targetReps: 5, targetSets: 4, targetWeight: 95 });
+    expect(beginnerBench).toMatchObject({ targetReps: 8, targetSets: 4, targetWeight: 82.5 });
+    expect(intermediateBench).toMatchObject({ targetReps: 5, targetSets: 5, targetWeight: 97.5 });
+  });
+
+  it("gives powerlifting and hypertrophy plans distinct main-lift priorities", () => {
+    const baseInput = {
+      templateType: "push_pull_squat" as const,
+      schedule: { mode: "fixed_weekdays" as const, weekdays: [1, 3, 5] },
+      exerciseProfiles: profiles,
+      experienceLevel: "intermediate" as const,
+      startDate: new Date("2026-07-13T00:00:00")
+    };
+    const powerlifting = buildFourWeekProgram({ ...baseInput, goal: "strength" });
+    const hypertrophy = buildFourWeekProgram({ ...baseInput, goal: "hypertrophy" });
+    const firstBench = (items: typeof powerlifting) => {
+      const workout = items[0];
+      return workout.dayType === "training"
+        ? workout.exercises.find((exercise) => exercise.exerciseSlug === "bench_press")
+        : undefined;
+    };
+
+    expect(firstBench(powerlifting)).toMatchObject({ targetSets: 5, targetReps: 5, targetWeight: 97.5 });
+    expect(firstBench(hypertrophy)).toMatchObject({ targetSets: 5, targetReps: 8, targetWeight: 87.5 });
   });
 
   it("assigns a stable zero-based sequence index without changing fixed-weekday dates", () => {
@@ -96,8 +117,8 @@ describe("buildFourWeekProgram", () => {
 
     expect(workouts).toHaveLength(18);
     expect(workouts.at(-1)?.name).toBe("第 6 周 · 腿");
-    expect(workouts[3]?.exercises[0]?.targetWeight).toBe(97.5);
-    expect(workouts[15]?.exercises[0]?.targetWeight).toBe(97.5);
+    expect(workouts[3]?.exercises[0]?.targetWeight).toBe(100);
+    expect(workouts[15]?.exercises[0]?.targetWeight).toBe(100);
   });
 
   it("treats twelve selected weeks as twelve calendar weeks for every template", () => {
