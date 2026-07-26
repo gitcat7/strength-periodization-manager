@@ -1,5 +1,7 @@
 "use client";
 
+import { DB_TABLE } from "../../lib/supabase/table-names";
+
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarDays, CheckCircle2, Loader2, Target, Trophy, XCircle } from "lucide-react";
@@ -116,16 +118,16 @@ export function PrGoalManager() {
 
     const [exerciseResult, liftResult, goalResult] = await Promise.all([
       supabase
-        .from("exercises")
+        .from(DB_TABLE.exercises)
         .select("id,slug,name,default_increment,is_main_lift")
         .eq("is_main_lift", true)
         .order("name", { ascending: true }),
       supabase
-        .from("lift_profiles")
+        .from(DB_TABLE.liftProfiles)
         .select("exercise_id,estimated_1rm")
         .eq("user_id", currentUserId),
       supabase
-        .from("pr_goals")
+        .from(DB_TABLE.prGoals)
         .select("id,exercise_id,current_estimated_1rm,target_weight,target_date,status,exercises(name,slug,default_increment)")
         .eq("user_id", currentUserId)
         .eq("status", "active")
@@ -205,7 +207,7 @@ export function PrGoalManager() {
 
     const supabase = createBrowserSupabaseClient();
     const { error: archiveError } = await supabase
-      .from("pr_goals")
+      .from(DB_TABLE.prGoals)
       .update({
         status: "cancelled",
         updated_at: new Date().toISOString()
@@ -220,7 +222,7 @@ export function PrGoalManager() {
       return;
     }
 
-    const { error: insertError } = await supabase.from("pr_goals").insert({
+    const { error: insertError } = await supabase.from(DB_TABLE.prGoals).insert({
       user_id: userId,
       exercise_id: selectedExercise.id,
       current_estimated_1rm: estimatedOneRm,
@@ -265,7 +267,7 @@ export function PrGoalManager() {
     setMessage("");
     const supabase = createBrowserSupabaseClient();
     const { data: athleteProfile, error: athleteProfileError } = await supabase
-      .from("athlete_profiles")
+      .from(DB_TABLE.athleteProfiles)
       .select("experience_level")
       .eq("user_id", userId)
       .maybeSingle();
@@ -281,7 +283,7 @@ export function PrGoalManager() {
       calculateTrainingMax(estimatedOneRepMax, athleteProfile?.experience_level ?? "beginner"),
       Number(selectedExercise.default_increment) || 2.5
     );
-    const { error } = await supabase.from("lift_profiles").upsert(
+    const { error } = await supabase.from(DB_TABLE.liftProfiles).upsert(
       {
         user_id: userId,
         exercise_id: selectedExercise.id,
@@ -317,7 +319,7 @@ export function PrGoalManager() {
 
     const supabase = createBrowserSupabaseClient();
     const { error } = await supabase
-      .from("pr_goals")
+      .from(DB_TABLE.prGoals)
       .update({
         status: nextStatus,
         updated_at: new Date().toISOString()

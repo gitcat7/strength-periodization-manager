@@ -1,3 +1,4 @@
+import { DB_TABLE } from "./supabase/table-names";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type AnalyticsEventName =
@@ -32,7 +33,7 @@ export async function trackEvent({
 
   try {
     const pagePath = typeof window === "undefined" ? null : window.location.pathname;
-    const { error } = await supabase.from("analytics_events").insert({
+    const { error } = await supabase.from(DB_TABLE.analyticsEvents).insert({
       event_name: eventName,
       page_path: pagePath,
       properties,

@@ -1,5 +1,7 @@
 "use client";
 
+import { DB_TABLE } from "../../lib/supabase/table-names";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -220,7 +222,7 @@ export function ProgramManager() {
     const [recommendationsResult, programResult] = await Promise.all([
       fetchRecommendations(userData.user.id),
       supabase
-        .from("programs")
+        .from(DB_TABLE.programs)
         .select("id,name,template_type,schedule_mode,schedule_config,custom_template_name,status,start_date,end_date")
         .eq("user_id", userData.user.id)
         .eq("status", "active")
@@ -302,12 +304,12 @@ export function ProgramManager() {
     const supabase = createBrowserSupabaseClient();
     const [profileResult, mainLiftsResult] = await Promise.all([
       supabase
-        .from("athlete_profiles")
+        .from(DB_TABLE.athleteProfiles)
         .select("experience_level,goal,training_days_per_week,available_weekdays,session_duration_minutes,injury_notes")
         .eq("user_id", targetUserId)
         .maybeSingle(),
       supabase
-        .from("exercises")
+        .from(DB_TABLE.exercises)
         .select("id,slug,name,default_increment,is_main_lift")
         .eq("is_main_lift", true)
         .order("created_at", { ascending: true })
@@ -336,7 +338,7 @@ export function ProgramManager() {
 
     const profile = profileResult.data;
     const { data: liftRows, error: liftError } = await supabase
-      .from("lift_profiles")
+      .from(DB_TABLE.liftProfiles)
       .select("exercise_id,estimated_1rm")
       .eq("user_id", targetUserId)
       .in("exercise_id", loadedMainLifts.map((exercise) => exercise.id));
@@ -384,7 +386,7 @@ export function ProgramManager() {
 
     setPlanSetupErrors({});
     const supabase = createBrowserSupabaseClient();
-    const { error: profileError } = await supabase.from("athlete_profiles").upsert(
+    const { error: profileError } = await supabase.from(DB_TABLE.athleteProfiles).upsert(
       {
         user_id: userId,
         experience_level: parsed.value.experienceLevel,
@@ -420,7 +422,7 @@ export function ProgramManager() {
       };
     });
     const { error: liftError } = await supabase
-      .from("lift_profiles")
+      .from(DB_TABLE.liftProfiles)
       .upsert(liftPayload, { onConflict: "user_id,exercise_id" });
 
     if (liftError) {
@@ -455,7 +457,7 @@ export function ProgramManager() {
   > {
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await supabase
-      .from("recommendations")
+      .from(DB_TABLE.recommendations)
       .select("id,exercise_id,workout_id,recommendation_type,previous_weight,suggested_weight,reason,status,exercises(name,slug),workouts(scheduled_date,sequence_index,name)")
       .eq("user_id", targetUserId)
       .eq("status", "pending")
@@ -475,8 +477,8 @@ export function ProgramManager() {
   > {
     const supabase = createBrowserSupabaseClient();
     const { data: workoutData, error: workoutError, usedLegacySchema } = await loadWorkoutsWithDayTypeFallback(
-      () => supabase.from("workouts").select("id,scheduled_date,sequence_index,schedule_index,day_type,name,status").eq("program_id", programId).order("schedule_index", { ascending: true }),
-      () => supabase.from("workouts").select("id,scheduled_date,sequence_index,name,status").eq("program_id", programId).order("sequence_index", { ascending: true })
+      () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,schedule_index,day_type,name,status").eq("program_id", programId).order("schedule_index", { ascending: true }),
+      () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,name,status").eq("program_id", programId).order("sequence_index", { ascending: true })
     );
 
     if (workoutError) {
@@ -501,7 +503,7 @@ export function ProgramManager() {
     }
 
     const { data: exerciseData, error: exerciseError } = await supabase
-      .from("workout_exercises")
+      .from(DB_TABLE.workoutExercises)
       .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
       .in("workout_id", workoutIds)
       .order("order_index", { ascending: true });
@@ -545,7 +547,7 @@ export function ProgramManager() {
 
     const supabase = createBrowserSupabaseClient();
     let futureWorkoutsQuery = supabase
-      .from("workouts")
+      .from(DB_TABLE.workouts)
       .select("id")
       .eq("program_id", program.id)
       .neq("status", "completed");
@@ -572,7 +574,7 @@ export function ProgramManager() {
     }
 
     const { error: updateExerciseError } = await supabase
-      .from("workout_exercises")
+      .from(DB_TABLE.workoutExercises)
       .update({
         target_weight: appliedWeight
       })
@@ -589,7 +591,7 @@ export function ProgramManager() {
     const recommendationStatus =
       Number(appliedWeight) === Number(recommendation.suggested_weight) ? "accepted" : "modified";
     const { error: updateRecommendationError } = await supabase
-      .from("recommendations")
+      .from(DB_TABLE.recommendations)
       .update({
         status: recommendationStatus,
         suggested_weight: appliedWeight,
@@ -629,7 +631,7 @@ export function ProgramManager() {
 
     const supabase = createBrowserSupabaseClient();
     const { error } = await supabase
-      .from("recommendations")
+      .from(DB_TABLE.recommendations)
       .update({
         status: "rejected",
         updated_at: new Date().toISOString()
@@ -681,68 +683,68 @@ export function ProgramManager() {
     setStatus("generating");
     setMessage("");
 
-    const saved = await persistPlanSetup();
-    if (!saved) return;
-
-    const supabase = createBrowserSupabaseClient();
-    const schedule: ScheduleConfig =
-      scheduleMode === "fixed_weekdays"
-        ? { mode: "fixed_weekdays", weekdays: selectedWeekdays }
-        : scheduleMode === "cadence"
-          ? { mode: "cadence", trainDays: cadenceTrainDays, restDays: cadenceRestDays }
-          : { mode: "flexible" };
-
-    const { data: exercises, error: exercisesError } = await supabase
-      .from("exercises")
-      .select("id,slug,name,default_increment");
-
-    if (exercisesError || !exercises) {
-      setStatus("error");
-      setMessage(exercisesError?.message ?? "动作数据读取失败。");
-      return;
-    }
-
-    const { data: liftProfiles, error: liftError } = await supabase
-      .from("lift_profiles")
-      .select("exercise_id,estimated_1rm,training_max")
-      .eq("user_id", userId);
-
-    if (liftError || !liftProfiles) {
-      setStatus("error");
-      setMessage(liftError?.message ?? "主项水平读取失败。");
-      return;
-    }
-
-    const exerciseRows = exercises as ExerciseRow[];
-    const exerciseById = new Map(exerciseRows.map((exercise) => [exercise.id, exercise]));
-    const liftRows = liftProfiles as LiftProfileRow[];
-    const exerciseProfiles: ExerciseProfile[] = liftRows
-      .map((lift) => {
-        const exercise = exerciseById.get(lift.exercise_id);
-        if (!exercise) return null;
-
-        return {
-          id: exercise.id,
-          slug: exercise.slug,
-          workingWeight: inferFiveRepWorkingWeight(
-            Number(lift.estimated_1rm),
-            Number(exercise.default_increment) || 2.5
-          ),
-          increment: Number(exercise.default_increment) || 2.5
-        };
-      })
-      .filter(Boolean) as ExerciseProfile[];
-
-    const accessoryProfiles: ExerciseProfile[] = deriveAccessoryProfiles(exerciseRows, exerciseProfiles);
-    const plannedWorkouts = buildFourWeekProgram({
-      templateType,
-      schedule,
-      exerciseProfiles: [...exerciseProfiles, ...accessoryProfiles],
-      weekCount: planSetup.weekCount,
-      trainingDaysPerWeek: planSetup.trainingDaysPerWeek
-    });
-
     try {
+      const saved = await persistPlanSetup();
+      if (!saved) return;
+
+      const supabase = createBrowserSupabaseClient();
+      const schedule: ScheduleConfig =
+        scheduleMode === "fixed_weekdays"
+          ? { mode: "fixed_weekdays", weekdays: selectedWeekdays }
+          : scheduleMode === "cadence"
+            ? { mode: "cadence", trainDays: cadenceTrainDays, restDays: cadenceRestDays }
+            : { mode: "flexible" };
+
+      const { data: exercises, error: exercisesError } = await supabase
+        .from(DB_TABLE.exercises)
+        .select("id,slug,name,default_increment");
+
+      if (exercisesError || !exercises) {
+        setStatus("error");
+        setMessage(exercisesError?.message ?? "动作数据读取失败。");
+        return;
+      }
+
+      const { data: liftProfiles, error: liftError } = await supabase
+        .from(DB_TABLE.liftProfiles)
+        .select("exercise_id,estimated_1rm,training_max")
+        .eq("user_id", userId);
+
+      if (liftError || !liftProfiles) {
+        setStatus("error");
+        setMessage(liftError?.message ?? "主项水平读取失败。");
+        return;
+      }
+
+      const exerciseRows = exercises as ExerciseRow[];
+      const exerciseById = new Map(exerciseRows.map((exercise) => [exercise.id, exercise]));
+      const liftRows = liftProfiles as LiftProfileRow[];
+      const exerciseProfiles: ExerciseProfile[] = liftRows
+        .map((lift) => {
+          const exercise = exerciseById.get(lift.exercise_id);
+          if (!exercise) return null;
+
+          return {
+            id: exercise.id,
+            slug: exercise.slug,
+            workingWeight: inferFiveRepWorkingWeight(
+              Number(lift.estimated_1rm),
+              Number(exercise.default_increment) || 2.5
+            ),
+            increment: Number(exercise.default_increment) || 2.5
+          };
+        })
+        .filter(Boolean) as ExerciseProfile[];
+
+      const accessoryProfiles: ExerciseProfile[] = deriveAccessoryProfiles(exerciseRows, exerciseProfiles);
+      const plannedWorkouts = buildFourWeekProgram({
+        templateType,
+        schedule,
+        exerciseProfiles: [...exerciseProfiles, ...accessoryProfiles],
+        weekCount: planSetup.weekCount,
+        trainingDaysPerWeek: planSetup.trainingDaysPerWeek
+      });
+
       const payload = buildProgramReplacementPayload({
         customTemplateName: useCustomName ? customTemplateName.trim() : null,
         exerciseIdsBySlug: new Map(exerciseRows.map((exercise) => [exercise.slug, exercise.id])),
@@ -768,9 +770,9 @@ export function ProgramManager() {
         })
       );
       setStatus("ready");
-    } catch {
+    } catch (error) {
       setStatus("error");
-      setMessage("计划预览生成失败，请检查训练设置后重试。");
+      setMessage(getPlanGenerationErrorMessage(error));
     }
   }
 
@@ -1206,6 +1208,7 @@ export function PlanSetupForm({
             value={value.goal}
           >
             <option value="hypertrophy">增肌（Hypertrophy）</option>
+            <option value="hypertrophy_strength">力型兼备（Hypertrophy + Strength）</option>
             <option value="fat_loss">减脂（Fat Loss）</option>
             <option value="body_recomposition">塑形（Body Recomposition）</option>
             <option value="strength">力量（Strength）</option>
@@ -1441,11 +1444,17 @@ function getProgramName(templateType: TemplateType) {
 }
 
 function normalizePlanGoal(goal: string): PlanSetupInput["goal"] {
-  if (goal === "hypertrophy_strength") return "hypertrophy";
-  if (goal === "hypertrophy" || goal === "fat_loss" || goal === "body_recomposition" || goal === "strength") {
+  if (goal === "hypertrophy" || goal === "hypertrophy_strength" || goal === "fat_loss" || goal === "body_recomposition" || goal === "strength") {
     return goal;
   }
   return "strength";
+}
+
+function getPlanGenerationErrorMessage(error: unknown) {
+  if (error instanceof TypeError && /load failed|failed to fetch/i.test(error.message)) {
+    return "网络连接失败，请检查网络后重试。已填写的计划参数仍会保留。";
+  }
+  return "计划预览生成失败，请检查训练设置后重试。";
 }
 
 function getScheduleConfig(schedule: ScheduleConfig) {

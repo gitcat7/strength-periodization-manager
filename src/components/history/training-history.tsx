@@ -1,5 +1,7 @@
 "use client";
 
+import { DB_TABLE } from "../../lib/supabase/table-names";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Brain, CalendarDays, CheckCircle2, Dumbbell, Loader2, Moon, Save, TrendingUp } from "lucide-react";
@@ -121,8 +123,8 @@ export function TrainingHistory() {
 
         const { data: workoutData, error: workoutError } = await withTimeout(
           loadWorkoutsWithDayTypeFallback(
-            () => supabase.from("workouts").select("id,scheduled_date,name,completed_at,day_type").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12),
-            () => supabase.from("workouts").select("id,scheduled_date,name,completed_at").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12)
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at,day_type").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12),
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12)
           ),
           "训练历史读取超时，请刷新页面后重试。"
         );
@@ -154,7 +156,7 @@ export function TrainingHistory() {
         const [exerciseResult, recommendationResult] = await Promise.all([
           withTimeout(
             supabase
-              .from("workout_exercises")
+              .from(DB_TABLE.workoutExercises)
               .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercise_name_snapshot,exercise_metadata_snapshot,exercise_provider,external_exercise_id,exercises(name,slug,training_direction)")
               .in("workout_id", workoutIds)
               .order("order_index", { ascending: true }),
@@ -162,7 +164,7 @@ export function TrainingHistory() {
           ),
           withTimeout(
             supabase
-              .from("recommendations")
+              .from(DB_TABLE.recommendations)
               .select("id,workout_id,recommendation_type,previous_weight,suggested_weight,reason,status,exercises(name,slug)")
               .eq("user_id", user.id)
               .in("workout_id", workoutIds)
@@ -187,7 +189,7 @@ export function TrainingHistory() {
         if (workoutExerciseIds.length > 0) {
           const { data: logsData, error: logsError } = await withTimeout(
             supabase
-              .from("set_logs")
+              .from(DB_TABLE.setLogs)
               .select("id,workout_exercise_id,set_index,target_weight,target_reps,actual_weight,actual_reps,rpe,completed")
               .in("workout_exercise_id", workoutExerciseIds)
               .order("set_index", { ascending: true }),
@@ -341,7 +343,7 @@ export function TrainingHistory() {
 
     const supabase = createBrowserSupabaseClient();
     const { error } = await supabase
-      .from("set_logs")
+      .from(DB_TABLE.setLogs)
       .upsert(
         normalizedLogs.map((log) => ({
           workout_exercise_id: log.workout_exercise_id,

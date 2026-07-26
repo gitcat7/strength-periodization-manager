@@ -1,3 +1,4 @@
+import { DB_TABLE } from "./supabase/table-names";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 
@@ -19,7 +20,7 @@ export async function authenticateAgentRequest(request: Request): Promise<AgentI
   const tokenHash = createHash("sha256").update(token).digest("hex");
   const supabase = createAdminSupabaseClient();
   const { data, error } = await supabase
-    .from("agent_access_tokens")
+    .from(DB_TABLE.agentAccessTokens)
     .select("id,user_id,token_hash,expires_at,revoked_at")
     .eq("token_hash", tokenHash)
     .maybeSingle();
@@ -35,7 +36,7 @@ export async function authenticateAgentRequest(request: Request): Promise<AgentI
   }
 
   await supabase
-    .from("agent_access_tokens")
+    .from(DB_TABLE.agentAccessTokens)
     .update({ last_used_at: new Date().toISOString() })
     .eq("id", data.id)
     .eq("user_id", data.user_id);
