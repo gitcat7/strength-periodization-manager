@@ -35,6 +35,12 @@
 
 ## 2. SQL 执行顺序
 
+### 云端结构变更与迁移同步
+
+任何在 Supabase Dashboard、SQL Editor 或运维工具执行的表、索引、RLS、函数或 RPC 优化，都必须先写入或同步写入仓库的 `supabase/migrations/<唯一版本>_<说明>.sql`。禁止只在云端修改而不留下 migration；这会造成环境漂移，后续本地、预览和生产无法可靠复现。
+
+执行前后在 Supabase Dashboard 的 SQL Editor 或 CLI migration history 核对已应用版本，并与仓库迁移文件列表逐项比对。发现云端版本缺失时，先补充描述该实际变更的 migration 并代码审查，再继续任何依赖该结构的发布；不要猜测数据库状态或直接修改用户业务数据。
+
 首次部署或重建：
 
 1. 执行 `supabase/schema.sql`
