@@ -1,0 +1,37 @@
+export type PlanOutlineWorkout = {
+  day_type: "training" | "rest";
+  id: string;
+  name: string;
+  schedule_index: number;
+  scheduled_date: string;
+  status: string;
+};
+
+export function groupPlanOutline(workouts: PlanOutlineWorkout[], startDate: string) {
+  const start = new Date(`${startDate}T00:00:00`);
+  const sorted = [...workouts].sort((a, b) => a.schedule_index - b.schedule_index);
+  const weeks = new Map<number, PlanOutlineWorkout[]>();
+  sorted.forEach((workout) => {
+    const day = new Date(`${workout.scheduled_date}T00:00:00`);
+    const week = Math.max(1, Math.floor((day.getTime() - start.getTime()) / 86400000 / 7) + 1);
+    weeks.set(week, [...(weeks.get(week) ?? []), workout]);
+  });
+  return [...weeks].map(([week, items]) => ({
+    week,
+    cycles: groupCycles(items)
+  }));
+}
+
+function groupCycles(workouts: PlanOutlineWorkout[]) {
+  const cycles: PlanOutlineWorkout[][] = [];
+  let current: PlanOutlineWorkout[] = [];
+  workouts.forEach((workout) => {
+    if (workout.day_type === "training" && current.some((item) => item.day_type === "training" && item.name === workout.name)) {
+      cycles.push(current);
+      current = [];
+    }
+    current.push(workout);
+  });
+  if (current.length > 0) cycles.push(current);
+  return cycles.map((items, index) => ({ index: index + 1, workouts: items }));
+}
