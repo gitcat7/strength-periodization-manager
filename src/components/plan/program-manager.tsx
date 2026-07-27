@@ -10,6 +10,7 @@ import type { RecommendationType } from "@/domain/fitness-coach";
 import { getNextWorkoutState } from "@/domain/next-workout";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
 import {
+  validateProfileContext,
   validatePlanSetup,
   type PlanSetupInput,
   type PlanSetupValidationResult
@@ -181,6 +182,7 @@ export function ProgramManager() {
   const [planSetupErrors, setPlanSetupErrors] = useState<Record<string, string>>({});
   const [persistedSessionDuration, setPersistedSessionDuration] = useState(60);
   const [showPlanSetup, setShowPlanSetup] = useState(false);
+  const [showProfileContext, setShowProfileContext] = useState(false);
   const [regenerationDialog, setRegenerationDialog] = useState(createRegenerationDialogState);
   const confirmationInFlight = useRef(false);
   const pendingReplacementPayload = useRef<ProgramReplacementPayload | null>(null);
@@ -286,6 +288,7 @@ export function ProgramManager() {
     }
 
     setProgram(programData as ProgramRow);
+    setPlanSetup((current) => ({ ...current, weekCount: getProgramWeekCount(programData as Pick<ProgramRow, "start_date" | "end_date">) }));
     const loadedWorkouts = await loadWorkouts(programData.id);
     if (!loadedWorkouts.ok) {
       return false;
@@ -459,6 +462,43 @@ export function ProgramManager() {
 
     clearTrainingDataCaches();
     return true;
+  }
+
+  async function saveProfileContext() {
+    if (!userId) return;
+
+    const parsed = validateProfileContext(planSetup);
+    if (!parsed.ok) {
+      setPlanSetupErrors(parsed.fieldErrors);
+      return;
+    }
+
+    setStatus("generating");
+    setMessage("");
+    const { error } = await createBrowserSupabaseClient()
+      .from(DB_TABLE.athleteProfiles)
+      .update({
+        current_body_weight_kg: parsed.value.currentBodyWeightKg,
+        target_weight_change_kg_per_week: parsed.value.targetWeightChangeKgPerWeek,
+        weight_change_last_14_days_kg: parsed.value.weightChangeLast14DaysKg,
+        nutrition_adherence: parsed.value.nutritionAdherence,
+        protein_target_met: parsed.value.proteinTargetMet,
+        recovery_status: parsed.value.recoveryStatus,
+        updated_at: new Date().toISOString()
+      })
+      .eq("user_id", userId);
+
+    if (error) {
+      setStatus("error");
+      setMessage(error.message);
+      return;
+    }
+
+    clearTrainingDataCaches();
+    setPlanSetupErrors({});
+    setShowProfileContext(false);
+    setMessage("画像数据已保存；下次重建计划时会使用这些体重、饮食与恢复数据。");
+    setStatus("ready");
   }
 
   async function loadRecommendations(targetUserId: string) {
@@ -938,6 +978,16 @@ export function ProgramManager() {
         />
       ) : null}
 
+      {program && showProfileContext ? (
+        <ProfileContextForm
+          errors={planSetupErrors}
+          isSaving={status === "generating"}
+          onChange={setPlanSetup}
+          onSave={saveProfileContext}
+          value={planSetup}
+        />
+      ) : null}
+
       {message ? (
         <p className={`rounded-lg border px-3 py-2 text-sm ${status === "error" ? "border-red-200 text-red-600" : "border-line text-muted"}`}>
           {message}
@@ -1005,6 +1055,14 @@ export function ProgramManager() {
               type="button"
             >
               {showPlanSetup ? "收起计划参数" : "调整计划参数"}
+            </button>
+            <button
+              className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={status === "generating"}
+              onClick={() => setShowProfileContext((current) => !current)}
+              type="button"
+            >
+              {showProfileContext ? "收起画像更新" : "更新体重、饮食与恢复"}
             </button>
           </div>
         </section>
@@ -1190,6 +1248,135 @@ export function ProgramManager() {
         />
       ) : null}
     </div>
+  );
+}
+
+export function getProgramWeekCount(program: Pick<ProgramRow, "start_date" | "end_date">) {
+  const start = Date.parse(`${program.start_date}T00:00:00Z`);
+  const end = Date.parse(`${program.end_date}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 4;
+  return Math.min(12, Math.max(1, Math.ceil((end - start + 86_400_000) / 604_800_000)));
+}
+
+export function ProfileContextForm({
+  errors,
+  isSaving,
+  onChange,
+  onSave,
+  value
+}: {
+  errors: Record<string, string>;
+  isSaving: boolean;
+  onChange: (value: PlanSetupInput) => void;
+  onSave: () => void;
+  value: PlanSetupInput;
+}) {
+  function update(patch: Partial<PlanSetupInput>) {
+    onChange({ ...value, ...patch });
+  }
+
+  return (
+    <section className="rounded-lg border border-line bg-white p-4">
+      <div className="mb-4">
+        <p className="page-kicker">训练画像</p>
+        <h2 className="text-xl font-bold">更新体重、饮食与恢复</h2>
+        <p className="mt-1 text-sm leading-6 text-muted">保存不会修改当前周期、已安排的训练或历史记录；这些数据会用于下一次重建计划。</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">当前体重（可选）</span>
+          <input
+            aria-label="当前体重 kg"
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            inputMode="decimal"
+            max="300"
+            min="30"
+            onChange={(event) => update({ currentBodyWeightKg: event.target.value })}
+            placeholder="例如 70"
+            step="0.1"
+            type="number"
+            value={value.currentBodyWeightKg ?? ""}
+          />
+          {errors.currentBodyWeightKg ? <p className="mt-1 text-xs text-red-600">{errors.currentBodyWeightKg}</p> : null}
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">目标体重（可选）</span>
+          <input
+            aria-label="目标体重 kg"
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            inputMode="decimal"
+            max="300"
+            min="30"
+            onChange={(event) => update({ targetBodyWeightKg: event.target.value })}
+            placeholder="例如 65"
+            step="0.1"
+            type="number"
+            value={value.targetBodyWeightKg ?? ""}
+          />
+          <p className="mt-1 text-xs text-muted">按 {value.weekCount} 周换算为每周体重变化。</p>
+          {errors.targetBodyWeightKg ? <p className="mt-1 text-xs text-red-600">{errors.targetBodyWeightKg}</p> : null}
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">近 14 天体重变化（可选）</span>
+          <input
+            aria-label="近14天体重变化 kg"
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            inputMode="decimal"
+            max="3"
+            min="-3"
+            onChange={(event) => update({ weightChangeLast14DaysKg: event.target.value })}
+            placeholder="当前体重 - 14 天前体重"
+            step="0.1"
+            type="number"
+            value={value.weightChangeLast14DaysKg ?? ""}
+          />
+          {errors.weightChangeLast14DaysKg ? <p className="mt-1 text-xs text-red-600">{errors.weightChangeLast14DaysKg}</p> : null}
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">饮食执行度</span>
+          <select
+            aria-label="饮食执行度"
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            onChange={(event) => update({ nutritionAdherence: event.target.value as PlanSetupInput["nutritionAdherence"] })}
+            value={value.nutritionAdherence ?? "moderate"}
+          >
+            <option value="high">高：大部分时间按计划执行</option>
+            <option value="moderate">中：有少量偏离</option>
+            <option value="low">低：近期难以稳定执行</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">恢复状态</span>
+          <select
+            aria-label="恢复状态"
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            onChange={(event) => update({ recoveryStatus: event.target.value as PlanSetupInput["recoveryStatus"] })}
+            value={value.recoveryStatus ?? "normal"}
+          >
+            <option value="high">良好：睡眠、精力和酸痛都可控</option>
+            <option value="normal">一般：可正常训练</option>
+            <option value="low">偏低：疲劳、睡眠或酸痛影响训练</option>
+          </select>
+        </label>
+      </div>
+      <label className="mt-3 flex items-start gap-2 text-sm">
+        <input
+          checked={value.proteinTargetMet ?? false}
+          className="mt-1 h-4 w-4"
+          onChange={(event) => update({ proteinTargetMet: event.target.checked })}
+          type="checkbox"
+        />
+        <span>近期大多数日子达到自己的蛋白质目标</span>
+      </label>
+      <button
+        className="pressable mt-4 inline-flex h-11 items-center justify-center rounded-md bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={isSaving}
+        onClick={onSave}
+        type="button"
+      >
+        {isSaving ? "保存中…" : "保存画像数据"}
+      </button>
+    </section>
   );
 }
 

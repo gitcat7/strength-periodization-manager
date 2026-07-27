@@ -18,6 +18,24 @@ export type PlanSetupInput = {
   trainingDaysPerWeek: number;
 };
 
+export type ProfileContextInput = Pick<PlanSetupInput,
+  "nutritionAdherence" | "proteinTargetMet" | "recoveryStatus" | "currentBodyWeightKg" | "targetBodyWeightKg" | "weightChangeLast14DaysKg" | "weekCount"
+>;
+
+export type ValidatedProfileContext = {
+  nutritionAdherence: NutritionAdherence;
+  proteinTargetMet: boolean;
+  recoveryStatus: RecoveryStatus;
+  currentBodyWeightKg: number | null;
+  targetBodyWeightKg: number | null;
+  targetWeightChangeKgPerWeek: number | null;
+  weightChangeLast14DaysKg: number | null;
+};
+
+export type ProfileContextValidationResult =
+  | { ok: true; value: ValidatedProfileContext }
+  | { ok: false; fieldErrors: Record<string, string> };
+
 export type ValidatedPlanSetup = Omit<PlanSetupInput, "experienceLevel" | "lifts" | "nutritionAdherence" | "proteinTargetMet" | "recoveryStatus" | "currentBodyWeightKg" | "targetBodyWeightKg" | "weightChangeLast14DaysKg"> & {
   experienceLevel: PlanExperienceLevel;
   lifts: Array<{ exerciseId: string; workingWeight: number; reps: number }>;
@@ -37,14 +55,7 @@ export type PlanSetupValidationResult =
 export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationResult {
   const fieldErrors: Record<string, string> = {};
   const experienceLevel = isPlanExperienceLevel(input.experienceLevel) ? input.experienceLevel : null;
-  const currentBodyWeightKg = parseOptionalNumber(input.currentBodyWeightKg ?? "", 30, 300);
-  const targetBodyWeightKg = parseOptionalNumber(input.targetBodyWeightKg ?? "", 30, 300);
-  const weightChangeLast14DaysKg = parseOptionalNumber(input.weightChangeLast14DaysKg ?? "", -3, 3);
-  const hasCurrentBodyWeight = typeof currentBodyWeightKg === "number";
-  const hasTargetBodyWeight = typeof targetBodyWeightKg === "number";
-  const targetWeightChangeKgPerWeek = hasCurrentBodyWeight && hasTargetBodyWeight
-    ? roundToTwoDecimals((targetBodyWeightKg - currentBodyWeightKg) / input.weekCount)
-    : null;
+  const profileContext = validateProfileContext(input);
   const lifts = input.lifts.flatMap((lift) => {
     const workingWeight = Number(lift.weightKg);
     const reps = Number(lift.reps);
@@ -66,31 +77,13 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
     fieldErrors.experienceLevel = "请选择训练经验";
   }
 
-  if (currentBodyWeightKg === undefined) {
-    fieldErrors.currentBodyWeightKg = "当前体重应在 30 至 300 kg 之间";
-  }
-
-  if (targetBodyWeightKg === undefined) {
-    fieldErrors.targetBodyWeightKg = "目标体重应在 30 至 300 kg 之间";
-  }
-
-  if (hasTargetBodyWeight && !hasCurrentBodyWeight) {
-    fieldErrors.currentBodyWeightKg = "填写目标体重时，还需要填写当前体重";
-  }
-
-  if (targetWeightChangeKgPerWeek !== null && (targetWeightChangeKgPerWeek < -1.5 || targetWeightChangeKgPerWeek > 1)) {
-    fieldErrors.targetBodyWeightKg = "按当前周期折算后，每周体重变化应在 -1.5 至 1 kg 之间";
-  }
-
-  if (weightChangeLast14DaysKg === undefined) {
-    fieldErrors.weightChangeLast14DaysKg = "近 14 天体重变化应在 -3 至 3 kg 之间";
-  }
+  if (!profileContext.ok) Object.assign(fieldErrors, profileContext.fieldErrors);
 
   if (lifts.length === 0) {
     fieldErrors.lifts = "至少录入一个主项最近工作组";
   }
 
-  if (Object.keys(fieldErrors).length > 0 || !experienceLevel) {
+  if (Object.keys(fieldErrors).length > 0 || !experienceLevel || !profileContext.ok) {
     return { ok: false, fieldErrors };
   }
 
@@ -101,14 +94,50 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
       goal: input.goal,
       injuryNotes: input.injuryNotes.trim().slice(0, 500),
       lifts,
+      ...profileContext.value,
+      weekCount: input.weekCount,
+      trainingDaysPerWeek: input.trainingDaysPerWeek
+    }
+  };
+}
+
+export function validateProfileContext(input: ProfileContextInput): ProfileContextValidationResult {
+  const fieldErrors: Record<string, string> = {};
+  const currentBodyWeightKg = parseOptionalNumber(input.currentBodyWeightKg ?? "", 30, 300);
+  const targetBodyWeightKg = parseOptionalNumber(input.targetBodyWeightKg ?? "", 30, 300);
+  const weightChangeLast14DaysKg = parseOptionalNumber(input.weightChangeLast14DaysKg ?? "", -3, 3);
+  const hasCurrentBodyWeight = typeof currentBodyWeightKg === "number";
+  const hasTargetBodyWeight = typeof targetBodyWeightKg === "number";
+  const targetWeightChangeKgPerWeek = hasCurrentBodyWeight && hasTargetBodyWeight
+    ? roundToTwoDecimals((targetBodyWeightKg - currentBodyWeightKg) / input.weekCount)
+    : null;
+
+  if (currentBodyWeightKg === undefined) {
+    fieldErrors.currentBodyWeightKg = "当前体重应在 30 至 300 kg 之间";
+  }
+  if (targetBodyWeightKg === undefined) {
+    fieldErrors.targetBodyWeightKg = "目标体重应在 30 至 300 kg 之间";
+  }
+  if (hasTargetBodyWeight && !hasCurrentBodyWeight) {
+    fieldErrors.currentBodyWeightKg = "填写目标体重时，还需要填写当前体重";
+  }
+  if (targetWeightChangeKgPerWeek !== null && (targetWeightChangeKgPerWeek < -1.5 || targetWeightChangeKgPerWeek > 1)) {
+    fieldErrors.targetBodyWeightKg = "按当前周期折算后，每周体重变化应在 -1.5 至 1 kg 之间";
+  }
+  if (weightChangeLast14DaysKg === undefined) {
+    fieldErrors.weightChangeLast14DaysKg = "近 14 天体重变化应在 -3 至 3 kg 之间";
+  }
+  if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
+
+  return {
+    ok: true,
+    value: {
       nutritionAdherence: input.nutritionAdherence ?? "moderate",
       proteinTargetMet: input.proteinTargetMet ?? false,
       recoveryStatus: input.recoveryStatus ?? "normal",
       currentBodyWeightKg: currentBodyWeightKg ?? null,
       targetBodyWeightKg: targetBodyWeightKg ?? null,
       targetWeightChangeKgPerWeek,
-      weekCount: input.weekCount,
-      trainingDaysPerWeek: input.trainingDaysPerWeek,
       weightChangeLast14DaysKg: weightChangeLast14DaysKg ?? null
     }
   };

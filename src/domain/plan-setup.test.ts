@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validatePlanSetup, type PlanSetupInput } from "./plan-setup";
+import { validatePlanSetup, validateProfileContext, type PlanSetupInput } from "./plan-setup";
 
 function baseInput(overrides: Partial<PlanSetupInput> = {}): PlanSetupInput {
   return {
@@ -14,6 +14,26 @@ function baseInput(overrides: Partial<PlanSetupInput> = {}): PlanSetupInput {
 }
 
 describe("validatePlanSetup", () => {
+  it("lets an existing-plan user save body context without a working-set entry", () => {
+    const result = validateProfileContext({
+      currentBodyWeightKg: "70",
+      targetBodyWeightKg: "65",
+      weightChangeLast14DaysKg: "-0.8",
+      nutritionAdherence: "high",
+      proteinTargetMet: true,
+      recoveryStatus: "normal",
+      weekCount: 12
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        currentBodyWeightKg: 70,
+        targetWeightChangeKgPerWeek: -0.42
+      }
+    });
+  });
+
   it("converts a target body weight into a weekly change using the selected plan duration", () => {
     const result = validatePlanSetup({
       experienceLevel: "novice",

@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import { PlanSetupForm } from "./program-manager";
+import { PlanSetupForm, ProfileContextForm } from "./program-manager";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -18,6 +18,36 @@ afterEach(() => {
 });
 
 describe("PlanSetupForm", () => {
+  it("offers existing-plan users a profile-only save action", () => {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    act(() => root?.render(
+      <ProfileContextForm
+        errors={{}}
+        isSaving={false}
+        onChange={() => undefined}
+        onSave={() => undefined}
+        value={{
+          experienceLevel: "novice",
+          goal: "fat_loss",
+          injuryNotes: "",
+          lifts: [],
+          currentBodyWeightKg: "70",
+          targetBodyWeightKg: "65",
+          weekCount: 12,
+          trainingDaysPerWeek: 3
+        }}
+      />
+    ));
+
+    expect(container.textContent).toContain("更新体重、饮食与恢复");
+    expect(container.querySelector('input[aria-label="当前体重 kg"]')).toHaveProperty("value", "70");
+    expect(container.querySelector('input[aria-label="目标体重 kg"]')).toHaveProperty("value", "65");
+    expect(Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("保存画像数据"))).toBeTruthy();
+  });
+
   it("shows the first-plan setup and retains a working-set input", () => {
     container = document.createElement("div");
     document.body.append(container);

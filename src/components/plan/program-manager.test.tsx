@@ -15,7 +15,7 @@ vi.mock("@/lib/supabase/browser", () => ({
   createBrowserSupabaseClient: () => supabaseClient
 }));
 
-import { ProgramManager } from "./program-manager";
+import { getProgramWeekCount, ProgramManager } from "./program-manager";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -33,6 +33,10 @@ afterEach(() => {
 });
 
 describe("ProgramManager cache hydration", () => {
+  it("uses an existing program's actual duration when converting target body weight", () => {
+    expect(getProgramWeekCount({ end_date: "2026-10-18", start_date: "2026-07-27" })).toBe(12);
+  });
+
   it("keeps loading and does not render another account's cached plan before authentication resolves", () => {
     writeClientCache("strength-training-cache:plan", {
       program: {
@@ -94,14 +98,32 @@ describe("ProgramManager cache hydration", () => {
     expect(view.textContent).not.toContain("TypeError: Load failed");
     expect(generateButton).not.toHaveProperty("disabled", true);
   });
+
+  it("shows a profile-only context entry for an existing plan", async () => {
+    supabaseClient = createSupabaseClient({ activeProgram: true });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("更新体重、饮食与恢复");
+  });
 });
 
 function createSupabaseClient({
   pendingAuth = false,
-  profileUpsertError
+  profileUpsertError,
+  activeProgram = false
 }: {
   pendingAuth?: boolean;
   profileUpsertError?: Error;
+  activeProgram?: boolean;
 }) {
   const mainLifts = [
     { default_increment: 2.5, id: "squat", is_main_lift: true, name: "深蹲", slug: "squat" },
@@ -131,7 +153,22 @@ function createSupabaseClient({
       if (table === "usr_athlete_profiles") return profileTable;
       if (table === "cfg_exercises") return createQuery({ data: mainLifts, error: null });
       if (table === "log_recommendations") return createQuery({ data: [], error: null });
-      if (table === "plan_programs") return createQuery({ data: null, error: null });
+      if (table === "plan_programs") {
+        return createQuery({
+          data: activeProgram ? {
+            custom_template_name: null,
+            end_date: "2026-08-23",
+            id: "program-1",
+            name: "当前训练计划",
+            schedule_config: { weekdays: [1, 3, 5] },
+            schedule_mode: "fixed_weekdays",
+            start_date: "2026-07-27",
+            status: "active",
+            template_type: "push_pull_squat"
+          } : null,
+          error: null
+        });
+      }
       if (table === "usr_lift_profiles") return Object.assign(createQuery({ data: [], error: null }), { upsert: () => Promise.resolve({ error: null }) });
       return createQuery({ data: [], error: null });
     }
