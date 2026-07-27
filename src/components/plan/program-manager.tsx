@@ -190,7 +190,10 @@ export function ProgramManager() {
   const firstScheduleItemRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    loadCurrentProgram();
+    void loadCurrentProgram().catch((error: unknown) => {
+      setStatus("error");
+      setMessage(getPlanLoadErrorMessage(error));
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1788,6 +1791,13 @@ function getPlanGenerationErrorMessage(error: unknown) {
     return "网络连接失败，请检查网络后重试。已填写的计划参数仍会保留。";
   }
   return "计划预览生成失败，请检查训练设置后重试。";
+}
+
+function getPlanLoadErrorMessage(error: unknown) {
+  if (error instanceof TypeError && /load failed|failed to fetch/i.test(error.message)) {
+    return "网络连接失败，请检查网络后刷新页面重试。已填写的计划参数不会丢失。";
+  }
+  return "计划数据读取失败，请刷新页面重试。";
 }
 
 function getScheduleConfig(schedule: ScheduleConfig) {

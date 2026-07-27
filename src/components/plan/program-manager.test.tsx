@@ -99,6 +99,24 @@ describe("ProgramManager cache hydration", () => {
     expect(generateButton).not.toHaveProperty("disabled", true);
   });
 
+  it("shows a recoverable message when initial plan data loading fails", async () => {
+    supabaseClient = createSupabaseClient({ profileLoadError: new TypeError("Load failed") });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("网络连接失败，请检查网络后刷新页面重试。已填写的计划参数不会丢失。");
+    expect(container.textContent).not.toContain("TypeError: Load failed");
+    expect(container.textContent).toContain("创建第一个计划");
+  });
+
   it("shows a profile-only context entry for an existing plan", async () => {
     supabaseClient = createSupabaseClient({ activeProgram: true });
     container = document.createElement("div");
@@ -118,10 +136,12 @@ describe("ProgramManager cache hydration", () => {
 
 function createSupabaseClient({
   pendingAuth = false,
+  profileLoadError,
   profileUpsertError,
   activeProgram = false
 }: {
   pendingAuth?: boolean;
+  profileLoadError?: Error;
   profileUpsertError?: Error;
   activeProgram?: boolean;
 }) {
@@ -132,7 +152,7 @@ function createSupabaseClient({
     { default_increment: 2.5, id: "press", is_main_lift: true, name: "推举", slug: "overhead_press" }
   ];
   const createQuery = (result: unknown) => {
-    const promise = Promise.resolve(result);
+    const promise = result instanceof Error ? Promise.reject(result) : Promise.resolve(result);
     const query = Object.assign(promise, {
       eq: () => query,
       in: () => query,
@@ -143,7 +163,7 @@ function createSupabaseClient({
     });
     return query;
   };
-  const profileTable = Object.assign(createQuery({ data: null, error: null }), {
+  const profileTable = Object.assign(createQuery(profileLoadError ?? { data: null, error: null }), {
     upsert: () => profileUpsertError ? Promise.reject(profileUpsertError) : Promise.resolve({ error: null })
   });
 
