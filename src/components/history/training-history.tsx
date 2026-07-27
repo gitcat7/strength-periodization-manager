@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Brain, CalendarDays, CheckCircle2, Dumbbell, Loader2, Moon, Save, TrendingUp } from "lucide-react";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
 import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
+import { filterHistoryWorkoutsByDate } from "@/domain/history-date-filter";
 import { requiresRpeForWorkoutExercise, resolveCompletedSetValues, resolveSetLoadType, validateRecordedSet } from "@/domain/workout-recording";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
@@ -95,6 +96,7 @@ export function TrainingHistory() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [message, setMessage] = useState("");
   const [historySearch, setHistorySearch] = useState("");
+  const [selectedDate, setSelectedDate] = useState("");
   const focusedWorkoutRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -123,8 +125,8 @@ export function TrainingHistory() {
 
         const { data: workoutData, error: workoutError } = await withTimeout(
           loadWorkoutsWithDayTypeFallback(
-            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at,day_type").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12),
-            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12)
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at,day_type").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }),
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false })
           ),
           "训练历史读取超时，请刷新页面后重试。"
         );
@@ -267,6 +269,10 @@ export function TrainingHistory() {
   }, [recommendations]);
 
   const focusedWorkoutId = useMemo(() => getHistoryWorkoutFocusId(historySearch, workouts), [historySearch, workouts]);
+  const filteredWorkouts = useMemo(
+    () => filterHistoryWorkoutsByDate(workouts, selectedDate),
+    [selectedDate, workouts]
+  );
 
   useEffect(() => {
     if (!focusedWorkoutId || status !== "ready" || !focusedWorkoutRef.current) return;
@@ -435,6 +441,12 @@ export function TrainingHistory() {
         <Metric label="平均 RPE" value={summary.averageRpe === null ? "-" : summary.averageRpe.toFixed(1)} />
       </section>
 
+      <HistoryDateFilter
+        hasResults={filteredWorkouts.length > 0}
+        onSelectedDateChange={setSelectedDate}
+        selectedDate={selectedDate}
+      />
+
       <section className="space-y-3">
         {message ? (
           <p className={`rounded-lg border px-3 py-2 text-sm ${saveStatus === "error" ? "border-red-200 text-red-600" : "border-line text-muted"}`}>
@@ -442,7 +454,7 @@ export function TrainingHistory() {
           </p>
         ) : null}
 
-        {workouts.map((workout) => {
+        {filteredWorkouts.map((workout) => {
           const exercises = exercisesByWorkoutId[workout.id] ?? [];
           const workoutRecommendations = recommendationsByWorkoutId[workout.id] ?? [];
           const workoutLogs = exercises.flatMap((exercise) => setLogsByExerciseId[exercise.id] ?? []);
@@ -611,6 +623,44 @@ export function TrainingHistory() {
         })}
       </section>
     </div>
+  );
+}
+
+export function HistoryDateFilter({
+  hasResults,
+  onSelectedDateChange,
+  selectedDate
+}: {
+  hasResults: boolean;
+  onSelectedDateChange: (date: string) => void;
+  selectedDate: string;
+}) {
+  return (
+    <section className="rounded-xl border border-line bg-white p-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="min-w-[13rem] flex-1">
+          <span className="mb-1 block text-sm font-medium">选择训练日期</span>
+          <input
+            aria-label="选择训练日期"
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            onChange={(event) => onSelectedDateChange(event.target.value)}
+            type="date"
+            value={selectedDate}
+          />
+        </label>
+        <button
+          className="pressable h-11 rounded-lg border border-line bg-white px-4 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={!selectedDate}
+          onClick={() => onSelectedDateChange("")}
+          type="button"
+        >
+          全部历史
+        </button>
+      </div>
+      {selectedDate && !hasResults ? (
+        <p className="mt-3 rounded-lg bg-field px-3 py-3 text-sm text-muted">当天没有完成训练。你可以选择其他日期，或查看全部历史。</p>
+      ) : null}
+    </section>
   );
 }
 
