@@ -85,4 +85,31 @@ describe("PlanSetupForm", () => {
     expect(container.textContent).not.toContain("单次时长");
     expect(container.textContent).not.toContain("可训练日");
   });
+
+  it("keeps decimal working weights readable in the compact mobile row", () => {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    act(() => root?.render(
+      <PlanSetupForm
+        errors={{}}
+        mainLifts={[{ id: "bench", slug: "bench_press", name: "卧推", default_increment: 2.5 }]}
+        onChange={() => undefined}
+        value={{
+          experienceLevel: "beginner",
+          goal: "strength",
+          injuryNotes: "",
+          lifts: [{ exerciseId: "bench", weightKg: "22.5", reps: "5" }],
+          weekCount: 4,
+          trainingDaysPerWeek: 3
+        }}
+      />
+    ));
+
+    const weight = container.querySelector('input[aria-label="卧推重量 kg"]');
+    expect(weight).toHaveProperty("value", "22.5");
+    expect(weight?.className).toContain("text-right");
+    expect(weight?.className).toContain("tabular-nums");
+  });
 });

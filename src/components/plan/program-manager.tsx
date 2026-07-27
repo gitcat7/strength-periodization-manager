@@ -1589,13 +1589,13 @@ export function PlanSetupForm({
               reps: "5"
             };
             return (
-              <div className="grid grid-cols-[minmax(0,1fr)_84px_72px] items-end gap-2" key={exercise.id}>
+              <div className="grid grid-cols-[minmax(0,1fr)_96px_64px] items-end gap-2" key={exercise.id}>
                 <p className="min-w-0 truncate pb-2 font-medium">{exercise.name}</p>
                 <label className="block">
                   <span className="mb-1 block text-[11px] text-muted">重量 kg</span>
                   <input
                     aria-label={`${exercise.name}重量 kg`}
-                    className="h-10 w-full rounded-md border border-line bg-white px-2 text-sm"
+                    className="h-10 w-full rounded-md border border-line bg-white px-2 text-right text-sm tabular-nums"
                     inputMode="decimal"
                     min="0"
                     onChange={(event) => updateLift(exercise.id, { weightKg: event.target.value })}
