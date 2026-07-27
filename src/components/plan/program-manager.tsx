@@ -152,7 +152,7 @@ const defaultPlanSetup: PlanSetupInput = {
   proteinTargetMet: false,
   recoveryStatus: "normal",
   currentBodyWeightKg: "",
-  targetWeightChangeKgPerWeek: "",
+  targetBodyWeightKg: "",
   weightChangeLast14DaysKg: "",
   weekCount: 4,
   trainingDaysPerWeek: 3
@@ -380,7 +380,9 @@ export function ProgramManager() {
         ? profile.recovery_status
         : "normal",
       currentBodyWeightKg: profile.current_body_weight_kg ? String(profile.current_body_weight_kg) : "",
-      targetWeightChangeKgPerWeek: profile.target_weight_change_kg_per_week ? String(profile.target_weight_change_kg_per_week) : "",
+      targetBodyWeightKg: profile.current_body_weight_kg && profile.target_weight_change_kg_per_week
+        ? String(Number(profile.current_body_weight_kg) + Number(profile.target_weight_change_kg_per_week) * 4)
+        : "",
       weightChangeLast14DaysKg: profile.weight_change_last_14_days_kg ? String(profile.weight_change_last_14_days_kg) : "",
       lifts: loadedMainLifts.map((exercise) => {
         const estimatedOneRepMax = estimatedByExerciseId.get(exercise.id) ?? 0;
@@ -723,6 +725,8 @@ export function ProgramManager() {
     try {
       const saved = await persistPlanSetup();
       if (!saved) return;
+      const validatedSetup = validatePlanSetup(planSetup);
+      if (!validatedSetup.ok) return;
 
       const supabase = createBrowserSupabaseClient();
       const schedule: ScheduleConfig =
@@ -789,7 +793,7 @@ export function ProgramManager() {
         proteinTargetMet: planSetup.proteinTargetMet,
         recoveryStatus: planSetup.recoveryStatus,
         currentBodyWeightKg: Number(planSetup.currentBodyWeightKg) || null,
-        targetWeightChangeKgPerWeek: Number(planSetup.targetWeightChangeKgPerWeek) || null,
+        targetWeightChangeKgPerWeek: validatedSetup.value.targetWeightChangeKgPerWeek,
         weightChangeLast14DaysKg: Number(planSetup.weightChangeLast14DaysKg) || null
       });
 
@@ -1314,20 +1318,21 @@ export function PlanSetupForm({
             {errors.currentBodyWeightKg ? <p className="mt-1 text-xs text-red-600">{errors.currentBodyWeightKg}</p> : null}
           </label>
           <label className="block">
-            <span className="mb-1 block text-sm font-medium">目标体重变化（可选）</span>
+            <span className="mb-1 block text-sm font-medium">目标体重（可选）</span>
             <input
-              aria-label="目标每周体重变化 kg"
+              aria-label="目标体重 kg"
               className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
               inputMode="decimal"
-              min="-1.5"
-              max="1"
-              onChange={(event) => update({ targetWeightChangeKgPerWeek: event.target.value })}
-              placeholder="减脂填负数，例如 -0.3"
+              min="30"
+              max="300"
+              onChange={(event) => update({ targetBodyWeightKg: event.target.value })}
+              placeholder="例如 65"
               step="0.1"
               type="number"
-              value={value.targetWeightChangeKgPerWeek ?? ""}
+              value={value.targetBodyWeightKg ?? ""}
             />
-            {errors.targetWeightChangeKgPerWeek ? <p className="mt-1 text-xs text-red-600">{errors.targetWeightChangeKgPerWeek}</p> : null}
+            <p className="mt-1 text-xs text-muted">系统会按 {value.weekCount} 周自动换算每周体重变化。</p>
+            {errors.targetBodyWeightKg ? <p className="mt-1 text-xs text-red-600">{errors.targetBodyWeightKg}</p> : null}
           </label>
           <label className="block">
             <span className="mb-1 block text-sm font-medium">近 14 天体重变化（可选）</span>

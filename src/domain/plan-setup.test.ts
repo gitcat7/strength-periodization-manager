@@ -14,7 +14,7 @@ function baseInput(overrides: Partial<PlanSetupInput> = {}): PlanSetupInput {
 }
 
 describe("validatePlanSetup", () => {
-  it("keeps evidence inputs that determine energy availability and recovery", () => {
+  it("converts a target body weight into a weekly change using the selected plan duration", () => {
     const result = validatePlanSetup({
       experienceLevel: "novice",
       goal: "fat_loss",
@@ -23,10 +23,10 @@ describe("validatePlanSetup", () => {
       nutritionAdherence: "high",
       proteinTargetMet: true,
       recoveryStatus: "low",
-      currentBodyWeightKg: "80",
-      targetWeightChangeKgPerWeek: "-0.4",
+      currentBodyWeightKg: "70",
+      targetBodyWeightKg: "65",
       weightChangeLast14DaysKg: "-0.8",
-      weekCount: 4,
+      weekCount: 12,
       trainingDaysPerWeek: 3
     });
 
@@ -36,8 +36,9 @@ describe("validatePlanSetup", () => {
         nutritionAdherence: "high",
         proteinTargetMet: true,
         recoveryStatus: "low",
-        currentBodyWeightKg: 80,
-        targetWeightChangeKgPerWeek: -0.4,
+        currentBodyWeightKg: 70,
+        targetBodyWeightKg: 65,
+        targetWeightChangeKgPerWeek: -0.42,
         weightChangeLast14DaysKg: -0.8
       }
     });

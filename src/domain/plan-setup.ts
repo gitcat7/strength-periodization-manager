@@ -12,19 +12,20 @@ export type PlanSetupInput = {
   proteinTargetMet?: boolean;
   recoveryStatus?: RecoveryStatus;
   currentBodyWeightKg?: string;
-  targetWeightChangeKgPerWeek?: string;
+  targetBodyWeightKg?: string;
   weightChangeLast14DaysKg?: string;
   weekCount: number;
   trainingDaysPerWeek: number;
 };
 
-export type ValidatedPlanSetup = Omit<PlanSetupInput, "experienceLevel" | "lifts" | "nutritionAdherence" | "proteinTargetMet" | "recoveryStatus" | "currentBodyWeightKg" | "targetWeightChangeKgPerWeek" | "weightChangeLast14DaysKg"> & {
+export type ValidatedPlanSetup = Omit<PlanSetupInput, "experienceLevel" | "lifts" | "nutritionAdherence" | "proteinTargetMet" | "recoveryStatus" | "currentBodyWeightKg" | "targetBodyWeightKg" | "weightChangeLast14DaysKg"> & {
   experienceLevel: PlanExperienceLevel;
   lifts: Array<{ exerciseId: string; workingWeight: number; reps: number }>;
   nutritionAdherence: NutritionAdherence;
   proteinTargetMet: boolean;
   recoveryStatus: RecoveryStatus;
   currentBodyWeightKg: number | null;
+  targetBodyWeightKg: number | null;
   targetWeightChangeKgPerWeek: number | null;
   weightChangeLast14DaysKg: number | null;
 };
@@ -37,8 +38,13 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
   const fieldErrors: Record<string, string> = {};
   const experienceLevel = isPlanExperienceLevel(input.experienceLevel) ? input.experienceLevel : null;
   const currentBodyWeightKg = parseOptionalNumber(input.currentBodyWeightKg ?? "", 30, 300);
-  const targetWeightChangeKgPerWeek = parseOptionalNumber(input.targetWeightChangeKgPerWeek ?? "", -1.5, 1);
+  const targetBodyWeightKg = parseOptionalNumber(input.targetBodyWeightKg ?? "", 30, 300);
   const weightChangeLast14DaysKg = parseOptionalNumber(input.weightChangeLast14DaysKg ?? "", -3, 3);
+  const hasCurrentBodyWeight = typeof currentBodyWeightKg === "number";
+  const hasTargetBodyWeight = typeof targetBodyWeightKg === "number";
+  const targetWeightChangeKgPerWeek = hasCurrentBodyWeight && hasTargetBodyWeight
+    ? roundToTwoDecimals((targetBodyWeightKg - currentBodyWeightKg) / input.weekCount)
+    : null;
   const lifts = input.lifts.flatMap((lift) => {
     const workingWeight = Number(lift.weightKg);
     const reps = Number(lift.reps);
@@ -64,8 +70,16 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
     fieldErrors.currentBodyWeightKg = "当前体重应在 30 至 300 kg 之间";
   }
 
-  if (targetWeightChangeKgPerWeek === undefined) {
-    fieldErrors.targetWeightChangeKgPerWeek = "目标体重变化应在每周 -1.5 至 1 kg 之间";
+  if (targetBodyWeightKg === undefined) {
+    fieldErrors.targetBodyWeightKg = "目标体重应在 30 至 300 kg 之间";
+  }
+
+  if (hasTargetBodyWeight && !hasCurrentBodyWeight) {
+    fieldErrors.currentBodyWeightKg = "填写目标体重时，还需要填写当前体重";
+  }
+
+  if (targetWeightChangeKgPerWeek !== null && (targetWeightChangeKgPerWeek < -1.5 || targetWeightChangeKgPerWeek > 1)) {
+    fieldErrors.targetBodyWeightKg = "按当前周期折算后，每周体重变化应在 -1.5 至 1 kg 之间";
   }
 
   if (weightChangeLast14DaysKg === undefined) {
@@ -91,7 +105,8 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
       proteinTargetMet: input.proteinTargetMet ?? false,
       recoveryStatus: input.recoveryStatus ?? "normal",
       currentBodyWeightKg: currentBodyWeightKg ?? null,
-      targetWeightChangeKgPerWeek: targetWeightChangeKgPerWeek ?? null,
+      targetBodyWeightKg: targetBodyWeightKg ?? null,
+      targetWeightChangeKgPerWeek,
       weekCount: input.weekCount,
       trainingDaysPerWeek: input.trainingDaysPerWeek,
       weightChangeLast14DaysKg: weightChangeLast14DaysKg ?? null
@@ -107,4 +122,8 @@ function parseOptionalNumber(value: string, min: number, max: number) {
   if (!value.trim()) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : undefined;
+}
+
+function roundToTwoDecimals(value: number) {
+  return Math.round(value * 100) / 100;
 }

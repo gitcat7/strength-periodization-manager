@@ -46,6 +46,8 @@ describe("PlanSetupForm", () => {
     expect(container.textContent).toContain("力型兼备（Hypertrophy + Strength）");
     expect(container.textContent).toContain("体重、饮食与恢复");
     expect(container.querySelector('input[aria-label="当前体重 kg"]')).not.toBeNull();
+    expect(container.querySelector('input[aria-label="目标体重 kg"]')).not.toBeNull();
+    expect(container.textContent).toContain("系统会按 4 周自动换算每周体重变化");
     expect(container.querySelector('select[aria-label="恢复状态"]')).not.toBeNull();
     expect(container.textContent).toContain("计划周期");
     expect(container.querySelector('select[aria-label="计划周期"]')).toHaveProperty("value", "4");
