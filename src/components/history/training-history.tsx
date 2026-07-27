@@ -14,7 +14,9 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 import { resolveWorkoutExerciseName } from "@/lib/workout-exercise-presentation";
 import { getRecommendationStatusLabel, type RecommendationType } from "@/domain/fitness-coach";
+import { type HistoryCalendarEntry } from "@/domain/history-calendar";
 import { getHistoryWorkoutFocusId } from "./history-workout-focus";
+import { HistoryCalendar } from "./history-calendar";
 
 type WorkoutRow = {
   day_type: "training" | "rest";
@@ -22,6 +24,7 @@ type WorkoutRow = {
   scheduled_date: string;
   name: string;
   completed_at: string | null;
+  status: string;
 };
 
 type WorkoutExerciseRow = {
@@ -97,6 +100,7 @@ export function TrainingHistory() {
   const [message, setMessage] = useState("");
   const [historySearch, setHistorySearch] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
+  const [calendarMonth, setCalendarMonth] = useState(getCalendarMonth);
   const focusedWorkoutRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -125,8 +129,8 @@ export function TrainingHistory() {
 
         const { data: workoutData, error: workoutError } = await withTimeout(
           loadWorkoutsWithDayTypeFallback(
-            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at,day_type").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }),
-            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false })
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at,day_type,status").eq("user_id", user.id).in("status", ["completed", "scheduled"]).order("scheduled_date", { ascending: false }),
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at,status").eq("user_id", user.id).in("status", ["completed", "scheduled"]).order("scheduled_date", { ascending: false })
           ),
           "训练历史读取超时，请刷新页面后重试。"
         );
@@ -137,9 +141,13 @@ export function TrainingHistory() {
           return;
         }
 
-        const completedWorkouts = (workoutData ?? []) as WorkoutRow[];
-        setWorkouts(completedWorkouts);
+        const loadedWorkouts = ((workoutData ?? []) as WorkoutRow[]).map((workout) => ({
+          ...workout,
+          day_type: workout.day_type ?? "training"
+        }));
+        setWorkouts(loadedWorkouts);
 
+        const completedWorkouts = loadedWorkouts.filter((workout) => workout.status === "completed");
         const workoutIds = completedWorkouts.map((workout) => workout.id);
         if (workoutIds.length === 0) {
           setWorkoutExercises([]);
@@ -149,7 +157,7 @@ export function TrainingHistory() {
             recommendations: [],
             setLogs: [],
             workoutExercises: [],
-            workouts: completedWorkouts
+            workouts: loadedWorkouts
           });
           setStatus("ready");
           return;
@@ -221,7 +229,7 @@ export function TrainingHistory() {
           recommendations: (recommendationData ?? []) as unknown as RecommendationRow[],
           setLogs: logRows,
           workoutExercises: exerciseRows,
-          workouts: completedWorkouts
+          workouts: loadedWorkouts
         });
         setStatus("ready");
       } catch (error) {
@@ -232,7 +240,7 @@ export function TrainingHistory() {
 
     const cached = readClientCache<HistoryCache>(historyCacheKey);
     if (cached) {
-      setWorkouts(cached.workouts);
+      setWorkouts(cached.workouts.map((workout) => ({ ...workout, day_type: workout.day_type ?? "training", status: workout.status ?? "completed" })));
       setWorkoutExercises(cached.workoutExercises);
       setSetLogs(cached.setLogs);
       setRecommendations(cached.recommendations);
@@ -269,10 +277,31 @@ export function TrainingHistory() {
   }, [recommendations]);
 
   const focusedWorkoutId = useMemo(() => getHistoryWorkoutFocusId(historySearch, workouts), [historySearch, workouts]);
+  const completedWorkouts = useMemo(() => workouts.filter((workout) => workout.status === "completed"), [workouts]);
   const filteredWorkouts = useMemo(
-    () => filterHistoryWorkoutsByDate(workouts, selectedDate),
-    [selectedDate, workouts]
+    () => filterHistoryWorkoutsByDate(completedWorkouts, selectedDate),
+    [completedWorkouts, selectedDate]
   );
+
+  const calendarEntries = useMemo<HistoryCalendarEntry[]>(() => {
+    const workoutIdByExerciseId = new Map(workoutExercises.map((exercise) => [exercise.id, exercise.workout_id]));
+    const completedVolumeByWorkoutId = new Map<string, number>();
+    setLogs.filter((log) => log.completed).forEach((log) => {
+      const workoutId = workoutIdByExerciseId.get(log.workout_exercise_id);
+      if (!workoutId) return;
+      const volume = Number(log.actual_weight ?? 0) * Number(log.actual_reps ?? 0);
+      completedVolumeByWorkoutId.set(workoutId, (completedVolumeByWorkoutId.get(workoutId) ?? 0) + volume);
+    });
+
+    return workouts.map((workout) => ({
+      day_type: workout.day_type,
+      id: workout.id,
+      name: workout.name,
+      scheduled_date: workout.scheduled_date,
+      status: workout.status,
+      volume: completedVolumeByWorkoutId.get(workout.id) ?? 0
+    }));
+  }, [setLogs, workoutExercises, workouts]);
 
   useEffect(() => {
     if (!focusedWorkoutId || status !== "ready" || !focusedWorkoutRef.current) return;
@@ -380,7 +409,7 @@ export function TrainingHistory() {
 
   const summary = useMemo(() => {
     const trainingWorkoutIds = new Set(
-      filterTrainingMetricWorkouts(workouts.map((workout) => ({ ...workout, dayType: workout.day_type }))).map((workout) => workout.id)
+      filterTrainingMetricWorkouts(completedWorkouts.map((workout) => ({ ...workout, dayType: workout.day_type }))).map((workout) => workout.id)
     );
     const trainingExerciseIds = new Set(workoutExercises.filter((exercise) => trainingWorkoutIds.has(exercise.workout_id)).map((exercise) => exercise.id));
     const completedLogs = setLogs.filter((log) => log.completed && trainingExerciseIds.has(log.workout_exercise_id));
@@ -399,7 +428,7 @@ export function TrainingHistory() {
       volume,
       workouts: trainingWorkoutIds.size
     };
-  }, [setLogs, workoutExercises, workouts]);
+  }, [completedWorkouts, setLogs, workoutExercises]);
 
   if (status === "loading") {
     return (
@@ -441,11 +470,17 @@ export function TrainingHistory() {
         <Metric label="平均 RPE" value={summary.averageRpe === null ? "-" : summary.averageRpe.toFixed(1)} />
       </section>
 
-      <HistoryDateFilter
-        hasResults={filteredWorkouts.length > 0}
+      <HistoryCalendar
+        entries={calendarEntries}
+        month={calendarMonth}
+        onMonthChange={setCalendarMonth}
         onSelectedDateChange={setSelectedDate}
         selectedDate={selectedDate}
       />
+
+      {selectedDate && filteredWorkouts.length === 0 ? (
+        <p className="rounded-lg bg-field px-3 py-3 text-sm text-muted">当天没有完成训练；月历会继续显示待训练或休息安排。</p>
+      ) : null}
 
       <section className="space-y-3">
         {message ? (
@@ -626,44 +661,6 @@ export function TrainingHistory() {
   );
 }
 
-export function HistoryDateFilter({
-  hasResults,
-  onSelectedDateChange,
-  selectedDate
-}: {
-  hasResults: boolean;
-  onSelectedDateChange: (date: string) => void;
-  selectedDate: string;
-}) {
-  return (
-    <section className="rounded-xl border border-line bg-white p-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="min-w-[13rem] flex-1">
-          <span className="mb-1 block text-sm font-medium">选择训练日期</span>
-          <input
-            aria-label="选择训练日期"
-            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
-            onChange={(event) => onSelectedDateChange(event.target.value)}
-            type="date"
-            value={selectedDate}
-          />
-        </label>
-        <button
-          className="pressable h-11 rounded-lg border border-line bg-white px-4 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
-          disabled={!selectedDate}
-          onClick={() => onSelectedDateChange("")}
-          type="button"
-        >
-          全部历史
-        </button>
-      </div>
-      {selectedDate && !hasResults ? (
-        <p className="mt-3 rounded-lg bg-field px-3 py-3 text-sm text-muted">当天没有完成训练。你可以选择其他日期，或查看全部历史。</p>
-      ) : null}
-    </section>
-  );
-}
-
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-line bg-field p-4">
@@ -812,4 +809,9 @@ function withTimeout<T>(promise: PromiseLike<T>, message: string, timeoutMs = 10
       window.setTimeout(() => reject(new Error(message)), timeoutMs);
     })
   ]);
+}
+
+function getCalendarMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
