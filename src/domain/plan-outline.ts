@@ -3,6 +3,7 @@ export type PlanOutlineWorkout = {
   id: string;
   name: string;
   schedule_index: number;
+  sequence_index: number | null;
   scheduled_date: string;
   status: string;
 };
@@ -18,6 +19,9 @@ export function groupPlanOutline(workouts: PlanOutlineWorkout[], startDate: stri
   });
   return [...weeks].map(([week, items]) => ({
     week,
+    startDate: items[0]?.scheduled_date ?? startDate,
+    endDate: items.at(-1)?.scheduled_date ?? startDate,
+    ...getTrainingDaySummary(items),
     cycles: groupCycles(items)
   }));
 }
@@ -33,5 +37,23 @@ function groupCycles(workouts: PlanOutlineWorkout[]) {
     current.push(workout);
   });
   if (current.length > 0) cycles.push(current);
-  return cycles.map((items, index) => ({ index: index + 1, workouts: items }));
+  return cycles.map((items, index) => ({
+    index: index + 1,
+    label: items
+      .filter((item) => item.day_type === "training")
+      .map((item) => item.name)
+      .join(" → ") || "恢复安排",
+    startDate: items[0]?.scheduled_date ?? "",
+    endDate: items.at(-1)?.scheduled_date ?? "",
+    ...getTrainingDaySummary(items),
+    workouts: items
+  }));
+}
+
+function getTrainingDaySummary(workouts: PlanOutlineWorkout[]) {
+  const trainingDays = workouts.filter((workout) => workout.day_type === "training");
+  return {
+    completedTrainingDays: trainingDays.filter((workout) => workout.status === "completed").length,
+    totalTrainingDays: trainingDays.length
+  };
 }

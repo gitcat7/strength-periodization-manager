@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Brain, CheckCircle2, Dumbbell, Loader2, Moon, PlusCircle, XCircle } from "lucide-react";
 import type { RecommendationType } from "@/domain/fitness-coach";
+import { groupPlanOutline } from "@/domain/plan-outline";
 import { getNextWorkoutState } from "@/domain/next-workout";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
 import {
@@ -183,6 +184,7 @@ export function ProgramManager() {
   const [persistedSessionDuration, setPersistedSessionDuration] = useState(60);
   const [showPlanSetup, setShowPlanSetup] = useState(false);
   const [showProfileContext, setShowProfileContext] = useState(false);
+  const [scheduleExpansionMode, setScheduleExpansionMode] = useState<"default" | "all" | "collapsed">("default");
   const [regenerationDialog, setRegenerationDialog] = useState(createRegenerationDialogState);
   const confirmationInFlight = useRef(false);
   const pendingReplacementPayload = useRef<ProgramReplacementPayload | null>(null);
@@ -205,6 +207,11 @@ export function ProgramManager() {
       return groups;
     }, {});
   }, [workoutExercises]);
+  const planOutline = useMemo(() => program ? groupPlanOutline(workouts, program.start_date) : [], [program, workouts]);
+  const defaultPlanWeek = useMemo(
+    () => getDefaultPlanWeek(planOutline, program?.start_date ?? "", new Date()),
+    [planOutline, program?.start_date]
+  );
 
   async function loadCurrentProgram({
     requireActiveProgram = false,
@@ -1142,7 +1149,24 @@ export function ProgramManager() {
 
       {workouts.length > 0 ? (
         <section className="space-y-3">
-          {workouts.map((workout, index) => {
+          <div className="flex justify-end gap-4">
+            <button className="text-sm font-semibold text-action" onClick={() => setScheduleExpansionMode("all")} type="button">
+              全部展开
+            </button>
+            <button className="text-sm font-semibold text-action" onClick={() => setScheduleExpansionMode("collapsed")} type="button">
+              全部收起
+            </button>
+          </div>
+          <div key={scheduleExpansionMode} className="space-y-3">
+          {planOutline.map(({ week, startDate, endDate, completedTrainingDays, totalTrainingDays, cycles }) => (
+            <details className="rounded-xl border border-line bg-white p-3" key={`week-${week}`} open={scheduleExpansionMode === "all" || (scheduleExpansionMode === "default" && week === defaultPlanWeek)}>
+              <summary className="cursor-pointer font-semibold">第 {week} 周 · {startDate} 至 {endDate} · 已完成 {completedTrainingDays}/{totalTrainingDays} 训练日</summary>
+              <div className="mt-3 space-y-3">
+                {cycles.map((cycle) => (
+                  <details className="rounded-lg bg-field p-3" key={`week-${week}-cycle-${cycle.index}`} open={scheduleExpansionMode === "all"}>
+                    <summary className="cursor-pointer text-sm font-semibold">循环 {cycle.index} · {cycle.label} · {cycle.startDate} 至 {cycle.endDate} · 已完成 {cycle.completedTrainingDays}/{cycle.totalTrainingDays}</summary>
+                    <div className="mt-3 space-y-3">
+                      {cycle.workouts.map((workout, index) => {
             const isRestDay = workout.day_type === "rest";
             const presentation = getScheduleItemPresentation({ dayType: workout.day_type, status: workout.status });
             const workoutMeta = isRestDay ? null : getWorkoutMeta(workout.name);
@@ -1222,7 +1246,14 @@ export function ProgramManager() {
               ) : null}
             </article>
             );
-          })}
+                      })}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </details>
+          ))}
+          </div>
         </section>
       ) : null}
       {regenerationDialog.open ? (
@@ -1886,6 +1917,21 @@ function getPlanWorkoutState(workout: WorkoutRow, isNextWorkout: boolean) {
           : `${nextState.daysUntil} 天后建议训练`
       : `第 ${(workout.sequence_index ?? 0) + 1} 节`
   };
+}
+
+function getProgramWeekNumber(startDate: string, now: Date) {
+  const start = new Date(`${startDate}T00:00:00`);
+  return Math.max(1, Math.floor((now.getTime() - start.getTime()) / 86400000 / 7) + 1);
+}
+
+function getDefaultPlanWeek(
+  outline: Array<{ week: number; totalTrainingDays: number; completedTrainingDays: number }> ,
+  startDate: string,
+  now: Date
+) {
+  const currentWeek = getProgramWeekNumber(startDate, now);
+  if (outline.some((item) => item.week === currentWeek)) return currentWeek;
+  return outline.find((item) => item.completedTrainingDays < item.totalTrainingDays)?.week ?? outline.at(-1)?.week ?? 1;
 }
 
 function formatDate(date: Date) {
