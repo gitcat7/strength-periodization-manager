@@ -132,6 +132,24 @@ describe("ProgramManager cache hydration", () => {
 
     expect(container.textContent).toContain("更新体重、饮食与恢复");
   });
+
+  it("shows management actions instead of a creation action for an existing plan", async () => {
+    supabaseClient = createSupabaseClient({ activeProgram: true });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("调整计划");
+    expect(container.textContent).toContain("重置计划");
+    expect(container.textContent).not.toContain("生成 4 周训练计划");
+  });
 });
 
 function createSupabaseClient({

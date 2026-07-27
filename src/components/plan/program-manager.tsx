@@ -1040,24 +1040,18 @@ export function ProgramManager() {
             <button
               className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
               disabled={status === "generating"}
-              onClick={() => {
-                if (!showPlanSetup) {
-                  setShowPlanSetup(true);
-                  return;
-                }
-                openRegenerationDialog();
-              }}
+              onClick={() => setShowPlanSetup(true)}
               ref={regenerationTriggerRef}
               type="button"
             >
-              {showPlanSetup ? "预览并重新生成计划" : "调整周期并重新生成"}
+              调整计划
             </button>
             <button
               className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink"
-              onClick={() => setShowPlanSetup((current) => !current)}
+              onClick={openRegenerationDialog}
               type="button"
             >
-              {showPlanSetup ? "收起计划参数" : "调整计划参数"}
+              重置计划
             </button>
             <button
               className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
