@@ -60,6 +60,18 @@
 3. 先在 Supabase SQL Editor 手动执行。
 4. 执行后立即打开 `/diagnostics`。
 
+### P1 单次训练时长（30 分钟）迁移
+
+在发布包含 30 分钟训练预算的前端前，先在 SQL Editor 执行
+`supabase/migrations/20260729000000_session_duration_30_minutes.sql`。该迁移只替换时长校验，保留已有的 45、60、75、90 分钟资料；75 分钟资料会在应用中按 60 分钟标准预算兼容处理。执行后验证：
+
+```sql
+select conname, pg_get_constraintdef(oid)
+from pg_constraint
+where conrelid = 'public.usr_athlete_profiles'::regclass
+  and conname = 'usr_athlete_profiles_session_duration_minutes_check';
+```
+
 表前缀迁移后，旧表名保留为仅供读取的兼容视图；新应用代码必须只访问带前缀的物理表。不要向旧名称写入，也不要在验证完成前删除这些兼容视图。
 
 结构与备注验收（不读取用户训练数据）：

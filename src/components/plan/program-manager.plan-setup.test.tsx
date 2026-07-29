@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import { PlanGenerationRationale, PlanSetupForm, ProfileContextForm } from "./program-manager";
+import { getPlanExerciseExplanation, PlanGenerationRationale, PlanSetupForm, ProfileContextForm } from "./program-manager";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -18,6 +18,15 @@ afterEach(() => {
 });
 
 describe("PlanSetupForm", () => {
+  it("explains technical-start and calibrated-weight prescriptions without medical inference", () => {
+    const value = { experienceLevel: "beginner" as const, goal: "strength" as const, injuryNotes: "肩部备注", lifts: [], weekCount: 4, trainingDaysPerWeek: 3, sessionDurationMinutes: 30 };
+    expect(getPlanExerciseExplanation({ exerciseSlug: "bench_press", targetSets: 2, targetReps: 5, targetWeight: 0, value }))
+      .toContain("技术起始");
+    expect(getPlanExerciseExplanation({ exerciseSlug: "lateral_raise", targetSets: 3, targetReps: 15, targetWeight: 8, value }))
+      .toContain("保守估算待校准");
+    expect(getPlanExerciseExplanation({ exerciseSlug: "lateral_raise", targetSets: 3, targetReps: 15, targetWeight: 8, isAccessoryCalibrated: true, value }))
+      .toContain("辅助动作已校准");
+  });
   it("offers existing-plan users a profile-only save action", () => {
     container = document.createElement("div");
     document.body.append(container);
@@ -82,7 +91,8 @@ describe("PlanSetupForm", () => {
     expect(container.textContent).toContain("计划周期");
     expect(container.querySelector('select[aria-label="计划周期"]')).toHaveProperty("value", "4");
     expect(container.querySelectorAll('select[aria-label="计划周期"] option')).toHaveLength(12);
-    expect(container.textContent).not.toContain("单次时长");
+    expect(container.textContent).toContain("单次训练时长");
+    expect(container.querySelector('select[aria-label="单次训练时长"]')).toHaveProperty("value", "60");
     expect(container.textContent).not.toContain("可训练日");
   });
 

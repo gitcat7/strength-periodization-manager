@@ -143,6 +143,32 @@ type TemplateWorkout = {
   exercises: TemplateExercise[];
 };
 
+export type SessionDurationMinutes = 30 | 45 | 60 | 90;
+
+const exerciseBudgetBySessionDuration: Record<SessionDurationMinutes, number> = {
+  30: 2,
+  45: 3,
+  60: 4,
+  90: Number.POSITIVE_INFINITY
+};
+
+export function normalizeSessionDurationMinutes(value: number | undefined): SessionDurationMinutes {
+  // 75 minutes was accepted by earlier profile versions. Treat it as the
+  // standard one-hour budget until the user chooses one of the four new slots.
+  if (value === 75) return 60;
+  if (value === 30 || value === 45 || value === 60 || value === 90) return value;
+  return 60;
+}
+
+function applySessionDurationBudget(template: TemplateWorkout[], duration: number | undefined) {
+  const exerciseBudget = exerciseBudgetBySessionDuration[normalizeSessionDurationMinutes(duration)];
+  return template.map((workout) => ({
+    ...workout,
+    // Template order intentionally puts the day's lead movement first.
+    exercises: workout.exercises.slice(0, exerciseBudget)
+  }));
+}
+
 const restrictedSlugs: Record<MovementRestriction, string[]> = {
   avoid_overhead_press: ["overhead_press"],
   avoid_horizontal_push: ["bench_press", "incline_dumbbell_press"],
@@ -369,8 +395,9 @@ export function buildFourWeekProgram({
   recoveryStatus = "normal",
   currentBodyWeightKg = null,
   targetWeightChangeKgPerWeek = null,
-  weightChangeLast14DaysKg = null
-  , restrictions = []
+  weightChangeLast14DaysKg = null,
+  restrictions = [],
+  sessionDurationMinutes
 }: {
   templateType: TemplateType;
   availableWeekdays?: number[];
@@ -388,8 +415,12 @@ export function buildFourWeekProgram({
   targetWeightChangeKgPerWeek?: number | null;
   weightChangeLast14DaysKg?: number | null;
   restrictions?: MovementRestriction[];
+  sessionDurationMinutes?: number;
 }) {
-  const template = applyMovementRestrictions(chooseTemplate(templateType), restrictions);
+  const template = applySessionDurationBudget(
+    applyMovementRestrictions(chooseTemplate(templateType), restrictions),
+    sessionDurationMinutes
+  );
   const profileBySlug = new Map(exerciseProfiles.map((profile) => [profile.slug, profile]));
   const normalizedWeekCount = normalizeWeekCount(weekCount);
   const prescriptionPolicy = getPrescriptionPolicy({

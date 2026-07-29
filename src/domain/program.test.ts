@@ -57,6 +57,26 @@ describe("buildFourWeekProgram", () => {
     expect(workouts[3]?.exercises.map((exercise) => exercise.exerciseSlug)).not.toContain("bench_press");
   });
 
+  it("scales generated exercise budgets by session duration without removing the lead movement", () => {
+    const baseInput = {
+      templateType: "three_split" as const,
+      schedule: { mode: "fixed_weekdays" as const, weekdays: [1, 3, 5] },
+      trainingDaysPerWeek: 3,
+      exerciseProfiles: profiles,
+      startDate: new Date("2026-07-13T00:00:00")
+    };
+    const firstTraining = (minutes: 30 | 60 | 90) => buildFourWeekProgram({ ...baseInput, sessionDurationMinutes: minutes })
+      .find((item) => item.dayType === "training");
+
+    const short = firstTraining(30)!;
+    const standard = firstTraining(60)!;
+    const long = firstTraining(90)!;
+    expect(short.exercises).toHaveLength(2);
+    expect(short.exercises[0]?.exerciseSlug).toBe("bench_press");
+    expect(short.exercises.length).toBeLessThan(standard.exercises.length);
+    expect(standard.exercises.length).toBeLessThanOrEqual(long.exercises.length);
+  });
+
   it("removes structured movement restrictions without inferring meaning from notes", () => {
     const workouts = buildFourWeekProgram({
       templateType: "three_split",

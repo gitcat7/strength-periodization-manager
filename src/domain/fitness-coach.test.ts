@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildExerciseCoachRecommendation, getRecommendationStatusLabel } from "./fitness-coach";
+import { buildExerciseCoachRecommendation, buildNextCycleMainLiftRecommendation, getRecommendationStatusLabel } from "./fitness-coach";
 
 describe("exercise coach recommendation safety gate", () => {
   const completedSet = (rpe: number | null) => ({
@@ -115,5 +115,33 @@ describe("recommendation status copy", () => {
     expect(getRecommendationStatusLabel("rejected")).toBe("已忽略");
     expect(getRecommendationStatusLabel("accepted")).toBe("已更新下次训练");
     expect(getRecommendationStatusLabel("modified")).toBe("修改后已更新下次训练");
+  });
+});
+
+describe("next-cycle main-lift recommendation", () => {
+  const met = (rpe: number) => ({
+    actualReps: 5,
+    actualWeight: 100,
+    completed: true,
+    rpe,
+    targetReps: 5,
+    targetWeight: 100
+  });
+
+  it("increases only a well-completed main lift with low RPE", () => {
+    expect(buildNextCycleMainLiftRecommendation({ exerciseName: "杠铃卧推", increment: 2.5, logs: [met(7), met(7)], targetWeight: 100, consecutiveMissedSessions: 0 }))
+      .toMatchObject({ type: "increase", suggestedWeight: 102.5 });
+  });
+
+  it("deloads when completion is poor or consecutive sessions were missed", () => {
+    expect(buildNextCycleMainLiftRecommendation({ exerciseName: "杠铃深蹲", increment: 2.5, logs: [{ ...met(9), completed: false }], targetWeight: 100, consecutiveMissedSessions: 0 }))
+      .toMatchObject({ type: "deload", suggestedWeight: 90 });
+    expect(buildNextCycleMainLiftRecommendation({ exerciseName: "杠铃硬拉", increment: 2.5, logs: [met(7)], targetWeight: 100, consecutiveMissedSessions: 2 }))
+      .toMatchObject({ type: "deload", suggestedWeight: 90 });
+  });
+
+  it("holds when there is not enough real data", () => {
+    expect(buildNextCycleMainLiftRecommendation({ exerciseName: "杠铃推举", increment: 2.5, logs: [], targetWeight: 60, consecutiveMissedSessions: 0 }))
+      .toMatchObject({ type: "hold", suggestedWeight: 60, reason: "杠铃推举数据不足，保持当前处方。" });
   });
 });

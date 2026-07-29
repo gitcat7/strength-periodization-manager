@@ -7,7 +7,7 @@ create table if not exists public.usr_athlete_profiles (
   goal text not null check (goal in ('strength', 'hypertrophy', 'hypertrophy_strength', 'fat_loss', 'body_recomposition')),
   training_days_per_week integer not null check (training_days_per_week in (3, 4, 7)),
   available_weekdays integer[] not null default '{}',
-  session_duration_minutes integer not null check (session_duration_minutes in (45, 60, 75, 90)),
+  session_duration_minutes integer not null check (session_duration_minutes in (30, 45, 60, 75, 90)),
   injury_notes text,
   movement_restrictions text[] not null default '{}',
   current_body_weight_kg numeric(6, 2) check (current_body_weight_kg between 30 and 300),

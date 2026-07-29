@@ -10,12 +10,14 @@ export type PlanSetupInput = {
   injuryNotes: string;
   movementRestrictions?: MovementRestriction[];
   lifts: Array<{ exerciseId: string; weightKg: string; reps: string }>;
+  accessoryLifts?: Array<{ exerciseId: string; weightKg: string; reps: string }>;
   nutritionAdherence?: NutritionAdherence;
   proteinTargetMet?: boolean;
   recoveryStatus?: RecoveryStatus;
   currentBodyWeightKg?: string;
   targetBodyWeightKg?: string;
   weightChangeLast14DaysKg?: string;
+  sessionDurationMinutes?: number;
   weekCount: number;
   trainingDaysPerWeek: number;
 };
@@ -38,9 +40,10 @@ export type ProfileContextValidationResult =
   | { ok: true; value: ValidatedProfileContext }
   | { ok: false; fieldErrors: Record<string, string> };
 
-export type ValidatedPlanSetup = Omit<PlanSetupInput, "experienceLevel" | "lifts" | "movementRestrictions" | "nutritionAdherence" | "proteinTargetMet" | "recoveryStatus" | "currentBodyWeightKg" | "targetBodyWeightKg" | "weightChangeLast14DaysKg"> & {
+export type ValidatedPlanSetup = Omit<PlanSetupInput, "experienceLevel" | "lifts" | "accessoryLifts" | "movementRestrictions" | "nutritionAdherence" | "proteinTargetMet" | "recoveryStatus" | "currentBodyWeightKg" | "targetBodyWeightKg" | "weightChangeLast14DaysKg"> & {
   experienceLevel: PlanExperienceLevel;
   lifts: Array<{ exerciseId: string; workingWeight: number; reps: number }>;
+  accessoryLifts: Array<{ exerciseId: string; workingWeight: number; reps: number }>;
   movementRestrictions: MovementRestriction[];
   nutritionAdherence: NutritionAdherence;
   proteinTargetMet: boolean;
@@ -67,6 +70,13 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
       ? [{ exerciseId: lift.exerciseId, workingWeight, reps }]
       : [];
   });
+  const accessoryLifts = (input.accessoryLifts ?? []).flatMap((lift) => {
+    const workingWeight = Number(lift.weightKg);
+    const reps = Number(lift.reps);
+    return lift.exerciseId.trim() && Number.isFinite(workingWeight) && workingWeight > 0 && workingWeight <= 1000 && Number.isInteger(reps) && reps >= 1 && reps <= 30
+      ? [{ exerciseId: lift.exerciseId, workingWeight, reps }]
+      : [];
+  });
 
   if (!Number.isInteger(input.trainingDaysPerWeek) || input.trainingDaysPerWeek < 1 || input.trainingDaysPerWeek > 7) {
     fieldErrors.trainingDaysPerWeek = "每周训练天数应为 1-7 天";
@@ -74,6 +84,11 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
 
   if (!Number.isInteger(input.weekCount) || input.weekCount < 1 || input.weekCount > 12) {
     fieldErrors.weekCount = "计划周期应为 1-12 周";
+  }
+
+  const sessionDurationMinutes = input.sessionDurationMinutes ?? 60;
+  if (sessionDurationMinutes !== 30 && sessionDurationMinutes !== 45 && sessionDurationMinutes !== 60 && sessionDurationMinutes !== 90) {
+    fieldErrors.sessionDurationMinutes = "单次训练时长仅支持 30、45、60 或 90 分钟";
   }
 
   if (!experienceLevel) {
@@ -98,7 +113,9 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
       injuryNotes: input.injuryNotes.trim().slice(0, 500),
       movementRestrictions: (input.movementRestrictions ?? []).filter(isMovementRestriction),
       lifts,
+      accessoryLifts,
       ...profileContext.value,
+      sessionDurationMinutes,
       weekCount: input.weekCount,
       trainingDaysPerWeek: input.trainingDaysPerWeek
     }

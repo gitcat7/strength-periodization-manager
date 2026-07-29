@@ -24,6 +24,7 @@ import {
 import { buildTodayHeaderView } from "@/domain/workout-presentation";
 import {
   buildExerciseCoachRecommendation,
+  buildNextCycleMainLiftRecommendation,
   getInterruptionAdvice,
   getWorkoutCoachCue,
   type ExerciseCoachRecommendation
@@ -897,18 +898,28 @@ export function TodayWorkout() {
 
   function buildCoachRecommendationsFromCurrentLogs() {
     return exercises.map((exercise) => {
-      const recommendation = buildExerciseCoachRecommendation({
+      const logs = (setLogs[exercise.id] ?? []).map((log) => ({
+        targetWeight: Number(log.target_weight),
+        targetReps: Number(log.target_reps),
+        actualWeight: log.actual_weight,
+        actualReps: log.actual_reps,
+        rpe: log.rpe,
+        completed: log.completed
+      }));
+      const isMainLift = exercise.exercises?.is_main_lift ?? false;
+      const recommendation = isMainLift ? buildNextCycleMainLiftRecommendation({
         exerciseName: exercise.exercises?.name ?? "动作",
         increment: Number(exercise.exercises?.default_increment) || 2.5,
-        isMainLift: exercise.exercises?.is_main_lift ?? false,
-        logs: (setLogs[exercise.id] ?? []).map((log) => ({
-          targetWeight: Number(log.target_weight),
-          targetReps: Number(log.target_reps),
-          actualWeight: log.actual_weight,
-          actualReps: log.actual_reps,
-          rpe: log.rpe,
-          completed: log.completed
-        })),
+        logs,
+        targetWeight: Number(exercise.target_weight),
+        // Missed-session history is not available in the active workout payload;
+        // the conservative decision still handles incomplete logged sets.
+        consecutiveMissedSessions: 0
+      }) : buildExerciseCoachRecommendation({
+        exerciseName: exercise.exercises?.name ?? "动作",
+        increment: Number(exercise.exercises?.default_increment) || 2.5,
+        isMainLift,
+        logs,
         targetWeight: Number(exercise.target_weight)
       });
 

@@ -153,12 +153,14 @@ const defaultPlanSetup: PlanSetupInput = {
   injuryNotes: "",
   movementRestrictions: [],
   lifts: [],
+  accessoryLifts: [],
   nutritionAdherence: "moderate",
   proteinTargetMet: false,
   recoveryStatus: "normal",
   currentBodyWeightKg: "",
   targetBodyWeightKg: "",
   weightChangeLast14DaysKg: "",
+  sessionDurationMinutes: 60,
   weekCount: 4,
   trainingDaysPerWeek: 3
 };
@@ -182,9 +184,9 @@ export function ProgramManager() {
   const [customTemplateName, setCustomTemplateName] = useState("");
   const [useCustomName, setUseCustomName] = useState(false);
   const [mainLifts, setMainLifts] = useState<ExerciseRow[]>([]);
+  const [accessoryExercises, setAccessoryExercises] = useState<ExerciseRow[]>([]);
   const [planSetup, setPlanSetup] = useState<PlanSetupInput>(defaultPlanSetup);
   const [planSetupErrors, setPlanSetupErrors] = useState<Record<string, string>>({});
-  const [persistedSessionDuration, setPersistedSessionDuration] = useState(60);
   const [showPlanSetup, setShowPlanSetup] = useState(false);
   const [showProfileContext, setShowProfileContext] = useState(false);
   const [scheduleExpansionMode, setScheduleExpansionMode] = useState<"default" | "all" | "collapsed">("default");
@@ -335,7 +337,6 @@ export function ProgramManager() {
       supabase
         .from(DB_TABLE.exercises)
         .select("id,slug,name,default_increment,is_main_lift")
-        .eq("is_main_lift", true)
         .order("created_at", { ascending: true })
     ]);
 
@@ -344,8 +345,10 @@ export function ProgramManager() {
       return;
     }
 
-    const loadedMainLifts = (mainLiftsResult.data ?? []) as ExerciseRow[];
+    const allExercises = (mainLiftsResult.data ?? []) as ExerciseRow[];
+    const loadedMainLifts = allExercises.filter((exercise) => exercise.is_main_lift);
     setMainLifts(loadedMainLifts);
+    setAccessoryExercises(allExercises.filter((exercise) => !exercise.is_main_lift && isCalibratableAccessory(exercise.slug)));
 
     if (profileResult.error) {
       setMessage("计划参数读取失败，请刷新后重试。");
@@ -365,7 +368,7 @@ export function ProgramManager() {
       .from(DB_TABLE.liftProfiles)
       .select("exercise_id,estimated_1rm")
       .eq("user_id", targetUserId)
-      .in("exercise_id", loadedMainLifts.map((exercise) => exercise.id));
+      .in("exercise_id", allExercises.map((exercise) => exercise.id));
 
     if (liftError) {
       setMessage("主项最近工作组读取失败，请刷新后重试。");
@@ -384,7 +387,10 @@ export function ProgramManager() {
 
     setSelectedWeekdays(availableWeekdays);
     setTemplateType(getTemplateType(trainingDaysPerWeek));
-    setPersistedSessionDuration(Number(profile.session_duration_minutes) || 60);
+    const savedSessionDuration = Number(profile.session_duration_minutes);
+    const sessionDurationMinutes = savedSessionDuration === 30 || savedSessionDuration === 45 || savedSessionDuration === 60 || savedSessionDuration === 90
+      ? savedSessionDuration
+      : 60;
     setPlanSetup({
       experienceLevel: profile.experience_level as PlanSetupInput["experienceLevel"],
       goal: normalizePlanGoal(profile.goal),
@@ -402,10 +408,16 @@ export function ProgramManager() {
         ? String(Number(profile.current_body_weight_kg) + Number(profile.target_weight_change_kg_per_week) * 4)
         : "",
       weightChangeLast14DaysKg: profile.weight_change_last_14_days_kg ? String(profile.weight_change_last_14_days_kg) : "",
+      sessionDurationMinutes,
       lifts: loadedMainLifts.map((exercise) => {
         const estimatedOneRepMax = estimatedByExerciseId.get(exercise.id) ?? 0;
         const workingWeight = inferFiveRepWorkingWeight(estimatedOneRepMax, Number(exercise.default_increment) || 2.5);
         return { exerciseId: exercise.id, weightKg: workingWeight ? String(workingWeight) : "", reps: "5" };
+      }),
+      accessoryLifts: allExercises.filter((exercise) => !exercise.is_main_lift && isCalibratableAccessory(exercise.slug)).map((exercise) => {
+        const estimatedOneRepMax = estimatedByExerciseId.get(exercise.id) ?? 0;
+        const workingWeight = inferFiveRepWorkingWeight(estimatedOneRepMax, Number(exercise.default_increment) || 2.5);
+        return { exerciseId: exercise.id, weightKg: workingWeight ? String(workingWeight) : "", reps: "10" };
       }),
       weekCount: 4,
       trainingDaysPerWeek
@@ -431,7 +443,7 @@ export function ProgramManager() {
         goal: parsed.value.goal,
         training_days_per_week: parsed.value.trainingDaysPerWeek,
         available_weekdays: selectedWeekdays,
-        session_duration_minutes: persistedSessionDuration,
+        session_duration_minutes: parsed.value.sessionDurationMinutes,
         injury_notes: parsed.value.injuryNotes || null,
         movement_restrictions: parsed.value.movementRestrictions,
         current_body_weight_kg: parsed.value.currentBodyWeightKg,
@@ -452,8 +464,8 @@ export function ProgramManager() {
       return false;
     }
 
-    const incrementById = new Map(mainLifts.map((exercise) => [exercise.id, Number(exercise.default_increment) || 2.5]));
-    const liftPayload = parsed.value.lifts.map((lift) => {
+    const incrementById = new Map([...mainLifts, ...accessoryExercises].map((exercise) => [exercise.id, Number(exercise.default_increment) || 2.5]));
+    const liftPayload = [...parsed.value.lifts, ...parsed.value.accessoryLifts].map((lift) => {
       const estimatedOneRepMax = estimateOneRepMax(lift.workingWeight, lift.reps);
       return {
         user_id: userId,
@@ -850,7 +862,8 @@ export function ProgramManager() {
         currentBodyWeightKg: Number(planSetup.currentBodyWeightKg) || null,
         targetWeightChangeKgPerWeek: validatedSetup.value.targetWeightChangeKgPerWeek,
         weightChangeLast14DaysKg: Number(planSetup.weightChangeLast14DaysKg) || null
-        , restrictions: validatedSetup.value.movementRestrictions
+        , restrictions: validatedSetup.value.movementRestrictions,
+        sessionDurationMinutes: validatedSetup.value.sessionDurationMinutes
       });
 
       const payload = buildProgramReplacementPayload({
@@ -988,6 +1001,7 @@ export function ProgramManager() {
       {(!program || showPlanSetup) ? (
         <>
           <PlanSetupForm
+            accessoryExercises={accessoryExercises}
             errors={planSetupErrors}
             mainLifts={mainLifts}
             onChange={(value) => {
@@ -1242,16 +1256,29 @@ export function ProgramManager() {
               {!isRestDay ? (
                 <div className="space-y-2">
                   {(workoutExercisesByWorkoutId[workout.id] ?? []).map((exercise) => (
-                    <div className="flex items-center justify-between border-b border-line/70 px-1 py-2 text-sm last:border-b-0" key={exercise.id}>
-                      <span>{exercise.exercises?.name ?? "动作"}</span>
-                      <span className="font-semibold">
-                        {formatPrescription({
-                          slug: exercise.exercises?.slug,
-                          targetSets: exercise.target_sets,
+                    <div className="border-b border-line/70 px-1 py-2 text-sm last:border-b-0" key={exercise.id}>
+                      <div className="flex items-center justify-between gap-3">
+                        <span>{exercise.exercises?.name ?? "动作"}</span>
+                        <span className="font-semibold">
+                          {formatPrescription({
+                            slug: exercise.exercises?.slug,
+                            targetSets: exercise.target_sets,
+                            targetReps: exercise.target_reps,
+                            targetWeight: Number(exercise.target_weight)
+                          })}
+                        </span>
+                      </div>
+                      <details className="mt-1 text-xs text-muted">
+                        <summary className="cursor-pointer">查看处方依据</summary>
+                        <p className="mt-1 leading-5">{getPlanExerciseExplanation({
+                          exerciseSlug: exercise.exercises?.slug,
                           targetReps: exercise.target_reps,
-                          targetWeight: Number(exercise.target_weight)
-                        })}
-                      </span>
+                          targetSets: exercise.target_sets,
+                          targetWeight: Number(exercise.target_weight),
+                          isAccessoryCalibrated: accessoryExercises.some((item) => item.slug === exercise.exercises?.slug && Number(planSetup.accessoryLifts?.find((lift) => lift.exerciseId === item.id)?.weightKg) > 0),
+                          value: planSetup
+                        })}</p>
+                      </details>
                     </div>
                   ))}
                 </div>
@@ -1421,11 +1448,13 @@ export function ProfileContextForm({
 }
 
 export function PlanSetupForm({
+  accessoryExercises,
   errors,
   mainLifts,
   onChange,
   value
 }: {
+  accessoryExercises?: ExerciseRow[];
   errors: Record<string, string>;
   mainLifts: ExerciseRow[];
   onChange: (value: PlanSetupInput) => void;
@@ -1435,12 +1464,12 @@ export function PlanSetupForm({
     onChange({ ...value, ...patch });
   }
 
-  function updateLift(exerciseId: string, patch: Partial<{ weightKg: string; reps: string }>) {
-    const existingLift = value.lifts.find((lift) => lift.exerciseId === exerciseId);
-    const lifts = existingLift
-      ? value.lifts.map((lift) => lift.exerciseId === exerciseId ? { ...lift, ...patch } : lift)
-      : [...value.lifts, { exerciseId, weightKg: "", reps: "5", ...patch }];
-    update({ lifts });
+  function updateLift(exerciseId: string, patch: Partial<{ weightKg: string; reps: string }>, kind: "main" | "accessory" = "main") {
+    const source = kind === "main" ? value.lifts : value.accessoryLifts ?? [];
+    const lifts = source.find((lift) => lift.exerciseId === exerciseId)
+      ? source.map((lift) => lift.exerciseId === exerciseId ? { ...lift, ...patch } : lift)
+      : [...source, { exerciseId, weightKg: "", reps: kind === "main" ? "5" : "10", ...patch }];
+    update(kind === "main" ? { lifts } : { accessoryLifts: lifts });
   }
 
   return (
@@ -1478,6 +1507,21 @@ export function PlanSetupForm({
             ))}
           </select>
           {errors.weekCount ? <p className="mt-1 text-xs text-red-600">{errors.weekCount}</p> : null}
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">单次训练时长</span>
+          <select
+            aria-label="单次训练时长"
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            onChange={(event) => update({ sessionDurationMinutes: Number(event.target.value) })}
+            value={value.sessionDurationMinutes ?? 60}
+          >
+            <option value={30}>30 分钟：只保留主项与最必要辅助</option>
+            <option value={45}>45 分钟：主项优先，精简辅助</option>
+            <option value={60}>60 分钟：标准训练量</option>
+            <option value={90}>90 分钟：完整训练量</option>
+          </select>
+          {errors.sessionDurationMinutes ? <p className="mt-1 text-xs text-red-600">{errors.sessionDurationMinutes}</p> : null}
         </label>
         <label className="block">
           <span className="mb-1 block text-sm font-medium">主要目标</span>
@@ -1690,6 +1734,22 @@ export function PlanSetupForm({
         </div>
         {errors.lifts ? <p className="mt-2 text-xs text-red-600">{errors.lifts}</p> : null}
       </div>
+      {(accessoryExercises ?? []).length > 0 ? (
+        <div className="mt-5">
+          <h3 className="font-semibold">辅助动作最近稳定工作组（可选）</h3>
+          <p className="mt-1 text-sm text-muted">可跳过。录入后会优先按该动作自己的能力锚点处方；未录入则使用保守估算并标记待校准。</p>
+          <div className="mt-3 space-y-3">
+            {accessoryExercises?.map((exercise) => {
+              const lift = value.accessoryLifts?.find((item) => item.exerciseId === exercise.id) ?? { exerciseId: exercise.id, weightKg: "", reps: "10" };
+              return <div className="grid grid-cols-[minmax(0,1fr)_96px_64px] items-end gap-2" key={exercise.id}>
+                <p className="min-w-0 truncate pb-2 font-medium">{exercise.name}</p>
+                <label className="block"><span className="mb-1 block text-[11px] text-muted">重量 kg</span><input aria-label={`${exercise.name}辅助重量 kg`} className="h-10 w-full rounded-md border border-line bg-white px-2 text-right text-sm tabular-nums" inputMode="decimal" min="0" onChange={(event) => updateLift(exercise.id, { weightKg: event.target.value }, "accessory")} step="0.5" type="number" value={lift.weightKg} /></label>
+                <label className="block"><span className="mb-1 block text-[11px] text-muted">次数</span><input aria-label={`${exercise.name}辅助次数`} className="h-10 w-full rounded-md border border-line bg-white px-2 text-sm" inputMode="numeric" min="1" onChange={(event) => updateLift(exercise.id, { reps: event.target.value }, "accessory")} type="number" value={lift.reps} /></label>
+              </div>;
+            })}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1959,12 +2019,47 @@ function deriveAccessoryProfiles(exercises: ExerciseRow[], mainProfiles: Exercis
     }));
 }
 
+function isCalibratableAccessory(slug: string) {
+  return !["pull_up", "cardio_zone2"].includes(slug);
+}
+
 function inferFiveRepWorkingWeight(estimatedOneRepMax: number, increment: number) {
   if (estimatedOneRepMax <= 0) {
     return 0;
   }
 
   return Math.round((estimatedOneRepMax / (1 + 5 / 30)) / increment) * increment;
+}
+
+export function getPlanExerciseExplanation({
+  exerciseSlug,
+  targetSets,
+  targetReps,
+  targetWeight,
+  isAccessoryCalibrated = false,
+  value
+}: {
+  exerciseSlug?: string;
+  targetSets: number;
+  targetReps: number;
+  targetWeight: number;
+  isAccessoryCalibrated?: boolean;
+  value: PlanSetupInput;
+}) {
+  const isMainLift = ["bench_press", "back_squat", "deadlift", "overhead_press"].includes(exerciseSlug ?? "");
+  const goalLabel = { strength: "目标", hypertrophy: "增肌目标", hypertrophy_strength: "力型兼备目标", fat_loss: "减脂目标", body_recomposition: "塑形目标" }[value.goal];
+  const duration = value.sessionDurationMinutes ?? 60;
+  if (isMainLift && targetWeight <= 0) {
+    return `技术起始：尚未录入稳定主项工作组，本次以动作练习为主；目标 ${targetSets} 组 × ${targetReps} 次。${goalLabel}、${value.experienceLevel === "beginner" ? "新手训练量" : "当前经验"}、恢复状态和 ${duration} 分钟时长已用于安排。`;
+  }
+  if (isMainLift) {
+    return `能力锚点来自你录入的稳定主项工作组，按目标 ${targetSets} 组 × ${targetReps} 次换算处方 ${targetWeight} kg，并按器械增量取整。${goalLabel}、训练经验、恢复状态和 ${duration} 分钟时长会调整组次或训练量。`;
+  }
+  return targetWeight > 0
+    ? isAccessoryCalibrated
+      ? `辅助动作已校准：优先采用该动作自己的稳定工作组作为能力锚点；目标 ${targetSets} 组 × ${targetReps} 次，重量 ${targetWeight} kg 按器械增量取整。`
+      : `辅助动作当前采用保守估算待校准；目标 ${targetSets} 组 × ${targetReps} 次，重量 ${targetWeight} kg 按器械增量取整。录入该动作自己的稳定工作组后，会优先使用它自己的能力锚点。`
+    : `这是自重或技术起始动作；目标 ${targetSets} 组 × ${targetReps} 次，不强制填写重量。`;
 }
 
 function formatRecommendationType(type: RecommendationType) {

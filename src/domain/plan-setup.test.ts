@@ -93,16 +93,19 @@ describe("validatePlanSetup", () => {
     });
   });
 
-  it("accepts fat loss and removes retired scheduling fields from the plan payload", () => {
-    const result = validatePlanSetup(baseInput({ goal: "fat_loss" as never, injuryNotes: "  右肩不适  " }));
+  it("keeps a supported session duration in the plan payload", () => {
+    const result = validatePlanSetup(baseInput({ goal: "fat_loss" as never, injuryNotes: "  右肩不适  ", sessionDurationMinutes: 45 }));
     expect(result).toMatchObject({
       ok: true,
-      value: { goal: "fat_loss", injuryNotes: "右肩不适" }
+      value: { goal: "fat_loss", injuryNotes: "右肩不适", sessionDurationMinutes: 45 }
     });
-    if (result.ok) {
-      expect(result.value).not.toHaveProperty("availableWeekdays");
-      expect(result.value).not.toHaveProperty("sessionDurationMinutes");
-    }
+  });
+
+  it("rejects unsupported session duration with an actionable Chinese error", () => {
+    expect(validatePlanSetup(baseInput({ sessionDurationMinutes: 75 }))).toEqual({
+      ok: false,
+      fieldErrors: { sessionDurationMinutes: "单次训练时长仅支持 30、45、60 或 90 分钟" }
+    });
   });
 
   it("keeps free-text notes as remarks and validates only known structured restrictions", () => {
