@@ -123,6 +123,21 @@ describe("SingleWorkoutRecorder", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("does not start duration tracking when only adding or removing a set", async () => {
+    const rpc = vi.fn(async (name: string) => name === "get_standalone_workout_draft" ? { data: null, error: null } : { data: { started_at: "2026-07-30T10:00:00.000Z", workout_id: "draft-1" }, error: null });
+    vi.mocked(createBrowserSupabaseClient).mockReturnValue({ auth: { getSession: async () => ({ data: { session: { access_token: "test" } } }) }, rpc } as never);
+    vi.stubGlobal("fetch", vi.fn());
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => root?.render(<SingleWorkoutRecorder />));
+    await addFirstReviewedExercise(container!);
+    await act(async () => clickButton(container!, "+ 增加一组"));
+    await act(async () => clickButton(container!, "删除末组"));
+
+    expect(rpc).not.toHaveBeenCalledWith("save_standalone_workout", expect.anything());
+  });
+
   it("switches to a non-editable success state after the server saves a completed free workout", async () => {
     vi.stubGlobal("fetch", vi.fn());
     vi.mocked(createBrowserSupabaseClient).mockReturnValue({

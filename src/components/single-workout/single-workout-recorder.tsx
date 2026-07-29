@@ -121,7 +121,7 @@ export function SingleWorkoutRecorder() {
     setDraftWorkoutId(typeof result.workout_id === "string" ? result.workout_id : draftWorkoutId);
     setStartedAt(typeof result.started_at === "string" ? result.started_at : localStartedAt);
   }
-  function update(id: string, mapper: (item: SelectedExercise) => SelectedExercise) { setSelected((current) => { const next = current.map((item) => item.id === id ? mapper(item) : item); void ensureStandaloneStarted(next); return next; }); }
+  function update(id: string, mapper: (item: SelectedExercise) => SelectedExercise) { setSelected((current) => { const next = current.map((item) => item.id === id ? mapper(item) : item); const before = current.find((item) => item.id === id); const after = next.find((item) => item.id === id); if (before && after && hasRecordedSetChange(before, after)) void ensureStandaloneStarted(next); return next; }); }
   function toggleSetCompletion(exerciseId: string, setIndex: number, completed: boolean) {
     const setKey = `${exerciseId}:${setIndex}`;
     update(exerciseId, (item) => ({
@@ -236,6 +236,13 @@ function requiresRealRpe(exercise: SelectedExercise) {
   }
 
   return true;
+}
+
+function hasRecordedSetChange(before: SelectedExercise, after: SelectedExercise) {
+  return before.sets.some((set, index) => {
+    const next = after.sets[index];
+    return Boolean(next && (set.weight !== next.weight || set.reps !== next.reps || set.rpe !== next.rpe || set.completed !== next.completed));
+  });
 }
 
 function formatRestTime(seconds: number) {
