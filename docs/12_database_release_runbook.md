@@ -160,6 +160,13 @@ where w.day_type = 'rest';
 - 每周固定备份一次。
 - 每次内测用户批量导入或清理数据前备份。
 - 不在疲劳或赶时间时执行数据库结构变更。
+
+## 7. 结构化动作限制迁移（2026-07-29）
+
+1. 在 Supabase SQL Editor 执行 `supabase/migrations/20260729150000_add_structured_movement_restrictions.sql`。
+2. 迁移只向 `usr_athlete_profiles` 追加 `movement_restrictions text[]`，默认空数组；不会解读或改写既有 `injury_notes`。
+3. 迁移后创建或更新一份训练画像，选择一项动作限制并确认保存成功；自由文本备注仍应只显示为备注。
+4. 再部署前端。若未执行迁移，前端会因缺少列无法安全保存画像，应先完成本迁移而非绕过限制字段。
 # wger 外部动作引用发布顺序（2026-07-16）
 
 1. 在 Supabase SQL Editor 执行 `supabase/migrations/20260716130000_wger_external_exercise_references.sql`；它仅追加字段、约束和 RPC，不会复制第三方动作目录。

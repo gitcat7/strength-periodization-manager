@@ -26,14 +26,38 @@ describe("resolvePrescriptionWeight", () => {
       increment: 2.5
     })).toBe(0);
   });
+
+  it("uses the e1RM anchor and target reps while staying below training max", () => {
+    const profile = {
+      estimatedOneRepMax: 120,
+      trainingMax: 107.5,
+      workingWeight: 100,
+      increment: 2.5
+    };
+
+    const fiveReps = resolvePrescriptionWeight({
+      role: "primary", profile, relatedProfile: null, targetReps: 5, baseRatio: 1, increment: 2.5
+    });
+    const eightReps = resolvePrescriptionWeight({
+      role: "primary", profile, relatedProfile: null, targetReps: 8, baseRatio: 1, increment: 2.5
+    });
+
+    expect(eightReps).toBeLessThan(fiveReps);
+    expect(fiveReps).toBeLessThanOrEqual(profile.trainingMax);
+    expect(fiveReps).toBeGreaterThan(80);
+  });
 });
 
 describe("getPrescriptionPolicy", () => {
   it("gives intermediate hypertrophy more starting volume than beginner hypertrophy", () => {
     const beginner = getPrescriptionPolicy({ experienceLevel: "beginner", goal: "hypertrophy" });
+    const novice = getPrescriptionPolicy({ experienceLevel: "novice", goal: "hypertrophy" });
     const intermediate = getPrescriptionPolicy({ experienceLevel: "intermediate", goal: "hypertrophy" });
 
+    expect(novice.setsAdjustment).toBeGreaterThan(beginner.setsAdjustment);
     expect(intermediate.setsAdjustment).toBeGreaterThan(beginner.setsAdjustment);
+    expect(beginner.progressionPercent).toBeLessThan(novice.progressionPercent);
+    expect(novice.progressionPercent).toBeLessThan(intermediate.progressionPercent);
   });
 
   it("never increases volume when recovery and energy availability are constrained", () => {

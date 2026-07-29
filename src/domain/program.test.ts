@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildFourWeekProgram, buildSchedulePreview, resolveProfileWorkingWeight } from "./program";
+import { buildFourWeekProgram, buildSchedulePreview, getTemplateType, resolveProfileWorkingWeight, validateScheduleAndTemplate } from "./program";
 
 const profiles = [
   { id: "bench", slug: "bench_press", workingWeight: 100, increment: 2.5 },
@@ -9,6 +9,58 @@ const profiles = [
 ];
 
 describe("buildFourWeekProgram", () => {
+  it("rejects fixed weekdays that do not match the requested weekly frequency", () => {
+    expect(validateScheduleAndTemplate({
+      templateType: "three_split",
+      trainingDaysPerWeek: 3,
+      schedule: { mode: "fixed_weekdays", weekdays: [1, 3] }
+    })).toEqual({ ok: false, message: "固定星期已选 2 天，请选择 3 天以匹配每周训练天数。" });
+  });
+
+  it("rejects cadence that exceeds the user's weekly training frequency", () => {
+    expect(validateScheduleAndTemplate({
+      templateType: "three_split",
+      trainingDaysPerWeek: 3,
+      schedule: { mode: "cadence", trainDays: 3, restDays: 1 }
+    })).toEqual({ ok: false, message: "当前练休循环平均每周超过 3 天训练，请增加休息日或调整每周训练天数。" });
+  });
+
+  it("chooses compatible defaults for three, four and seven weekly training days", () => {
+    expect(getTemplateType(3)).toBe("three_split");
+    expect(getTemplateType(4)).toBe("four_day_upper_lower");
+    expect(getTemplateType(7)).toBe("push_pull_squat");
+    expect(validateScheduleAndTemplate({
+      templateType: "five_split",
+      trainingDaysPerWeek: 3,
+      schedule: { mode: "fixed_weekdays", weekdays: [1, 3, 5] }
+    })).toEqual({ ok: false, message: "五分化适合每周 5 天训练；请调整训练天数或选择匹配的模板。" });
+  });
+
+  it("removes structured movement restrictions without inferring meaning from notes", () => {
+    const workouts = buildFourWeekProgram({
+      templateType: "three_split",
+      schedule: { mode: "fixed_weekdays", weekdays: [1, 3, 5] },
+      trainingDaysPerWeek: 3,
+      exerciseProfiles: profiles,
+      restrictions: ["avoid_overhead_press", "avoid_deadlift_hip_hinge"],
+      startDate: new Date("2026-07-13T00:00:00")
+    }).filter((workout) => workout.dayType === "training");
+
+    expect(workouts.flatMap((workout) => workout.exercises.map((exercise) => exercise.exerciseSlug))).not.toEqual(
+      expect.arrayContaining(["overhead_press", "deadlift", "romanian_deadlift"])
+    );
+  });
+
+  it("blocks a direction when combined restrictions leave no safe controlled replacement", () => {
+    expect(() => buildFourWeekProgram({
+      templateType: "three_split",
+      schedule: { mode: "fixed_weekdays", weekdays: [1, 3, 5] },
+      trainingDaysPerWeek: 3,
+      exerciseProfiles: profiles,
+      restrictions: ["avoid_deep_knee_flexion", "avoid_deadlift_hip_hinge"],
+      startDate: new Date("2026-07-13T00:00:00")
+    })).toThrow("当前限制条件下，腿部训练没有可安全替代的动作，请调整限制或咨询专业人士后再生成计划。");
+  });
   it("uses training max instead of a higher estimated 1RM", () => {
     expect(resolveProfileWorkingWeight({ estimatedOneRepMax: 120, trainingMax: 100 })).toBe(100);
   });
@@ -39,8 +91,8 @@ describe("buildFourWeekProgram", () => {
       ? intermediateStrength[0].exercises.find((exercise) => exercise.exerciseSlug === "bench_press")
       : undefined;
 
-    expect(beginnerBench).toMatchObject({ targetReps: 8, targetSets: 4, targetWeight: 82.5 });
-    expect(intermediateBench).toMatchObject({ targetReps: 5, targetSets: 5, targetWeight: 97.5 });
+    expect(beginnerBench).toMatchObject({ targetReps: 8, targetSets: 4, targetWeight: 75 });
+    expect(intermediateBench).toMatchObject({ targetReps: 5, targetSets: 6, targetWeight: 97.5 });
   });
 
   it("gives powerlifting and hypertrophy plans distinct main-lift priorities", () => {
@@ -60,8 +112,8 @@ describe("buildFourWeekProgram", () => {
         : undefined;
     };
 
-    expect(firstBench(powerlifting)).toMatchObject({ targetSets: 5, targetReps: 5, targetWeight: 97.5 });
-    expect(firstBench(hypertrophy)).toMatchObject({ targetSets: 5, targetReps: 8, targetWeight: 87.5 });
+    expect(firstBench(powerlifting)).toMatchObject({ targetSets: 6, targetReps: 5, targetWeight: 97.5 });
+    expect(firstBench(hypertrophy)).toMatchObject({ targetSets: 6, targetReps: 8, targetWeight: 80 });
   });
 
   it("keeps accessory prescriptions independent from a stronger main lift", () => {

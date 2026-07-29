@@ -34,7 +34,9 @@ import {
 } from "@/domain/training-format";
 import {
   buildFourWeekProgram,
+  getTemplateType,
   resolveProfileWorkingWeight,
+  validateScheduleAndTemplate,
   type ExerciseProfile,
   templateOptions,
   type ProgramTemplateType,
@@ -149,6 +151,7 @@ const defaultPlanSetup: PlanSetupInput = {
   experienceLevel: "",
   goal: "strength",
   injuryNotes: "",
+  movementRestrictions: [],
   lifts: [],
   nutritionAdherence: "moderate",
   proteinTargetMet: false,
@@ -171,7 +174,7 @@ export function ProgramManager() {
   const [status, setStatus] = useState<"loading" | "ready" | "generating" | "error">("loading");
   const [usesLegacyScheduleSchema, setUsesLegacyScheduleSchema] = useState(false);
   const [message, setMessage] = useState("");
-  const [templateType, setTemplateType] = useState<TemplateType>("push_pull_squat");
+  const [templateType, setTemplateType] = useState<TemplateType>(getTemplateType(defaultPlanSetup.trainingDaysPerWeek));
   const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("fixed_weekdays");
   const [selectedWeekdays, setSelectedWeekdays] = useState<number[]>([1, 3, 5]);
   const [cadenceTrainDays, setCadenceTrainDays] = useState(1);
@@ -326,7 +329,7 @@ export function ProgramManager() {
     const [profileResult, mainLiftsResult] = await Promise.all([
       supabase
         .from(DB_TABLE.athleteProfiles)
-        .select("experience_level,goal,training_days_per_week,available_weekdays,session_duration_minutes,injury_notes,current_body_weight_kg,target_weight_change_kg_per_week,weight_change_last_14_days_kg,nutrition_adherence,protein_target_met,recovery_status")
+        .select("experience_level,goal,training_days_per_week,available_weekdays,session_duration_minutes,injury_notes,movement_restrictions,current_body_weight_kg,target_weight_change_kg_per_week,weight_change_last_14_days_kg,nutrition_adherence,protein_target_met,recovery_status")
         .eq("user_id", targetUserId)
         .maybeSingle(),
       supabase
@@ -380,11 +383,13 @@ export function ProgramManager() {
       : defaultPlanSetup.trainingDaysPerWeek;
 
     setSelectedWeekdays(availableWeekdays);
+    setTemplateType(getTemplateType(trainingDaysPerWeek));
     setPersistedSessionDuration(Number(profile.session_duration_minutes) || 60);
     setPlanSetup({
       experienceLevel: profile.experience_level as PlanSetupInput["experienceLevel"],
       goal: normalizePlanGoal(profile.goal),
       injuryNotes: profile.injury_notes ?? "",
+      movementRestrictions: Array.isArray(profile.movement_restrictions) ? profile.movement_restrictions : [],
       nutritionAdherence: profile.nutrition_adherence === "low" || profile.nutrition_adherence === "high"
         ? profile.nutrition_adherence
         : "moderate",
@@ -428,6 +433,7 @@ export function ProgramManager() {
         available_weekdays: selectedWeekdays,
         session_duration_minutes: persistedSessionDuration,
         injury_notes: parsed.value.injuryNotes || null,
+        movement_restrictions: parsed.value.movementRestrictions,
         current_body_weight_kg: parsed.value.currentBodyWeightKg,
         target_weight_change_kg_per_week: parsed.value.targetWeightChangeKgPerWeek,
         weight_change_last_14_days_kg: parsed.value.weightChangeLast14DaysKg,
@@ -757,9 +763,16 @@ export function ProgramManager() {
       return;
     }
 
-    if (scheduleMode === "fixed_weekdays" && selectedWeekdays.length === 0) {
+    const schedule: ScheduleConfig =
+      scheduleMode === "fixed_weekdays"
+        ? { mode: "fixed_weekdays", weekdays: selectedWeekdays }
+        : scheduleMode === "cadence"
+          ? { mode: "cadence", trainDays: cadenceTrainDays, restDays: cadenceRestDays }
+          : { mode: "flexible" };
+    const scheduleValidation = validateScheduleAndTemplate({ templateType, trainingDaysPerWeek: planSetup.trainingDaysPerWeek, schedule });
+    if (!scheduleValidation.ok) {
       setStatus("error");
-      setMessage("固定星期模式至少选择一个训练日。");
+      setMessage(scheduleValidation.message);
       return;
     }
 
@@ -779,13 +792,6 @@ export function ProgramManager() {
       if (!validatedSetup.ok) return;
 
       const supabase = createBrowserSupabaseClient();
-      const schedule: ScheduleConfig =
-        scheduleMode === "fixed_weekdays"
-          ? { mode: "fixed_weekdays", weekdays: selectedWeekdays }
-          : scheduleMode === "cadence"
-            ? { mode: "cadence", trainDays: cadenceTrainDays, restDays: cadenceRestDays }
-            : { mode: "flexible" };
-
       const { data: exercises, error: exercisesError } = await supabase
         .from(DB_TABLE.exercises)
         .select("id,slug,name,default_increment");
@@ -818,11 +824,10 @@ export function ProgramManager() {
           return {
             id: exercise.id,
             slug: exercise.slug,
+            estimatedOneRepMax: Number(lift.estimated_1rm),
+            trainingMax: Number(lift.training_max),
             workingWeight: inferFiveRepWorkingWeight(
-              resolveProfileWorkingWeight({
-                estimatedOneRepMax: Number(lift.estimated_1rm),
-                trainingMax: Number(lift.training_max)
-              }),
+              Number(lift.estimated_1rm),
               Number(exercise.default_increment) || 2.5
             ),
             increment: Number(exercise.default_increment) || 2.5
@@ -845,6 +850,7 @@ export function ProgramManager() {
         currentBodyWeightKg: Number(planSetup.currentBodyWeightKg) || null,
         targetWeightChangeKgPerWeek: validatedSetup.value.targetWeightChangeKgPerWeek,
         weightChangeLast14DaysKg: Number(planSetup.weightChangeLast14DaysKg) || null
+        , restrictions: validatedSetup.value.movementRestrictions
       });
 
       const payload = buildProgramReplacementPayload({
@@ -984,7 +990,10 @@ export function ProgramManager() {
           <PlanSetupForm
             errors={planSetupErrors}
             mainLifts={mainLifts}
-            onChange={setPlanSetup}
+            onChange={(value) => {
+              if (value.trainingDaysPerWeek !== planSetup.trainingDaysPerWeek) setTemplateType(getTemplateType(value.trainingDaysPerWeek));
+              setPlanSetup(value);
+            }}
             value={planSetup}
           />
           <PlanGenerationRationale value={planSetup} />
@@ -1502,18 +1511,45 @@ export function PlanSetupForm({
       </div>
 
       <label className="mt-4 block">
-        <span className="mb-1 block text-sm font-medium">伤病或禁忌动作（可选）</span>
+        <span className="mb-1 block text-sm font-medium">伤病或禁忌备注（可选）</span>
         <textarea
           className="min-h-20 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm"
           maxLength={500}
           onChange={(event) => update({ injuryNotes: event.target.value })}
-          placeholder="例如：右肩不适，暂时不做过顶推"
+          placeholder="例如：右肩不适；此处仅作为备注，不会自动推断医疗结论"
           value={value.injuryNotes}
         />
-        {value.injuryNotes.trim() ? (
-          <p className="mt-2 text-xs text-amber-700">已记录限制说明。系统不会自动进行医疗判断或规避动作；请遵医嘱，并在生成后手动替换不适动作。</p>
-        ) : null}
+        <p className="mt-2 text-xs text-muted">备注不会触发医疗判断。需要自动避开的训练动作请在下方选择结构化限制。</p>
       </label>
+
+      <fieldset className="mt-3 rounded-lg border border-line bg-field p-3">
+        <legend className="px-1 text-sm font-medium">动作限制（可选）</legend>
+        <p className="text-xs leading-5 text-muted">仅按你明确选择的动作类别替换模板；无法安全替代时会阻止生成。</p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {[
+            ["avoid_overhead_press", "避免过顶推"],
+            ["avoid_horizontal_push", "避免水平推"],
+            ["avoid_deep_knee_flexion", "避免深屈膝"],
+            ["avoid_deadlift_hip_hinge", "避免硬拉/髋铰链"]
+          ].map(([restriction, label]) => {
+            const checked = value.movementRestrictions?.includes(restriction as NonNullable<PlanSetupInput["movementRestrictions"]>[number]) ?? false;
+            return (
+              <label className="flex items-center gap-2 text-sm" key={restriction}>
+                <input
+                  checked={checked}
+                  onChange={() => update({
+                    movementRestrictions: checked
+                      ? (value.movementRestrictions ?? []).filter((item) => item !== restriction)
+                      : [...(value.movementRestrictions ?? []), restriction as NonNullable<PlanSetupInput["movementRestrictions"]>[number]]
+                  })}
+                  type="checkbox"
+                />
+                {label}
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
 
       <div className="mt-5 rounded-lg border border-line bg-slate-50 p-3">
         <h3 className="font-semibold">体重、饮食与恢复</h3>

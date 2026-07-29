@@ -9,6 +9,7 @@ create table if not exists public.usr_athlete_profiles (
   available_weekdays integer[] not null default '{}',
   session_duration_minutes integer not null check (session_duration_minutes in (45, 60, 75, 90)),
   injury_notes text,
+  movement_restrictions text[] not null default '{}',
   current_body_weight_kg numeric(6, 2) check (current_body_weight_kg between 30 and 300),
   target_weight_change_kg_per_week numeric(4, 2) check (target_weight_change_kg_per_week between -1.5 and 1),
   weight_change_last_14_days_kg numeric(4, 2) check (weight_change_last_14_days_kg between -3 and 3),
@@ -1531,6 +1532,7 @@ comment on column public.usr_athlete_profiles.training_days_per_week is '每周�
 comment on column public.usr_athlete_profiles.available_weekdays is '可训练星期数组，1 至 7。';
 comment on column public.usr_athlete_profiles.session_duration_minutes is '单次训练可用分钟数。';
 comment on column public.usr_athlete_profiles.injury_notes is '用户主动提供的伤病或限制说明。';
+comment on column public.usr_athlete_profiles.movement_restrictions is '用户明确选择的动作限制；不从自由文本推断。';
 comment on column public.usr_athlete_profiles.unit is '重量单位；产品固定为 kg。';
 comment on column public.usr_athlete_profiles.created_at is '画像创建时刻，timestamptz。';
 comment on column public.usr_athlete_profiles.updated_at is '画像最后更新时刻，timestamptz，由触发器维护。';

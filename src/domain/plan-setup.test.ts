@@ -105,6 +105,21 @@ describe("validatePlanSetup", () => {
     }
   });
 
+  it("keeps free-text notes as remarks and validates only known structured restrictions", () => {
+    const result = validatePlanSetup(baseInput({
+      injuryNotes: "右肩偶有不适，仅作备注",
+      movementRestrictions: ["avoid_overhead_press", "unknown" as never]
+    }));
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        injuryNotes: "右肩偶有不适，仅作备注",
+        movementRestrictions: ["avoid_overhead_press"]
+      }
+    });
+  });
+
   it("accepts the combined hypertrophy_strength goal", () => {
     const result = validatePlanSetup(baseInput({ goal: "hypertrophy_strength" as never }));
     expect(result).toMatchObject({

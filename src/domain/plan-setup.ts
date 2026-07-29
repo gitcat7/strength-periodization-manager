@@ -1,4 +1,5 @@
 export type PlanExperienceLevel = "beginner" | "novice" | "intermediate";
+export type MovementRestriction = "avoid_overhead_press" | "avoid_horizontal_push" | "avoid_deep_knee_flexion" | "avoid_deadlift_hip_hinge";
 export type PlanGoal = "hypertrophy" | "hypertrophy_strength" | "fat_loss" | "body_recomposition" | "strength";
 export type NutritionAdherence = "low" | "moderate" | "high";
 export type RecoveryStatus = "low" | "normal" | "high";
@@ -7,6 +8,7 @@ export type PlanSetupInput = {
   experienceLevel: PlanExperienceLevel | "";
   goal: PlanGoal;
   injuryNotes: string;
+  movementRestrictions?: MovementRestriction[];
   lifts: Array<{ exerciseId: string; weightKg: string; reps: string }>;
   nutritionAdherence?: NutritionAdherence;
   proteinTargetMet?: boolean;
@@ -36,9 +38,10 @@ export type ProfileContextValidationResult =
   | { ok: true; value: ValidatedProfileContext }
   | { ok: false; fieldErrors: Record<string, string> };
 
-export type ValidatedPlanSetup = Omit<PlanSetupInput, "experienceLevel" | "lifts" | "nutritionAdherence" | "proteinTargetMet" | "recoveryStatus" | "currentBodyWeightKg" | "targetBodyWeightKg" | "weightChangeLast14DaysKg"> & {
+export type ValidatedPlanSetup = Omit<PlanSetupInput, "experienceLevel" | "lifts" | "movementRestrictions" | "nutritionAdherence" | "proteinTargetMet" | "recoveryStatus" | "currentBodyWeightKg" | "targetBodyWeightKg" | "weightChangeLast14DaysKg"> & {
   experienceLevel: PlanExperienceLevel;
   lifts: Array<{ exerciseId: string; workingWeight: number; reps: number }>;
+  movementRestrictions: MovementRestriction[];
   nutritionAdherence: NutritionAdherence;
   proteinTargetMet: boolean;
   recoveryStatus: RecoveryStatus;
@@ -93,12 +96,20 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
       experienceLevel,
       goal: input.goal,
       injuryNotes: input.injuryNotes.trim().slice(0, 500),
+      movementRestrictions: (input.movementRestrictions ?? []).filter(isMovementRestriction),
       lifts,
       ...profileContext.value,
       weekCount: input.weekCount,
       trainingDaysPerWeek: input.trainingDaysPerWeek
     }
   };
+}
+
+function isMovementRestriction(value: unknown): value is MovementRestriction {
+  return value === "avoid_overhead_press"
+    || value === "avoid_horizontal_push"
+    || value === "avoid_deep_knee_flexion"
+    || value === "avoid_deadlift_hip_hinge";
 }
 
 export function validateProfileContext(input: ProfileContextInput): ProfileContextValidationResult {

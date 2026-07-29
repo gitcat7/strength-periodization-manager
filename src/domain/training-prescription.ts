@@ -4,6 +4,7 @@ export type PrescriptionRole = "primary" | "secondary" | "accessory" | "bodyweig
 
 export type PrescriptionProfile = {
   estimatedOneRepMax?: number;
+  trainingMax?: number;
   increment: number;
   workingWeight: number;
 };
@@ -52,7 +53,7 @@ export function getPrescriptionPolicy({
     fat_loss: -1,
     body_recomposition: 0
   }[goal];
-  const experienceSets = { beginner: -1, novice: 0, intermediate: 0 }[experienceLevel];
+  const experienceSets = { beginner: -1, novice: 0, intermediate: 1 }[experienceLevel];
   const recoverySets = recoveryStatus === "low" ? -1 : 0;
   const targetRate = currentBodyWeightKg && targetWeightChangeKgPerWeek
     ? Math.abs(targetWeightChangeKgPerWeek / currentBodyWeightKg)
@@ -74,7 +75,8 @@ export function getPrescriptionPolicy({
       hypertrophy_strength: -0.025,
       fat_loss: -0.1,
       body_recomposition: -0.05
-    }[goal] + { beginner: -0.05, novice: -0.025, intermediate: 0 }[experienceLevel]
+    }[goal] + { beginner: -0.05, novice: -0.025, intermediate: 0 }[experienceLevel],
+    progressionPercent: { beginner: 0.015, novice: 0.025, intermediate: 0.03 }[experienceLevel]
   };
 }
 
@@ -101,5 +103,13 @@ export function resolvePrescriptionWeight({
   const anchor = role === "primary" ? profile : relatedProfile;
   if (!anchor) return 0;
 
-  return roundToNearestPlate(anchor.workingWeight * baseRatio, increment);
+  const estimatedOneRepMax = anchor.estimatedOneRepMax && anchor.estimatedOneRepMax > 0
+    ? anchor.estimatedOneRepMax
+    : anchor.workingWeight * (1 + 5 / 30);
+  const trainingMax = anchor.trainingMax && anchor.trainingMax > 0
+    ? anchor.trainingMax
+    : estimatedOneRepMax * 0.9;
+  const repAdjustedWeight = estimatedOneRepMax * baseRatio / (1 + targetReps / 30);
+
+  return roundToNearestPlate(Math.min(repAdjustedWeight, trainingMax), increment);
 }
