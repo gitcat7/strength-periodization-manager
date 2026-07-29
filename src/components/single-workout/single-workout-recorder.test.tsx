@@ -140,6 +140,8 @@ describe("SingleWorkoutRecorder", () => {
     await act(async () => addBench?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     const complete = [...container.querySelectorAll("button")].find((button) => button.textContent === "完成训练");
     await act(async () => complete?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const duration = container.querySelector<HTMLInputElement>('input[aria-label="实际训练时长（分钟）"]');
+    await act(async () => setInputValue(duration!, "60"));
     const confirm = [...container.querySelectorAll("button")].find((button) => button.textContent === "仍然结束训练");
     await act(async () => confirm?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 

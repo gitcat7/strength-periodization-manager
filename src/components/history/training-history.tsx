@@ -17,6 +17,7 @@ import { getRecommendationStatusLabel, type RecommendationType } from "@/domain/
 import { type HistoryCalendarEntry } from "@/domain/history-calendar";
 import { getHistoryWorkoutFocusId } from "./history-workout-focus";
 import { HistoryCalendar } from "./history-calendar";
+import { formatWorkoutDuration } from "@/domain/workout-duration";
 
 type WorkoutRow = {
   day_type: "training" | "rest";
@@ -24,6 +25,7 @@ type WorkoutRow = {
   scheduled_date: string;
   name: string;
   completed_at: string | null;
+  duration_seconds: number | null;
   status: string;
 };
 
@@ -129,8 +131,8 @@ export function TrainingHistory() {
 
         const { data: workoutData, error: workoutError } = await withTimeout(
           loadWorkoutsWithDayTypeFallback(
-            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at,day_type,status").eq("user_id", user.id).in("status", ["completed", "scheduled"]).order("scheduled_date", { ascending: false }),
-            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at,status").eq("user_id", user.id).in("status", ["completed", "scheduled"]).order("scheduled_date", { ascending: false })
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at,duration_seconds,day_type,status").eq("user_id", user.id).in("status", ["completed", "scheduled"]).order("scheduled_date", { ascending: false }),
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at,duration_seconds,status").eq("user_id", user.id).in("status", ["completed", "scheduled"]).order("scheduled_date", { ascending: false })
           ),
           "训练历史读取超时，请刷新页面后重试。"
         );
@@ -533,6 +535,7 @@ export function TrainingHistory() {
                     <p className="mt-1 text-sm text-muted">
                       {review.completedSets} 组 · {Math.round(review.volume).toLocaleString()} kg
                     </p>
+                    <p className="mt-2 text-sm text-muted">训练时长：{formatWorkoutDuration(workout.duration_seconds)}</p>
                   </div>
                 </div>
                 <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${isRecovery ? "bg-[#4a7a9a]/10 text-[#4a7a9a]" : "bg-action/10 text-action"}`}>

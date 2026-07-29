@@ -1497,6 +1497,12 @@ create index if not exists log_pr_goals_user_status_target_idx
 create index if not exists ops_analytics_events_user_created_idx
   on public.ops_analytics_events (user_id, created_at desc);
 
+-- Keep clean-schema initialization aligned with the duration tracking migration.
+alter table public.plan_workouts add column if not exists started_at timestamptz;
+alter table public.plan_workouts add column if not exists duration_seconds integer;
+alter table public.plan_workouts drop constraint if exists plan_workouts_duration_seconds_check;
+alter table public.plan_workouts add constraint plan_workouts_duration_seconds_check check (duration_seconds is null or duration_seconds between 60 and 43200);
+
 comment on function public.set_updated_at() is '统一维护含 updated_at 字段记录的最后更新时间（带时区的完整年月日时分秒）。';
 
 comment on table public.cfg_exercises is '共享动作目录：系统审核的动作定义，不存储个人训练事实。';

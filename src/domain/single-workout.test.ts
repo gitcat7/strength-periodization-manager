@@ -59,6 +59,14 @@ describe("single workout domain", () => {
     expect(buildStandaloneWorkoutSavePayload("2026-07-16", exercises.slice(0, 1), "draft-1")).toMatchObject({ workout_id: "draft-1" });
   });
 
+  it("keeps the persisted start and final duration in standalone save payloads", () => {
+    expect(buildStandaloneWorkoutSavePayload("2026-07-16", exercises.slice(0, 1), "draft-1", "2026-07-16T10:00:00.000Z", 2700)).toMatchObject({
+      duration_seconds: 2700,
+      started_at: "2026-07-16T10:00:00.000Z",
+      workout_id: "draft-1"
+    });
+  });
+
   it("serializes an external standalone exercise without a local exercise id", () => {
     const payload = buildStandaloneWorkoutSavePayload("2026-07-16", [{
       externalReference: {

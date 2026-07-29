@@ -63,6 +63,8 @@ import {
 } from "./rest-day-state";
 import { completeRestDayCheckIn, getCurrentRestItem } from "./rest-day-actions";
 import { buildCompletionSummary } from "@/domain/workout-recording";
+import { getAutomaticDurationMinutes, getElapsedDurationSeconds, validateManualDurationMinutes } from "@/domain/workout-duration";
+import { WorkoutDurationEditor } from "@/components/workout/workout-duration-editor";
 
 type WorkoutRow = {
   id: string;
@@ -70,6 +72,8 @@ type WorkoutRow = {
   sequence_index: number;
   name: string;
   status: string;
+  started_at?: string | null;
+  duration_seconds?: number | null;
 };
 
 type WorkoutExerciseRow = {
@@ -300,6 +304,19 @@ export function TodayWorkout() {
   const [restRunning, setRestRunning] = useState(false);
   const [restContext, setRestContext] = useState("完成一组后自动开始休息");
   const [reloadTrigger, setReloadTrigger] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
+  const [manualDurationMode, setManualDurationMode] = useState(false);
+  const [manualDurationMinutes, setManualDurationMinutes] = useState("");
+  const startRequestRef = useRef(false);
+
+  useEffect(() => {
+    const startedAt = workout?.started_at ?? null;
+    if (!startedAt || workout?.status === "completed") { setElapsedSeconds(null); return; }
+    const update = () => setElapsedSeconds(getElapsedDurationSeconds(startedAt));
+    update();
+    const timerId = window.setInterval(update, 1000);
+    return () => window.clearInterval(timerId);
+  }, [workout?.started_at, workout?.status]);
 
   useEffect(() => {
     if (!scheduleResolved || !workout || restItem) return;
@@ -656,7 +673,18 @@ export function TodayWorkout() {
     return groupedLogs;
   }
 
+  async function ensureWorkoutStarted() {
+    if (!workout || workout.started_at || startRequestRef.current) return workout?.started_at ?? null;
+    startRequestRef.current = true;
+    const { data, error } = await createBrowserSupabaseClient().rpc("start_training_workout", { p_workout_id: workout.id });
+    startRequestRef.current = false;
+    if (error || typeof data !== "string") throw new Error(error?.message ?? "训练开始时间保存失败。");
+    setWorkout((current) => current ? { ...current, started_at: data } : current);
+    return data;
+  }
+
   function updateSetLog(workoutExerciseId: string, setIndex: number, patch: Partial<SetLogRow>) {
+    void ensureWorkoutStarted().catch(() => setMessage("训练开始时间保存失败，请检查网络后重试。"));
     setSaveStatus("idle");
     setValidationIssues([]);
     setSetLogs((current) => {
@@ -707,6 +735,7 @@ export function TodayWorkout() {
       return;
     }
 
+    if (completed && !log.completed) void ensureWorkoutStarted().catch(() => setMessage("训练开始时间保存失败，请检查网络后重试。"));
     updateSetLog(exercise.id, log.set_index, {
       actual_weight: log.actual_weight ?? log.target_weight,
       actual_reps: log.actual_reps ?? log.target_reps,
@@ -814,8 +843,12 @@ export function TodayWorkout() {
     }
 
     if (completeWorkout) {
+      const manualDuration = manualDurationMode ? validateManualDurationMinutes(manualDurationMinutes) : null;
+      if (manualDurationMode && !manualDuration?.ok) { setSaveStatus("error"); setMessage(manualDuration?.message ?? "训练时长请输入 1–720 的整数分钟。"); return; }
+      if (!workout.started_at && !manualDuration) { setSaveStatus("error"); setMessage("尚未记录开始时间，请填写实际训练时长。"); return; }
       const { error: workoutError } = await supabase.rpc("complete_training_workout", {
-        p_workout_id: workout.id
+        p_workout_id: workout.id,
+        p_duration_seconds: manualDuration?.ok ? manualDuration.seconds : null
       });
 
       if (workoutError) {
@@ -1451,6 +1484,8 @@ export function TodayWorkout() {
         />
       ) : null}
 
+      {elapsedSeconds !== null ? <p className="mb-3 text-sm font-semibold text-action">已训练 {formatElapsedTime(elapsedSeconds)}</p> : null}
+
       {completionPreview ? (
         <div aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-black/30 p-4 sm:place-items-center" role="dialog">
           <div className="w-full max-w-md rounded-lg bg-white p-4">
@@ -1461,6 +1496,7 @@ export function TodayWorkout() {
               <p><span className="block text-muted">总吨位</span><strong>{completionPreview.totalTonnage === null ? "不适用" : `${completionPreview.totalTonnage} kg`}</strong></p>
               <p><span className="block text-muted">最高 e1RM</span><strong>{completionPreview.bestE1rm === null ? "不适用" : `${completionPreview.bestE1rm} kg`}</strong></p>
             </div>
+            <div className="mt-4"><WorkoutDurationEditor automaticMinutes={getAutomaticDurationMinutes(workout.started_at ?? null)} manualMinutes={manualDurationMinutes} manualMode={manualDurationMode} onManualMinutesChange={setManualDurationMinutes} onManualModeChange={setManualDurationMode} /></div>
             <div className="mt-4 flex gap-2"><button className="rounded-md border border-line px-3 py-2 text-sm font-semibold" onClick={() => setCompletionPreview(null)} type="button">返回继续记录</button><button className="rounded-md bg-action px-3 py-2 text-sm font-semibold text-white" disabled={saveStatus === "saving"} onClick={() => void saveLogs({ completeWorkout: true, confirmed: true })} type="button">{completionPreview.incompleteSetCount ? "仍然结束训练" : "确认完成"}</button></div>
           </div>
         </div>
@@ -2016,6 +2052,13 @@ function formatRestTimer(seconds: number) {
 function formatRestOption(seconds: number) {
   if (seconds < 60) return `${seconds} 秒`;
   return `${Math.floor(seconds / 60)} 分${seconds % 60 === 0 ? "" : `${seconds % 60} 秒`}`;
+}
+
+function formatElapsedTime(seconds: number) {
+  const hours = Math.floor(seconds / 3600).toString().padStart(2, "0");
+  const minutes = Math.floor((seconds % 3600) / 60).toString().padStart(2, "0");
+  const remainder = (seconds % 60).toString().padStart(2, "0");
+  return `${hours}:${minutes}:${remainder}`;
 }
 
 function formatRecommendationType(type: ExerciseCoachRecommendation["type"]) {
