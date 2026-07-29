@@ -1605,7 +1605,11 @@ export function PlanSetupForm({
 
       <div className="mt-5">
         <h3 className="font-semibold">主项最近工作组</h3>
-        <p className="mt-1 text-sm text-muted">至少填写一个稳定完成的工作组，例如卧推 80kg × 5。</p>
+        <p className="mt-1 text-sm text-muted">
+          {value.experienceLevel === "beginner"
+            ? "新手可跳过，首次训练后再补充实际工作组。"
+            : "训练满 6 个月需要至少填写一个稳定完成的主项工作组，例如卧推 80kg × 5。"}
+        </p>
         <div className="mt-3 space-y-3">
           {mainLifts.map((exercise) => {
             const lift = value.lifts.find((item) => item.exerciseId === exercise.id) ?? {

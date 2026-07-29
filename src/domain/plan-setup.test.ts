@@ -63,12 +63,25 @@ describe("validatePlanSetup", () => {
       }
     });
   });
-  it("requires training experience and one positive main-lift working set", () => {
+  it("allows a beginner to generate a plan without a main-lift working set", () => {
+    expect(validatePlanSetup(baseInput({ experienceLevel: "beginner", lifts: [] }))).toMatchObject({
+      ok: true,
+      value: { experienceLevel: "beginner", lifts: [] }
+    });
+  });
+
+  it("requires a working set after six months of training", () => {
+    expect(validatePlanSetup(baseInput({ experienceLevel: "novice", lifts: [] }))).toEqual({
+      ok: false,
+      fieldErrors: { lifts: "训练满 6 个月需要至少填写一个稳定完成的主项工作组" }
+    });
+  });
+
+  it("requires training experience", () => {
     expect(validatePlanSetup(baseInput({ experienceLevel: "" as never, lifts: [] }))).toEqual({
       ok: false,
       fieldErrors: {
-        experienceLevel: "请选择训练经验",
-        lifts: "至少录入一个主项最近工作组"
+        experienceLevel: "请选择训练经验"
       }
     });
   });

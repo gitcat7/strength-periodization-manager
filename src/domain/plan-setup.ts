@@ -79,8 +79,8 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
 
   if (!profileContext.ok) Object.assign(fieldErrors, profileContext.fieldErrors);
 
-  if (lifts.length === 0) {
-    fieldErrors.lifts = "至少录入一个主项最近工作组";
+  if ((experienceLevel === "novice" || experienceLevel === "intermediate") && lifts.length === 0) {
+    fieldErrors.lifts = "训练满 6 个月需要至少填写一个稳定完成的主项工作组";
   }
 
   if (Object.keys(fieldErrors).length > 0 || !experienceLevel || !profileContext.ok) {

@@ -86,6 +86,48 @@ describe("PlanSetupForm", () => {
     expect(container.textContent).not.toContain("可训练日");
   });
 
+  it("explains when a main-lift working set is optional or required", () => {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    act(() => root?.render(
+      <PlanSetupForm
+        errors={{}}
+        mainLifts={[]}
+        onChange={() => undefined}
+        value={{
+          experienceLevel: "beginner",
+          goal: "hypertrophy",
+          injuryNotes: "",
+          lifts: [],
+          weekCount: 4,
+          trainingDaysPerWeek: 3
+        }}
+      />
+    ));
+
+    expect(container.textContent).toContain("新手可跳过，首次训练后再补充实际工作组");
+
+    act(() => root?.render(
+      <PlanSetupForm
+        errors={{}}
+        mainLifts={[]}
+        onChange={() => undefined}
+        value={{
+          experienceLevel: "novice",
+          goal: "hypertrophy",
+          injuryNotes: "",
+          lifts: [],
+          weekCount: 4,
+          trainingDaysPerWeek: 3
+        }}
+      />
+    ));
+
+    expect(container.textContent).toContain("训练满 6 个月需要至少填写一个稳定完成的主项工作组");
+  });
+
   it("keeps decimal working weights readable in the compact mobile row", () => {
     container = document.createElement("div");
     document.body.append(container);
