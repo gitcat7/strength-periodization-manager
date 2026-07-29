@@ -64,6 +64,36 @@ describe("buildFourWeekProgram", () => {
     expect(firstBench(hypertrophy)).toMatchObject({ targetSets: 5, targetReps: 8, targetWeight: 87.5 });
   });
 
+  it("keeps accessory prescriptions independent from a stronger main lift", () => {
+    const baseInput = {
+      templateType: "push_pull_squat" as const,
+      schedule: { mode: "fixed_weekdays" as const, weekdays: [1, 3, 5] },
+      experienceLevel: "novice" as const,
+      goal: "hypertrophy" as const,
+      startDate: new Date("2026-07-13T00:00:00")
+    };
+    const withRegularBench = buildFourWeekProgram({
+      ...baseInput,
+      exerciseProfiles: [...profiles, { id: "raise", slug: "lateral_raise", workingWeight: 8, increment: 2.5 }]
+    });
+    const withStrongerBench = buildFourWeekProgram({
+      ...baseInput,
+      exerciseProfiles: [
+        ...profiles.map((profile) => profile.slug === "bench_press" ? { ...profile, workingWeight: 160 } : profile),
+        { id: "raise", slug: "lateral_raise", workingWeight: 8, increment: 2.5 }
+      ]
+    });
+    const lateralRaise = (items: typeof withRegularBench) => {
+      const workout = items[0];
+      return workout.dayType === "training"
+        ? workout.exercises.find((exercise) => exercise.exerciseSlug === "lateral_raise")
+        : undefined;
+    };
+
+    expect(lateralRaise(withRegularBench)).toMatchObject({ targetReps: 12, targetWeight: 7.5 });
+    expect(lateralRaise(withStrongerBench)).toMatchObject({ targetReps: 12, targetWeight: 7.5 });
+  });
+
   it("reduces fat-loss volume only when the user's deficit trend and recovery indicate high strain", () => {
     const baseInput = {
       templateType: "push_pull_squat" as const,
