@@ -303,6 +303,7 @@ export function ProgramManager() {
     }
 
     setProgram(programData as ProgramRow);
+    setShowPlanSetup(false);
     setPlanSetup((current) => ({ ...current, weekCount: getProgramWeekCount(programData as Pick<ProgramRow, "start_date" | "end_date">) }));
     const loadedWorkouts = await loadWorkouts(programData.id);
     if (!loadedWorkouts.ok) {
@@ -981,22 +982,37 @@ export function ProgramManager() {
 
   return (
     <div className="space-y-5">
-      <PlanBuilder
-        cadenceRestDays={cadenceRestDays}
-        cadenceTrainDays={cadenceTrainDays}
-        customTemplateName={customTemplateName}
-        scheduleMode={scheduleMode}
-        selectedWeekdays={selectedWeekdays}
-        setCadenceRestDays={setCadenceRestDays}
-        setCadenceTrainDays={setCadenceTrainDays}
-        setCustomTemplateName={setCustomTemplateName}
-        setScheduleMode={setScheduleMode}
-        setSelectedWeekdays={setSelectedWeekdays}
-        setTemplateType={setTemplateType}
-        setUseCustomName={setUseCustomName}
-        templateType={templateType}
-        useCustomName={useCustomName}
-      />
+      {(!program || showPlanSetup) ? (
+        <>
+          {program ? (
+            <div className="flex justify-end">
+              <button
+                className="pressable rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink"
+                onClick={() => setShowPlanSetup(false)}
+                type="button"
+              >
+                取消调整
+              </button>
+            </div>
+          ) : null}
+          <PlanBuilder
+            cadenceRestDays={cadenceRestDays}
+            cadenceTrainDays={cadenceTrainDays}
+            customTemplateName={customTemplateName}
+            scheduleMode={scheduleMode}
+            selectedWeekdays={selectedWeekdays}
+            setCadenceRestDays={setCadenceRestDays}
+            setCadenceTrainDays={setCadenceTrainDays}
+            setCustomTemplateName={setCustomTemplateName}
+            setScheduleMode={setScheduleMode}
+            setSelectedWeekdays={setSelectedWeekdays}
+            setTemplateType={setTemplateType}
+            setUseCustomName={setUseCustomName}
+            templateType={templateType}
+            useCustomName={useCustomName}
+          />
+        </>
+      ) : null}
 
       {(!program || showPlanSetup) ? (
         <>
@@ -1084,7 +1100,7 @@ export function ProgramManager() {
               onClick={openRegenerationDialog}
               type="button"
             >
-              重置计划
+              按当前参数重新生成
             </button>
             <button
               className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"

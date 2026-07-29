@@ -142,7 +142,7 @@ describe("ProgramManager cache hydration", () => {
     expect(container.textContent).toContain("更新体重、饮食与恢复");
   });
 
-  it("shows management actions instead of a creation action for an existing plan", async () => {
+  it("keeps an existing plan in management view until the user explicitly adjusts it", async () => {
     supabaseClient = createSupabaseClient({ activeProgram: true });
     container = document.createElement("div");
     document.body.append(container);
@@ -156,8 +156,25 @@ describe("ProgramManager cache hydration", () => {
     });
 
     expect(container.textContent).toContain("调整计划");
-    expect(container.textContent).toContain("重置计划");
+    expect(container.textContent).toContain("按当前参数重新生成");
     expect(container.textContent).not.toContain("生成 4 周训练计划");
+    expect(container.textContent).not.toContain("先选训练结构，再选安排方式");
+    expect(container.textContent).not.toContain("训练安排与主项最近工作组");
+
+    await act(async () => {
+      clickButton(container!, "调整计划");
+    });
+
+    expect(container.textContent).toContain("先选训练结构，再选安排方式");
+    expect(container.textContent).toContain("训练安排与主项最近工作组");
+    expect(container.textContent).toContain("取消调整");
+
+    await act(async () => {
+      clickButton(container!, "取消调整");
+    });
+
+    expect(container.textContent).not.toContain("先选训练结构，再选安排方式");
+    expect(container.textContent).not.toContain("训练安排与主项最近工作组");
   });
 });
 
@@ -232,4 +249,10 @@ function selectValue(select: HTMLSelectElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
   setter?.call(select, value);
   select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function clickButton(view: HTMLElement, label: string) {
+  const button = Array.from(view.querySelectorAll("button")).find((item) => item.textContent?.includes(label));
+  if (!button) throw new Error(`button not found: ${label}`);
+  button.click();
 }
