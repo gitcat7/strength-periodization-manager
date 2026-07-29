@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildFourWeekProgram, buildSchedulePreview, getTemplateType, resolveProfileWorkingWeight, validateScheduleAndTemplate } from "./program";
+import { buildFourWeekProgram, buildSchedulePreview, getTemplateType, normalizeTemplateTypeForGeneration, resolveProfileWorkingWeight, templateOptions, validateScheduleAndTemplate } from "./program";
 
 const profiles = [
   { id: "bench", slug: "bench_press", workingWeight: 100, increment: 2.5 },
@@ -27,8 +27,14 @@ describe("buildFourWeekProgram", () => {
 
   it("chooses compatible defaults for three, four and seven weekly training days", () => {
     expect(getTemplateType(3)).toBe("three_split");
-    expect(getTemplateType(4)).toBe("four_day_upper_lower");
+    expect(getTemplateType(4)).toBe("push_pull_squat");
     expect(getTemplateType(7)).toBe("push_pull_squat");
+    expect(templateOptions.map((option) => option.value)).not.toContain("four_day_upper_lower");
+    expect(validateScheduleAndTemplate({
+      templateType: "push_pull_squat",
+      trainingDaysPerWeek: 4,
+      schedule: { mode: "fixed_weekdays", weekdays: [1, 2, 4, 5] }
+    })).toEqual({ ok: true });
     expect(validateScheduleAndTemplate({
       templateType: "five_split",
       trainingDaysPerWeek: 3,
@@ -36,7 +42,12 @@ describe("buildFourWeekProgram", () => {
     })).toEqual({ ok: false, message: "五分化适合每周 5 天训练；请调整训练天数或选择匹配的模板。" });
   });
 
-  it("uses a real upper/lower four-day rotation instead of push/pull/squat days", () => {
+  it("normalizes a legacy upper/lower template before a new generation", () => {
+    expect(normalizeTemplateTypeForGeneration("four_day_upper_lower")).toBe("push_pull_squat");
+    expect(normalizeTemplateTypeForGeneration("five_split")).toBe("five_split");
+  });
+
+  it("uses push/pull/squat A-B rotation for four training days", () => {
     const workouts = buildFourWeekProgram({
       templateType: getTemplateType(4),
       schedule: { mode: "fixed_weekdays", weekdays: [1, 2, 4, 5] },
@@ -46,15 +57,15 @@ describe("buildFourWeekProgram", () => {
     }).filter((workout) => workout.dayType === "training");
 
     expect(workouts.slice(0, 4).map((workout) => workout.name)).toEqual([
-      "第 1 周 · 上肢 A · 强度",
-      "第 1 周 · 下肢 A · 强度",
-      "第 1 周 · 上肢 B · 容量",
-      "第 1 周 · 下肢 B · 容量"
+      "第 1 周 · 推 A · 强度",
+      "第 1 周 · 拉 B · 容量",
+      "第 1 周 · 蹲 A · 强度",
+      "第 1 周 · 推 B · 容量"
     ]);
     expect(workouts[0]?.exercises.map((exercise) => exercise.exerciseSlug)).toContain("bench_press");
-    expect(workouts[1]?.exercises.map((exercise) => exercise.exerciseSlug)).toContain("back_squat");
-    expect(workouts[2]?.exercises.map((exercise) => exercise.exerciseSlug)).not.toContain("back_squat");
-    expect(workouts[3]?.exercises.map((exercise) => exercise.exerciseSlug)).not.toContain("bench_press");
+    expect(workouts[1]?.exercises.map((exercise) => exercise.exerciseSlug)).toContain("barbell_row");
+    expect(workouts[2]?.exercises.map((exercise) => exercise.exerciseSlug)).toContain("back_squat");
+    expect(workouts[3]?.exercises.map((exercise) => exercise.exerciseSlug)).toContain("bench_press");
   });
 
   it("scales generated exercise budgets by session duration without removing the lead movement", () => {

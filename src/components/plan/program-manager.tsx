@@ -35,6 +35,7 @@ import {
 import {
   buildFourWeekProgram,
   getTemplateType,
+  normalizeTemplateTypeForGeneration,
   resolveProfileWorkingWeight,
   validateScheduleAndTemplate,
   type ExerciseProfile,
@@ -304,6 +305,7 @@ export function ProgramManager() {
 
     setProgram(programData as ProgramRow);
     setShowPlanSetup(false);
+    setTemplateType(normalizeTemplateTypeForGeneration(programData.template_type as TemplateType));
     setPlanSetup((current) => ({ ...current, weekCount: getProgramWeekCount(programData as Pick<ProgramRow, "start_date" | "end_date">) }));
     const loadedWorkouts = await loadWorkouts(programData.id);
     if (!loadedWorkouts.ok) {
@@ -1955,7 +1957,7 @@ function getProgramName(templateType: TemplateType) {
   }
   if (templateType === "one_split") return "一分化全身循环";
   if (templateType === "three_split" || templateType === "three_day_full_body") return "三分化训练循环";
-  if (templateType === "four_day_upper_lower") return "上下肢四分化训练循环";
+  if (templateType === "four_day_upper_lower") return "历史上下肢四分化计划";
   if (templateType === "five_split") return "五分化训练循环";
   return "训练循环";
 }

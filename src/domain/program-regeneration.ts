@@ -116,7 +116,8 @@ export function getProgramName(templateType: TemplateType) {
   if (templateType === "push_pull_squat") return "推/拉/蹲 A-B 周期";
   if (templateType === "one_split") return "一分化全身循环";
   if (templateType === "three_split" || templateType === "three_day_full_body") return "三分化训练循环";
-  if (templateType === "five_split" || templateType === "four_day_upper_lower") return "五分化训练循环";
+  if (templateType === "five_split") return "五分化训练循环";
+  if (templateType === "four_day_upper_lower") return "历史上下肢四分化计划";
   return "训练循环";
 }
 

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildProgramReplacementPayload,
-  buildRegenerationPreview
+  buildRegenerationPreview,
+  getProgramName
 } from "./program-regeneration";
 import type { PlannedScheduleItem } from "./program";
 
@@ -55,6 +56,9 @@ describe("buildRegenerationPreview", () => {
 });
 
 describe("buildProgramReplacementPayload", () => {
+  it("keeps legacy upper/lower plans readable without naming them five-split", () => {
+    expect(getProgramName("four_day_upper_lower")).toBe("历史上下肢四分化计划");
+  });
   it("converts mixed schedule items into the RPC payload without prescriptions on rest days", () => {
     expect(
       buildProgramReplacementPayload({

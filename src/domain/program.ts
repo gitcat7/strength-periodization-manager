@@ -25,7 +25,6 @@ export type MovementRestriction =
 export const templateOptions: Array<{ description: string; label: string; value: TemplateType }> = [
   { value: "one_split", label: "一分化", description: "全身训练，适合每周 2-3 次稳定入门。" },
   { value: "three_split", label: "三分化", description: "胸肩三头 / 背二头 / 腿，按顺序循环。" },
-  { value: "four_day_upper_lower", label: "上下肢四分化", description: "上肢 / 下肢交替，适合每周 4 次。" },
   { value: "five_split", label: "五分化", description: "胸 / 背 / 腿 / 肩 / 手臂，单日更聚焦。" },
   { value: "push_pull_squat", label: "推拉蹲", description: "推 / 拉 / 蹲 A/B，交替强度与容量。" }
 ];
@@ -501,9 +500,13 @@ export function buildFourWeekProgram({
 export function getTemplateType(trainingDaysPerWeek: number): TemplateType {
   if (trainingDaysPerWeek <= 2) return "one_split";
   if (trainingDaysPerWeek === 3) return "three_split";
-  if (trainingDaysPerWeek === 4) return "four_day_upper_lower";
+  if (trainingDaysPerWeek === 4) return "push_pull_squat";
   if (trainingDaysPerWeek === 5) return "five_split";
   return "push_pull_squat";
+}
+
+export function normalizeTemplateTypeForGeneration(templateType: TemplateType): TemplateType {
+  return templateType === "four_day_upper_lower" ? "push_pull_squat" : templateType;
 }
 
 const compatibleTrainingDays: Record<TemplateType, number[]> = {
@@ -512,7 +515,7 @@ const compatibleTrainingDays: Record<TemplateType, number[]> = {
   three_day_full_body: [3],
   four_day_upper_lower: [4],
   five_split: [5],
-  push_pull_squat: [6, 7]
+  push_pull_squat: [4, 6, 7]
 };
 
 export function validateScheduleAndTemplate({
