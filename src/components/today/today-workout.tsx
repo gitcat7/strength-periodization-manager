@@ -65,6 +65,7 @@ import { completeRestDayCheckIn, getCurrentRestItem } from "./rest-day-actions";
 import { buildCompletionSummary } from "@/domain/workout-recording";
 import { getAutomaticDurationMinutes, getElapsedDurationSeconds, validateManualDurationMinutes } from "@/domain/workout-duration";
 import { WorkoutDurationEditor } from "@/components/workout/workout-duration-editor";
+import { parseCompletionResult } from "@/domain/completion-result";
 
 type WorkoutRow = {
   id: string;
@@ -846,7 +847,7 @@ export function TodayWorkout() {
       const manualDuration = manualDurationMode ? validateManualDurationMinutes(manualDurationMinutes) : null;
       if (manualDurationMode && !manualDuration?.ok) { setSaveStatus("error"); setMessage(manualDuration?.message ?? "训练时长请输入 1–720 的整数分钟。"); return; }
       if (!workout.started_at && !manualDuration) { setSaveStatus("error"); setMessage("尚未记录开始时间，请填写实际训练时长。"); return; }
-      const { error: workoutError } = await supabase.rpc("complete_training_workout", {
+      const { data: completionData, error: workoutError } = await supabase.rpc("complete_training_workout", {
         p_workout_id: workout.id,
         p_duration_seconds: manualDuration?.ok ? manualDuration.seconds : null
       });
@@ -856,39 +857,13 @@ export function TodayWorkout() {
         setMessage(workoutError.message);
         return;
       }
+      let completionResult;
+      try { completionResult = parseCompletionResult(completionData); } catch { setSaveStatus("error"); setMessage("训练完成结果无效，请稍后重试。"); return; }
 
       clearDraftLogs(workout.id);
       clearTrainingDataCaches();
 
-      const recommendations = buildCoachRecommendationsFromCurrentLogs();
-      const recommendationPayload = recommendations
-        .filter((item) => item.targetWeight > 0)
-        .map((item) => ({
-          user_id: userId,
-          exercise_id: item.exerciseId,
-          workout_id: workout.id,
-          recommendation_type: item.recommendation.type,
-          previous_weight: item.targetWeight,
-          suggested_weight: item.recommendation.suggestedWeight,
-          reason: item.recommendation.reason,
-          status: "pending"
-        }));
-
-      if (recommendationPayload.length > 0) {
-        const { error: recommendationError } = await supabase.from(DB_TABLE.recommendations).insert(recommendationPayload);
-        if (recommendationError) {
-          setSaveStatus("error");
-          setMessage(recommendationError.message);
-          return;
-        }
-      }
-
-      setCoachRecommendations(
-        recommendations.map((item) => ({
-          ...item.recommendation,
-          exerciseName: item.exerciseName
-        }))
-      );
+      setCoachRecommendations(completionResult.recommendations.map((item) => ({ type: item.recommendation_type, suggestedWeight: item.suggested_weight, reason: item.reason, exerciseName: exercises.find((exercise) => exercise.exercise_id === item.exercise_id)?.exercises?.name ?? "动作" })));
       const summary = buildWorkoutSummary({ exercises, setLogs });
       setWorkout({ ...workout, status: "completed" });
       setValidationIssues([]);
@@ -899,7 +874,7 @@ export function TodayWorkout() {
           completed_sets: allLogs.filter((log) => log.completed).length,
           average_rpe: summary.averageRpe,
           completion_rate: summary.completionRate,
-          recommendations: recommendationPayload.length,
+          recommendations: completionResult.recommendations.length,
           total_volume: summary.totalVolume,
           workout_name: workout.name
         },

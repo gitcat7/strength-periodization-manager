@@ -49,7 +49,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Agent API 请求失败。";
     const notFound = message.startsWith("找不到") || message.startsWith("不属于");
-    const invalidRequest = message.startsWith("记录训练组需要") || message.startsWith("完成训练需要") || message.startsWith("组序号");
+  const invalidRequest = message.startsWith("记录训练组需要") || message.startsWith("完成训练需要") || message.startsWith("组序号") || message.startsWith("已完成组") || message.startsWith("负重训练");
     const status = notFound ? 404 : invalidRequest ? 400 : 500;
     return jsonError(message, status, notFound ? "not_found" : invalidRequest ? "invalid_request" : "server_error");
   }
@@ -214,6 +214,13 @@ async function recordSet(userId: string, request: AgentRequest) {
   if (!exercise) throw new Error("找不到指定训练动作。");
   await assertWorkoutOwnership(userId, exercise.workout_id);
   if (request.set_index > exercise.target_sets) throw new Error("组序号超过该动作的计划组数。");
+  const completed = request.completed ?? true;
+  if (completed && request.actual_reps <= 0) throw new Error("已完成组的实际次数必须大于 0。");
+  if (completed && Number(exercise.target_weight) > 0 && request.actual_weight <= 0) throw new Error("负重训练已完成组的实际重量必须大于 0。");
+  if (completed) {
+    const { error: startError } = await supabase.rpc("start_training_workout", { p_workout_id: exercise.workout_id });
+    if (startError) throw new Error(startError.message);
+  }
 
   const { data, error } = await supabase
     .from(DB_TABLE.setLogs)
@@ -221,7 +228,7 @@ async function recordSet(userId: string, request: AgentRequest) {
       {
         actual_reps: request.actual_reps,
         actual_weight: request.actual_weight,
-        completed: request.completed ?? true,
+        completed,
         rpe: request.rpe,
         set_index: request.set_index,
         target_reps: exercise.target_reps,

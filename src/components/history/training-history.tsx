@@ -379,22 +379,17 @@ export function TrainingHistory() {
     setMessage("");
 
     const supabase = createBrowserSupabaseClient();
-    const { error } = await supabase
-      .from(DB_TABLE.setLogs)
-      .upsert(
-        normalizedLogs.map((log) => ({
+    const { data, error } = await supabase.rpc("revise_completed_workout_logs", {
+      p_workout_id: workoutId,
+      p_logs: normalizedLogs.map((log) => ({
           workout_exercise_id: log.workout_exercise_id,
           set_index: log.set_index,
-          target_weight: log.target_weight,
-          target_reps: log.target_reps,
           actual_weight: log.actual_weight,
           actual_reps: log.actual_reps,
           rpe: log.rpe,
-          completed: log.completed,
-          updated_at: new Date().toISOString()
-        })),
-        { onConflict: "workout_exercise_id,set_index" }
-      );
+          completed: log.completed
+        }))
+    });
 
     if (error) {
       setSaveStatus("error");
@@ -403,10 +398,12 @@ export function TrainingHistory() {
     }
 
     clearTrainingDataCaches();
-    const normalizedById = new Map(normalizedLogs.map((log) => [log.id, log]));
-    setSetLogs((current) => current.map((log) => normalizedById.get(log.id) ?? log));
+    const result = data as { recommendations?: RecommendationRow[]; set_logs?: SetLogRow[] } | null;
+    const returnedLogs = Array.isArray(result?.set_logs) ? result.set_logs : normalizedLogs;
+    setSetLogs((current) => current.map((log) => returnedLogs.find((item) => item.workout_exercise_id === log.workout_exercise_id && item.set_index === log.set_index) ?? log));
+    if (Array.isArray(result?.recommendations)) setRecommendations((current) => [...current.filter((item) => item.workout_id !== workoutId || item.status !== "pending"), ...(result.recommendations ?? [])]);
     setSaveStatus("saved");
-    setMessage("历史训练已保存。进展页会按新的记录重新计算。");
+    setMessage("历史训练已保存，待处理 Coach 建议已按新数据重新生成；已应用的历史调整不会自动撤销。");
   }
 
   const summary = useMemo(() => {
