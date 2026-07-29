@@ -132,6 +132,20 @@ describe("buildFourWeekProgram", () => {
     expect(firstBench(highStrain)).toMatchObject({ targetSets: 2 });
   });
 
+  it("creates a conservative beginner plan without inventing main-lift weights", () => {
+    const workouts = buildFourWeekProgram({
+      templateType: "three_split",
+      schedule: { mode: "fixed_weekdays", weekdays: [1, 3, 5] },
+      exerciseProfiles: [],
+      experienceLevel: "beginner",
+      goal: "hypertrophy",
+      startDate: new Date("2026-07-13T00:00:00")
+    });
+    const workout = workouts.find((item) => item.dayType === "training");
+
+    expect(workout?.exercises[0]).toMatchObject({ targetSets: 3, targetWeight: 0 });
+  });
+
   it("assigns a stable zero-based sequence index without changing fixed-weekday dates", () => {
     const workouts = buildFourWeekProgram({
       templateType: "three_day_full_body",

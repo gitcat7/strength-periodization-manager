@@ -342,10 +342,16 @@ export function buildFourWeekProgram({
             : item.intensity + bump + prescriptionPolicy.loadAdjustment,
           increment: profile?.increment ?? 2.5
         });
+        const targetSets = Math.max(2, item.sets + prescriptionPolicy.setsAdjustment + (isDeloadWeek ? -1 : 0));
+        const hasRequiredAnchor = role === "secondary"
+          ? Boolean(profileBySlug.get(getRelatedPrimarySlug(item.slug)))
+          : role === "primary"
+            ? Boolean(profile)
+            : true;
 
         return {
           exerciseSlug: item.slug,
-          targetSets: Math.max(2, item.sets + prescriptionPolicy.setsAdjustment + (isDeloadWeek ? -1 : 0)),
+          targetSets: experienceLevel === "beginner" && !hasRequiredAnchor ? Math.min(3, targetSets) : targetSets,
           targetReps,
           targetWeight
         };

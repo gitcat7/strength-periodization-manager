@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import { PlanSetupForm, ProfileContextForm } from "./program-manager";
+import { PlanGenerationRationale, PlanSetupForm, ProfileContextForm } from "./program-manager";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -153,5 +153,33 @@ describe("PlanSetupForm", () => {
     expect(weight).toHaveProperty("value", "22.5");
     expect(weight?.className).toContain("text-right");
     expect(weight?.className).toContain("tabular-nums");
+  });
+
+  it("lists the inputs used to generate a plan", () => {
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    act(() => root?.render(
+      <PlanGenerationRationale
+        value={{
+          experienceLevel: "novice",
+          goal: "hypertrophy",
+          injuryNotes: "",
+          lifts: [{ exerciseId: "bench", weightKg: "80", reps: "5" }],
+          nutritionAdherence: "high",
+          proteinTargetMet: true,
+          recoveryStatus: "low",
+          weekCount: 4,
+          trainingDaysPerWeek: 3
+        }}
+      />
+    ));
+
+    expect(container.textContent).toContain("本计划参考");
+    expect(container.textContent).toContain("训练经验：初级，6-18 个月");
+    expect(container.textContent).toContain("每周训练天数：3 天");
+    expect(container.textContent).toContain("主项工作组：已录入 1 项");
+    expect(container.textContent).toContain("恢复状态：偏低");
   });
 });

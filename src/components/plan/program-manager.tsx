@@ -980,12 +980,15 @@ export function ProgramManager() {
       />
 
       {(!program || showPlanSetup) ? (
-        <PlanSetupForm
-          errors={planSetupErrors}
-          mainLifts={mainLifts}
-          onChange={setPlanSetup}
-          value={planSetup}
-        />
+        <>
+          <PlanSetupForm
+            errors={planSetupErrors}
+            mainLifts={mainLifts}
+            onChange={setPlanSetup}
+            value={planSetup}
+          />
+          <PlanGenerationRationale value={planSetup} />
+        </>
       ) : null}
 
       {program && showProfileContext ? (
@@ -1650,6 +1653,34 @@ export function PlanSetupForm({
           })}
         </div>
         {errors.lifts ? <p className="mt-2 text-xs text-red-600">{errors.lifts}</p> : null}
+      </div>
+    </section>
+  );
+}
+
+export function PlanGenerationRationale({ value }: { value: PlanSetupInput }) {
+  const experienceLabel = value.experienceLevel === "beginner"
+    ? "新手，0-6 个月"
+    : value.experienceLevel === "novice"
+      ? "初级，6-18 个月"
+      : value.experienceLevel === "intermediate"
+        ? "中级，18 个月以上"
+        : "待选择";
+  const recoveryLabel = value.recoveryStatus === "low"
+    ? "偏低"
+    : value.recoveryStatus === "high"
+      ? "良好"
+      : "一般";
+  const liftCount = value.lifts.filter((lift) => Number(lift.weightKg) > 0 && Number(lift.reps) > 0).length;
+
+  return (
+    <section className="rounded-lg border border-line bg-field p-3 text-sm">
+      <h3 className="font-semibold">本计划参考</h3>
+      <div className="mt-2 grid gap-1 text-muted">
+        <p>训练经验：{experienceLabel}</p>
+        <p>每周训练天数：{value.trainingDaysPerWeek} 天</p>
+        <p>主项工作组：{liftCount > 0 ? `已录入 ${liftCount} 项` : value.experienceLevel === "beginner" ? "未录入，将使用技术起始处方" : "待录入"}</p>
+        <p>恢复状态：{recoveryLabel}</p>
       </div>
     </section>
   );
