@@ -271,6 +271,47 @@ const threeSplitTemplate: TemplateWorkout[] = [
   { ...pushPullSquatTemplate[2], name: "腿" }
 ];
 
+const fourDayUpperLowerTemplate: TemplateWorkout[] = [
+  {
+    name: "上肢 A · 强度",
+    exercises: [
+      { slug: "bench_press", sets: 4, reps: 5, intensity: 0.95 },
+      { slug: "overhead_press", sets: 3, reps: 5, intensity: 0.9 },
+      { slug: "lat_pulldown", sets: 4, reps: 8, intensity: 0.72 },
+      { slug: "seated_cable_row", sets: 3, reps: 8, intensity: 0.72 },
+      { slug: "triceps_pushdown", sets: 3, reps: 10, intensity: 0.45 }
+    ]
+  },
+  {
+    name: "下肢 A · 强度",
+    exercises: [
+      { slug: "back_squat", sets: 4, reps: 5, intensity: 0.95 },
+      { slug: "romanian_deadlift", sets: 3, reps: 6, intensity: 0.75 },
+      { slug: "leg_curl", sets: 3, reps: 10, intensity: 0.42 },
+      { slug: "standing_calf_raise", sets: 4, reps: 10, intensity: 0.45 }
+    ]
+  },
+  {
+    name: "上肢 B · 容量",
+    exercises: [
+      { slug: "bench_press", sets: 3, reps: 8, intensity: 0.78 },
+      { slug: "incline_dumbbell_press", sets: 3, reps: 10, intensity: 0.72 },
+      { slug: "lat_pulldown", sets: 3, reps: 12, intensity: 0.7 },
+      { slug: "lateral_raise", sets: 4, reps: 15, intensity: 0.3 },
+      { slug: "dumbbell_curl", sets: 3, reps: 12, intensity: 0.35 }
+    ]
+  },
+  {
+    name: "下肢 B · 容量",
+    exercises: [
+      { slug: "leg_press", sets: 4, reps: 10, intensity: 0.85 },
+      { slug: "romanian_deadlift", sets: 3, reps: 10, intensity: 0.65 },
+      { slug: "leg_curl", sets: 3, reps: 15, intensity: 0.38 },
+      { slug: "standing_calf_raise", sets: 4, reps: 15, intensity: 0.4 }
+    ]
+  }
+];
+
 const fiveSplitTemplate: TemplateWorkout[] = [
   { ...pushPullSquatTemplate[0], name: "胸" },
   { ...pushPullSquatTemplate[1], name: "背" },
@@ -309,6 +350,7 @@ export function chooseTemplate(type: TemplateType) {
   if (type === "push_pull_squat") return pushPullSquatTemplate;
   if (type === "one_split") return oneSplitTemplate;
   if (type === "three_split" || type === "three_day_full_body") return threeSplitTemplate;
+  if (type === "four_day_upper_lower") return fourDayUpperLowerTemplate;
   return type === "five_split" ? fiveSplitTemplate : pushPullSquatTemplate.slice(0, 4);
 }
 

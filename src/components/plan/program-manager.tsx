@@ -1879,7 +1879,8 @@ function getProgramName(templateType: TemplateType) {
   }
   if (templateType === "one_split") return "一分化全身循环";
   if (templateType === "three_split" || templateType === "three_day_full_body") return "三分化训练循环";
-  if (templateType === "five_split" || templateType === "four_day_upper_lower") return "五分化训练循环";
+  if (templateType === "four_day_upper_lower") return "上下肢四分化训练循环";
+  if (templateType === "five_split") return "五分化训练循环";
   return "训练循环";
 }
 
@@ -1890,9 +1891,12 @@ function normalizePlanGoal(goal: string): PlanSetupInput["goal"] {
   return "strength";
 }
 
-function getPlanGenerationErrorMessage(error: unknown) {
+export function getPlanGenerationErrorMessage(error: unknown) {
   if (error instanceof TypeError && /load failed|failed to fetch/i.test(error.message)) {
     return "网络连接失败，请检查网络后重试。已填写的计划参数仍会保留。";
+  }
+  if (error instanceof Error && /^当前限制条件下，(?:腿部|当前训练方向)训练没有可安全替代的动作，请调整限制或咨询专业人士后再生成计划。$/.test(error.message)) {
+    return error.message;
   }
   return "计划预览生成失败，请检查训练设置后重试。";
 }

@@ -15,7 +15,7 @@ vi.mock("@/lib/supabase/browser", () => ({
   createBrowserSupabaseClient: () => supabaseClient
 }));
 
-import { getProgramWeekCount, ProgramManager } from "./program-manager";
+import { getPlanGenerationErrorMessage, getProgramWeekCount, ProgramManager } from "./program-manager";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -33,6 +33,15 @@ afterEach(() => {
 });
 
 describe("ProgramManager cache hydration", () => {
+  it("keeps a safe structured-restriction conflict visible while hiding unknown errors", () => {
+    expect(getPlanGenerationErrorMessage(new Error("当前限制条件下，腿部训练没有可安全替代的动作，请调整限制或咨询专业人士后再生成计划。")))
+      .toBe("当前限制条件下，腿部训练没有可安全替代的动作，请调整限制或咨询专业人士后再生成计划。");
+    expect(getPlanGenerationErrorMessage(new TypeError("Load failed")))
+      .toBe("网络连接失败，请检查网络后重试。已填写的计划参数仍会保留。");
+    expect(getPlanGenerationErrorMessage(new Error("database socket exploded")))
+      .toBe("计划预览生成失败，请检查训练设置后重试。");
+  });
+
   it("uses an existing program's actual duration when converting target body weight", () => {
     expect(getProgramWeekCount({ end_date: "2026-10-18", start_date: "2026-07-27" })).toBe(12);
   });

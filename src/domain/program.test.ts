@@ -36,6 +36,27 @@ describe("buildFourWeekProgram", () => {
     })).toEqual({ ok: false, message: "五分化适合每周 5 天训练；请调整训练天数或选择匹配的模板。" });
   });
 
+  it("uses a real upper/lower four-day rotation instead of push/pull/squat days", () => {
+    const workouts = buildFourWeekProgram({
+      templateType: getTemplateType(4),
+      schedule: { mode: "fixed_weekdays", weekdays: [1, 2, 4, 5] },
+      trainingDaysPerWeek: 4,
+      exerciseProfiles: profiles,
+      startDate: new Date("2026-07-13T00:00:00")
+    }).filter((workout) => workout.dayType === "training");
+
+    expect(workouts.slice(0, 4).map((workout) => workout.name)).toEqual([
+      "第 1 周 · 上肢 A · 强度",
+      "第 1 周 · 下肢 A · 强度",
+      "第 1 周 · 上肢 B · 容量",
+      "第 1 周 · 下肢 B · 容量"
+    ]);
+    expect(workouts[0]?.exercises.map((exercise) => exercise.exerciseSlug)).toContain("bench_press");
+    expect(workouts[1]?.exercises.map((exercise) => exercise.exerciseSlug)).toContain("back_squat");
+    expect(workouts[2]?.exercises.map((exercise) => exercise.exerciseSlug)).not.toContain("back_squat");
+    expect(workouts[3]?.exercises.map((exercise) => exercise.exerciseSlug)).not.toContain("bench_press");
+  });
+
   it("removes structured movement restrictions without inferring meaning from notes", () => {
     const workouts = buildFourWeekProgram({
       templateType: "three_split",
