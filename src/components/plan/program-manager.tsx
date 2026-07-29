@@ -1659,6 +1659,13 @@ export function PlanSetupForm({
 }
 
 export function PlanGenerationRationale({ value }: { value: PlanSetupInput }) {
+  const goalLabel = {
+    strength: "力量举",
+    hypertrophy: "增肌",
+    hypertrophy_strength: "力型兼备",
+    fat_loss: "减脂",
+    body_recomposition: "塑形"
+  }[value.goal];
   const experienceLabel = value.experienceLevel === "beginner"
     ? "新手，0-6 个月"
     : value.experienceLevel === "novice"
@@ -1677,6 +1684,7 @@ export function PlanGenerationRationale({ value }: { value: PlanSetupInput }) {
     <section className="rounded-lg border border-line bg-field p-3 text-sm">
       <h3 className="font-semibold">本计划参考</h3>
       <div className="mt-2 grid gap-1 text-muted">
+        <p>主要目标：{goalLabel}</p>
         <p>训练经验：{experienceLabel}</p>
         <p>每周训练天数：{value.trainingDaysPerWeek} 天</p>
         <p>主项工作组：{liftCount > 0 ? `已录入 ${liftCount} 项` : value.experienceLevel === "beginner" ? "未录入，将使用技术起始处方" : "待录入"}</p>

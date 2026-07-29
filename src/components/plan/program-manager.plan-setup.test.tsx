@@ -177,6 +177,7 @@ describe("PlanSetupForm", () => {
     ));
 
     expect(container.textContent).toContain("本计划参考");
+    expect(container.textContent).toContain("主要目标：增肌");
     expect(container.textContent).toContain("训练经验：初级，6-18 个月");
     expect(container.textContent).toContain("每周训练天数：3 天");
     expect(container.textContent).toContain("主项工作组：已录入 1 项");
