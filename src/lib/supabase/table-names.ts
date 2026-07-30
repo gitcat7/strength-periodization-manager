@@ -10,5 +10,8 @@ export const DB_TABLE = {
   prGoals: "log_pr_goals",
   feedbackReports: "ops_feedback_reports",
   analyticsEvents: "ops_analytics_events",
-  agentAccessTokens: "ops_agent_access_tokens"
+  agentAccessTokens: "ops_agent_access_tokens",
+  calendarDates: "cfg_cn_calendar_dates",
+  unavailableDates: "usr_unavailable_dates",
+  scheduleEvents: "ops_schedule_events"
 } as const;
