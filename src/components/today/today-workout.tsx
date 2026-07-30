@@ -270,6 +270,9 @@ export function TodayWorkout() {
   const [userId, setUserId] = useState<string | null>(null);
   const [restItem, setRestItem] = useState<RestScheduleItem | null>(null);
   const [nextTraining, setNextTraining] = useState<TrainingScheduleItem | null>(null);
+  const [scheduleBlock, setScheduleBlock] = useState<
+    { kind: "paused"; resumeDate: string | null } | { kind: "adjustment_required"; eventId: string } | null
+  >(null);
   const [restSaveStatus, setRestSaveStatus] = useState<"idle" | "saving" | "error">("idle");
   const [scheduleResolved, setScheduleResolved] = useState(false);
   const [workout, setWorkout] = useState<WorkoutRow | null>(null);
@@ -370,6 +373,7 @@ export function TodayWorkout() {
         }
 
         if (!program) {
+          setScheduleBlock(null);
           writeClientCache<TodayCache>(todayCacheKey, {
             coachRecommendations: [],
             exercises: [],
@@ -386,6 +390,29 @@ export function TodayWorkout() {
         }
 
         const today = formatDate(new Date());
+
+        // Schedule events ship with the calendar migration; a missing table just
+        // means pause state is unavailable on this database.
+        const latestEventResult = await supabase
+          .from(DB_TABLE.scheduleEvents)
+          .select("id,event_type,metadata,created_at")
+          .eq("program_id", program.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
+          .then((result) => result, () => ({ data: null, error: null }));
+        const latestScheduleEvent = (latestEventResult.data ?? null) as {
+          id: string;
+          event_type: string;
+          metadata: Record<string, unknown> | null;
+        } | null;
+        const pausedUntil =
+          latestScheduleEvent?.event_type === "pause_started"
+            ? typeof latestScheduleEvent.metadata?.resume_date === "string"
+              ? latestScheduleEvent.metadata.resume_date
+              : null
+            : undefined;
+
         const restItems = withTimeout(
           loadWorkoutsWithDayTypeFallback(
             () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,status,day_type").eq("program_id", program.id).eq("day_type", "rest").eq("scheduled_date", today).in("status", ["scheduled", "draft"]).limit(1).maybeSingle(),
@@ -414,12 +441,39 @@ export function TodayWorkout() {
 
         const scheduleState = await resolveTodayScheduleState({
           now: today,
+          ...(pausedUntil !== undefined ? { pausedUntil } : {}),
           onRestQueryError: (error) => console.warn("today rest day query failed", error),
           restItems,
           trainingItems
         });
 
+        if (scheduleState.kind === "paused" || scheduleState.kind === "adjustment_required") {
+          // A paused or unconfirmed plan must not load set logs or enable completion.
+          writeClientCache<TodayCache>(todayCacheKey, {
+            coachRecommendations: [],
+            exercises: [],
+            lastCompletedWorkout: null,
+            nextTraining: null,
+            restItem: null,
+            setLogs: {},
+            userId: user.id,
+            workout: null
+          });
+          setScheduleBlock(scheduleState);
+          setRestItem(null);
+          setNextTraining(null);
+          setWorkout(null);
+          setExercises([]);
+          setSetLogs({});
+          setCoachRecommendations([]);
+          setLastCompletedWorkout(null);
+          setScheduleResolved(true);
+          setStatus("ready");
+          return;
+        }
+
         if (scheduleState.kind === "rest") {
+          setScheduleBlock(null);
           setRestItem(scheduleState.restItem);
           setNextTraining(scheduleState.nextTraining);
           setWorkout(null);
@@ -443,6 +497,7 @@ export function TodayWorkout() {
         }
 
         if (scheduleState.kind === "empty") {
+          setScheduleBlock(null);
           writeClientCache<TodayCache>(todayCacheKey, {
             coachRecommendations: [],
             exercises: [],
@@ -473,6 +528,7 @@ export function TodayWorkout() {
           sequence_index: scheduleState.workout.sequenceIndex,
           status: scheduleState.workout.status
         };
+        setScheduleBlock(null);
         setRestItem(null);
         setNextTraining(scheduleState.workout);
 
@@ -1107,6 +1163,31 @@ export function TodayWorkout() {
   }
 
   const currentRestItem = getCurrentRestItem(restItem, formatDate(new Date()));
+
+  if (scheduleBlock) {
+    return (
+      <section className="rounded-xl border border-line p-4">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-full bg-[#c75c1a]/10 text-[#c75c1a]">
+            <CalendarDays size={20} />
+          </span>
+          <div>
+            <h2 className="font-semibold">{scheduleBlock.kind === "paused" ? "计划已暂停" : "日程需要确认"}</h2>
+            <p className="text-sm text-muted">
+              {scheduleBlock.kind === "paused"
+                ? scheduleBlock.resumeDate
+                  ? `计划暂停至 ${scheduleBlock.resumeDate}，恢复时再选择从哪一节继续。`
+                  : "计划当前处于暂停状态，恢复时再选择从哪一节继续。"
+                : "日程在其他设备或最近一次调整中发生变化，需要先到计划页确认。"}
+            </p>
+          </div>
+        </div>
+        <Link className="inline-flex h-11 items-center justify-center rounded-lg bg-action px-4 font-semibold text-white" href="/plan">
+          {scheduleBlock.kind === "paused" ? "前往计划页恢复" : "前往计划页确认"}
+        </Link>
+      </section>
+    );
+  }
 
   if (currentRestItem) {
     return (

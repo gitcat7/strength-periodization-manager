@@ -66,6 +66,7 @@ afterEach(() => {
 describe("TodayWorkout Fitness Coach", () => {
   it("looks up the last completed training day before calculating interruption advice", async () => {
     const program = createQuery({ data: { id: "program-1" }, error: null });
+    const scheduleEvents = createQuery({ data: null, error: null });
     const rest = createQuery({ data: null, error: null });
     const training = createQuery({
       data: { day_type: "training", id: "workout-1", name: "推 A · 强度", scheduled_date: "2026-07-16", sequence_index: 1, status: "scheduled" },
@@ -73,7 +74,7 @@ describe("TodayWorkout Fitness Coach", () => {
     });
     const exercises = createQuery({ data: [], error: null });
     const lastCompleted = createQuery({ data: null, error: null });
-    const queries = [program, rest, training, exercises, lastCompleted];
+    const queries = [program, scheduleEvents, rest, training, exercises, lastCompleted];
     mocks.from.mockImplementation(() => queries.shift()?.query);
 
     container = document.createElement("div");

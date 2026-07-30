@@ -14,14 +14,28 @@ export type TrainingScheduleItem = {
   status: string;
 };
 
+export type TodayScheduleState =
+  | { kind: "training"; workout: TrainingScheduleItem }
+  | { kind: "rest"; restItem: RestScheduleItem; nextTraining: TrainingScheduleItem | null }
+  | { kind: "paused"; resumeDate: string | null }
+  | { kind: "adjustment_required"; eventId: string }
+  | { kind: "empty" };
+
 export function getTodayScheduleState(input: {
   now: string;
+  // Pass pausedUntil only while the program is paused; null means no planned resume date.
+  pausedUntil?: string | null;
+  pendingAdjustment?: { id: string } | null;
   restItems: RestScheduleItem[];
   trainingItems: TrainingScheduleItem[];
-}):
-  | { kind: "rest"; restItem: RestScheduleItem; nextTraining: TrainingScheduleItem | null }
-  | { kind: "training"; workout: TrainingScheduleItem }
-  | { kind: "empty" } {
+}): TodayScheduleState {
+  if (input.pendingAdjustment) {
+    return { kind: "adjustment_required", eventId: input.pendingAdjustment.id };
+  }
+  if (input.pausedUntil !== undefined) {
+    return { kind: "paused", resumeDate: input.pausedUntil };
+  }
+
   const restItem = input.restItems.find(
     (item) => item.dayType === "rest" && item.scheduledDate === input.now && canCompleteRestDay(item)
   );
@@ -40,6 +54,8 @@ export function canCompleteRestDay(item: { dayType: string; status: string }): b
 
 export async function resolveTodayScheduleState(input: {
   now: string;
+  pausedUntil?: string | null;
+  pendingAdjustment?: { id: string } | null;
   onRestQueryError: (error: unknown) => void;
   restItems: Promise<RestScheduleItem[]>;
   trainingItems: Promise<TrainingScheduleItem[]>;
@@ -50,7 +66,13 @@ export async function resolveTodayScheduleState(input: {
   });
   const trainingItems = await input.trainingItems;
 
-  return getTodayScheduleState({ now: input.now, restItems, trainingItems });
+  return getTodayScheduleState({
+    now: input.now,
+    ...(input.pausedUntil !== undefined ? { pausedUntil: input.pausedUntil } : {}),
+    ...(input.pendingAdjustment ? { pendingAdjustment: input.pendingAdjustment } : {}),
+    restItems,
+    trainingItems
+  });
 }
 
 export function reportRestCompletionFailure(error: unknown): string {

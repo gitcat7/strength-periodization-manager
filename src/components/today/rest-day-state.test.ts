@@ -8,6 +8,47 @@ import {
 } from "./rest-day-state";
 
 describe("getTodayScheduleState", () => {
+  it("requires confirmation before training when a schedule adjustment is pending", () => {
+    expect(
+      getTodayScheduleState({
+        now: "2026-08-20",
+        pausedUntil: null,
+        pendingAdjustment: { id: "event-1" },
+        restItems: [],
+        trainingItems: [
+          {
+            dayType: "training",
+            id: "train-1",
+            name: "推 A · 强度",
+            scheduledDate: "2026-08-20",
+            sequenceIndex: 0,
+            status: "scheduled"
+          }
+        ]
+      })
+    ).toEqual({ kind: "adjustment_required", eventId: "event-1" });
+  });
+
+  it("shows the paused state instead of stale training or rest cards", () => {
+    expect(
+      getTodayScheduleState({
+        now: "2026-08-20",
+        pausedUntil: "2026-08-25",
+        restItems: [{ dayType: "rest", id: "rest-1", scheduledDate: "2026-08-20", status: "scheduled" }],
+        trainingItems: [
+          {
+            dayType: "training",
+            id: "train-1",
+            name: "推 A · 强度",
+            scheduledDate: "2026-08-20",
+            sequenceIndex: 0,
+            status: "scheduled"
+          }
+        ]
+      })
+    ).toEqual({ kind: "paused", resumeDate: "2026-08-25" });
+  });
+
   it("shows a date-exact rest day without consuming the next strength session", () => {
     const state = getTodayScheduleState({
       now: "2026-07-14",
