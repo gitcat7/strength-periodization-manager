@@ -34,7 +34,7 @@ describe("PlanSetupForm", () => {
           injuryNotes: "",
           lifts: [{ exerciseId: "bench", weightKg: "80", reps: "5" }],
           weekCount: 4,
-          trainingDaysPerWeek: 3
+          sessionDurationMinutes: 60
         }}
       />
     ));
@@ -47,7 +47,9 @@ describe("PlanSetupForm", () => {
     expect(container.textContent).toContain("计划周期");
     expect(container.querySelector('select[aria-label="计划周期"]')).toHaveProperty("value", "4");
     expect(container.querySelectorAll('select[aria-label="计划周期"] option')).toHaveLength(12);
-    expect(container.textContent).not.toContain("单次时长");
+    expect(container.textContent).toContain("单次训练时长");
+    expect(container.querySelector('select[aria-label="单次训练时长"]')).toHaveProperty("value", "60");
+    expect(container.textContent).not.toContain("每周训练天数");
     expect(container.textContent).not.toContain("可训练日");
   });
 });

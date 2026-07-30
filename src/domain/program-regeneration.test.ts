@@ -9,6 +9,8 @@ import type { PlannedScheduleItem } from "./program";
 const proposedItems: PlannedScheduleItem[] = [
   {
     dayType: "training" as const,
+    cycleIndex: 0,
+    cyclePosition: 0,
     exercises: [
       {
         exerciseSlug: "bench_press",
@@ -67,10 +69,13 @@ describe("buildProgramReplacementPayload", () => {
     ).toEqual({
       custom_template_name: null,
       end_date: "2026-07-14",
+      holiday_policy: "train",
       name: "推/拉/蹲 A-B 周期",
       schedule_config: { train_days: 1, rest_days: 1 },
       schedule_items: [
         {
+          cycle_index: 0,
+          cycle_position: 0,
           day_type: "training",
           exercises: [
             {
@@ -87,6 +92,8 @@ describe("buildProgramReplacementPayload", () => {
           sequence_index: 0
         },
         {
+          cycle_index: null,
+          cycle_position: null,
           day_type: "rest",
           exercises: [],
           name: "休息/恢复日",
@@ -97,7 +104,21 @@ describe("buildProgramReplacementPayload", () => {
       ],
       schedule_mode: "cadence",
       start_date: "2026-07-13",
-      template_type: "push_pull_squat"
+      template_type: "push_pull_squat",
+      timezone: "Asia/Shanghai"
     });
+  });
+
+  it("carries the plan holiday policy and never carries weekly training days", () => {
+    const payload = buildProgramReplacementPayload({
+      exerciseIdsBySlug: new Map([["bench_press", "exercise-1"]]),
+      holidayPolicy: "rest_and_shift",
+      plannedItems: proposedItems,
+      schedule: { mode: "cadence", trainDays: 1, restDays: 1 },
+      templateType: "push_pull_squat"
+    });
+
+    expect(payload.holiday_policy).toBe("rest_and_shift");
+    expect(JSON.stringify(payload)).not.toContain("training_days_per_week");
   });
 });

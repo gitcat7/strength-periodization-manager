@@ -295,3 +295,166 @@ $$;
 
 revoke execute on function public.reflow_program_schedule(jsonb) from public, anon;
 grant execute on function public.reflow_program_schedule(jsonb) to authenticated;
+
+-- Persist sequence-cycle metadata and holiday policy on program replacement.
+create or replace function public.replace_active_program(p_payload jsonb)
+returns table (
+  program_id uuid,
+  first_schedule_item_id uuid,
+  training_days integer,
+  rest_days integer
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_program_id uuid;
+  v_first_schedule_item_id uuid;
+  v_name text;
+  v_template_type text;
+  v_custom_template_name text;
+  v_schedule_mode text;
+  v_schedule_config jsonb;
+  v_start_date date;
+  v_end_date date;
+  v_items jsonb;
+  v_item jsonb;
+  v_exercise jsonb;
+  v_workout_id uuid;
+  v_day_type text;
+  v_sequence_index integer;
+  v_schedule_index integer;
+  v_holiday_policy text;
+  v_timezone text;
+  v_cycle_index integer;
+  v_cycle_position integer;
+  v_item_count integer;
+  v_training_days integer := 0;
+  v_rest_days integer := 0;
+  v_schedule_indexes integer[] := '{}';
+  v_unique_schedule_indexes integer[];
+  v_exercise_indexes integer[];
+  v_exercise_index integer;
+  v_exercise_id uuid;
+begin
+  if v_user_id is null then
+    raise exception 'Authentication required' using errcode = 'P0001';
+  end if;
+  if p_payload is null or jsonb_typeof(p_payload) <> 'object' then
+    raise exception 'Replacement payload must be an object' using errcode = 'P0001';
+  end if;
+  v_name := btrim(p_payload ->> 'name');
+  v_template_type := p_payload ->> 'template_type';
+  v_custom_template_name := nullif(btrim(p_payload ->> 'custom_template_name'), '');
+  v_schedule_mode := p_payload ->> 'schedule_mode';
+  v_schedule_config := p_payload -> 'schedule_config';
+  v_items := p_payload -> 'schedule_items';
+  v_holiday_policy := coalesce(nullif(btrim(p_payload ->> 'holiday_policy'), ''), 'train');
+  v_timezone := coalesce(nullif(btrim(p_payload ->> 'timezone'), ''), 'Asia/Shanghai');
+  if v_name is null or v_name = ''
+    or v_template_type not in ('three_day_full_body', 'four_day_upper_lower', 'one_split', 'three_split', 'five_split', 'push_pull_squat', 'custom')
+    or v_schedule_mode not in ('fixed_weekdays', 'cadence', 'flexible')
+    or v_holiday_policy not in ('train', 'rest_and_shift')
+    or jsonb_typeof(v_schedule_config) <> 'object'
+    or jsonb_typeof(v_items) <> 'array'
+    or jsonb_array_length(v_items) = 0 then
+    raise exception 'Replacement payload is invalid' using errcode = 'P0001';
+  end if;
+  begin
+    v_start_date := (p_payload ->> 'start_date')::date;
+    v_end_date := (p_payload ->> 'end_date')::date;
+  exception when others then
+    raise exception 'Replacement payload has invalid dates' using errcode = 'P0001';
+  end;
+  if v_start_date is null or v_end_date is null or v_end_date < v_start_date then
+    raise exception 'Replacement payload has invalid dates' using errcode = 'P0001';
+  end if;
+  v_item_count := jsonb_array_length(v_items);
+  for v_item in select value from jsonb_array_elements(v_items) loop
+    if jsonb_typeof(v_item) <> 'object'
+      or jsonb_typeof(v_item -> 'scheduled_date') <> 'string'
+      or nullif(btrim(v_item ->> 'name'), '') is null
+      or (v_item ->> 'schedule_index') !~ '^(0|[1-9][0-9]*)$'
+      or v_item ->> 'day_type' not in ('training', 'rest')
+      or jsonb_typeof(v_item -> 'cfg_exercises') <> 'array' then
+      raise exception 'Replacement schedule item is invalid' using errcode = 'P0001';
+    end if;
+    begin
+      perform (v_item ->> 'scheduled_date')::date;
+    exception when others then
+      raise exception 'Replacement schedule item has invalid date' using errcode = 'P0001';
+    end;
+    v_schedule_index := (v_item ->> 'schedule_index')::integer;
+    v_schedule_indexes := array_append(v_schedule_indexes, v_schedule_index);
+    v_day_type := v_item ->> 'day_type';
+    if v_day_type = 'training' then
+      if (v_item ->> 'sequence_index') !~ '^(0|[1-9][0-9]*)$' or jsonb_array_length(v_item -> 'cfg_exercises') = 0 then
+        raise exception 'Training schedule items require sequence indexes and prescriptions' using errcode = 'P0001';
+      end if;
+      v_training_days := v_training_days + 1;
+    elsif not (v_item ? 'sequence_index' and v_item -> 'sequence_index' = 'null'::jsonb)
+      or jsonb_array_length(v_item -> 'cfg_exercises') <> 0 then
+      raise exception 'Rest schedule items require null sequence indexes and no prescriptions' using errcode = 'P0001';
+    else
+      v_rest_days := v_rest_days + 1;
+    end if;
+    v_exercise_indexes := '{}';
+    for v_exercise in select value from jsonb_array_elements(v_item -> 'cfg_exercises') loop
+      if jsonb_typeof(v_exercise) <> 'object'
+        or jsonb_typeof(v_exercise -> 'exercise_id') <> 'string'
+        or (v_exercise ->> 'exercise_id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        or (v_exercise ->> 'order_index') !~ '^[1-9][0-9]*$'
+        or (v_exercise ->> 'target_sets') !~ '^[1-9][0-9]*$'
+        or (v_exercise ->> 'target_reps') !~ '^[1-9][0-9]*$'
+        or jsonb_typeof(v_exercise -> 'target_weight') <> 'number'
+        or (v_exercise ->> 'target_weight')::numeric < 0 then
+        raise exception 'Replacement exercise prescription is invalid' using errcode = 'P0001';
+      end if;
+      v_exercise_id := (v_exercise ->> 'exercise_id')::uuid;
+      if not exists (select 1 from public.cfg_exercises where id = v_exercise_id) then
+        raise exception 'Replacement exercise does not exist' using errcode = 'P0001';
+      end if;
+      v_exercise_index := (v_exercise ->> 'order_index')::integer;
+      if v_exercise_index = any(v_exercise_indexes) then
+        raise exception 'Replacement exercise order indexes must be unique' using errcode = 'P0001';
+      end if;
+      v_exercise_indexes := array_append(v_exercise_indexes, v_exercise_index);
+    end loop;
+  end loop;
+  select array_agg(distinct schedule_index order by schedule_index)
+  into v_unique_schedule_indexes
+  from unnest(v_schedule_indexes) as indexes(schedule_index);
+  if cardinality(v_unique_schedule_indexes) <> v_item_count
+    or v_unique_schedule_indexes[1] <> 0
+    or v_unique_schedule_indexes[v_item_count] <> v_item_count - 1 then
+    raise exception 'Replacement schedule indexes must be continuous from zero' using errcode = 'P0001';
+  end if;
+  perform 1 from auth.users where id = v_user_id for update;
+  perform 1 from public.plan_programs where user_id = v_user_id and status = 'active' for update;
+  insert into public.plan_programs (user_id, name, template_type, custom_template_name, schedule_mode, schedule_config, holiday_policy, timezone, status, start_date, end_date)
+  values (v_user_id, v_name, v_template_type, v_custom_template_name, v_schedule_mode, v_schedule_config, v_holiday_policy, v_timezone, 'active', v_start_date, v_end_date)
+  returning id into v_program_id;
+  for v_item in select value from jsonb_array_elements(v_items) loop
+    v_schedule_index := (v_item ->> 'schedule_index')::integer;
+    v_day_type := v_item ->> 'day_type';
+    v_sequence_index := case when v_day_type = 'training' then (v_item ->> 'sequence_index')::integer else null end;
+    v_cycle_index := case when v_day_type = 'training' and (v_item ->> 'cycle_index') ~ '^(0|[1-9][0-9]*)$' then (v_item ->> 'cycle_index')::integer else null end;
+    v_cycle_position := case when v_day_type = 'training' and (v_item ->> 'cycle_position') ~ '^(0|[1-9][0-9]*)$' then (v_item ->> 'cycle_position')::integer else null end;
+    insert into public.plan_workouts (program_id, user_id, scheduled_date, sequence_index, schedule_index, day_type, name, status, cycle_index, cycle_position)
+    values (v_program_id, v_user_id, (v_item ->> 'scheduled_date')::date, v_sequence_index, v_schedule_index, v_day_type, btrim(v_item ->> 'name'), 'scheduled', v_cycle_index, v_cycle_position)
+    returning id into v_workout_id;
+    if v_schedule_index = 0 then v_first_schedule_item_id := v_workout_id; end if;
+    if v_day_type = 'training' then
+      for v_exercise in select value from jsonb_array_elements(v_item -> 'cfg_exercises') loop
+        insert into public.plan_workout_exercises (workout_id, exercise_id, order_index, target_sets, target_reps, target_weight)
+        values (v_workout_id, (v_exercise ->> 'exercise_id')::uuid, (v_exercise ->> 'order_index')::integer, (v_exercise ->> 'target_sets')::integer, (v_exercise ->> 'target_reps')::integer, (v_exercise ->> 'target_weight')::numeric);
+      end loop;
+    end if;
+  end loop;
+  update public.plan_programs set status = 'archived', updated_at = now()
+  where user_id = v_user_id and status = 'active' and id <> v_program_id;
+  return query select v_program_id, v_first_schedule_item_id, v_training_days, v_rest_days;
+end;
+$$;

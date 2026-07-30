@@ -10,6 +10,7 @@ import type { RecommendationType } from "@/domain/fitness-coach";
 import { getNextWorkoutState } from "@/domain/next-workout";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
 import {
+  sessionDurationOptions,
   validatePlanSetup,
   type PlanSetupInput,
   type PlanSetupValidationResult
@@ -38,7 +39,8 @@ import {
   type LegacyScheduleMode,
   type TemplateType
 } from "@/domain/program";
-import type { ScheduleRule } from "@/domain/schedule-rule";
+import type { HolidayPolicy, ScheduleRule } from "@/domain/schedule-rule";
+import { ScheduleRuleFields } from "./schedule-rule-fields";
 import {
   buildProgramReplacementPayload,
   buildRegenerationPreview,
@@ -148,7 +150,7 @@ const defaultPlanSetup: PlanSetupInput = {
   injuryNotes: "",
   lifts: [],
   weekCount: 4,
-  trainingDaysPerWeek: 3
+  sessionDurationMinutes: 60
 };
 
 export function ProgramManager() {
@@ -163,16 +165,14 @@ export function ProgramManager() {
   const [usesLegacyScheduleSchema, setUsesLegacyScheduleSchema] = useState(false);
   const [message, setMessage] = useState("");
   const [templateType, setTemplateType] = useState<TemplateType>("push_pull_squat");
-  const [scheduleMode, setScheduleMode] = useState<LegacyScheduleMode>("fixed_weekdays");
-  const [selectedWeekdays, setSelectedWeekdays] = useState<number[]>([1, 3, 5]);
-  const [cadenceTrainDays, setCadenceTrainDays] = useState(1);
-  const [cadenceRestDays, setCadenceRestDays] = useState(1);
+  const [scheduleRule, setScheduleRule] = useState<ScheduleRule>({ mode: "fixed_weekdays", weekdays: [1, 3, 5] });
+  const [holidayPolicy, setHolidayPolicy] = useState<HolidayPolicy>("train");
+  const [holidayDates, setHolidayDates] = useState<Array<{ date: string; name: string }>>([]);
   const [customTemplateName, setCustomTemplateName] = useState("");
   const [useCustomName, setUseCustomName] = useState(false);
   const [mainLifts, setMainLifts] = useState<ExerciseRow[]>([]);
   const [planSetup, setPlanSetup] = useState<PlanSetupInput>(defaultPlanSetup);
   const [planSetupErrors, setPlanSetupErrors] = useState<Record<string, string>>({});
-  const [persistedSessionDuration, setPersistedSessionDuration] = useState(60);
   const [showPlanSetup, setShowPlanSetup] = useState(false);
   const [regenerationDialog, setRegenerationDialog] = useState(createRegenerationDialogState);
   const confirmationInFlight = useRef(false);
@@ -183,6 +183,15 @@ export function ProgramManager() {
   useEffect(() => {
     loadCurrentProgram();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    async function loadHolidayDates() {
+      const supabase = createBrowserSupabaseClient();
+      const { data } = await supabase.from(DB_TABLE.calendarDates).select("date,name");
+      if (data) setHolidayDates(data as Array<{ date: string; name: string }>);
+    }
+    void loadHolidayDates();
   }, []);
 
   const workoutExercisesByWorkoutId = useMemo(() => {
@@ -355,12 +364,15 @@ export function ProgramManager() {
     const availableWeekdays = Array.isArray(profile.available_weekdays) && profile.available_weekdays.length > 0
       ? profile.available_weekdays
       : [1, 3, 5];
-    const trainingDaysPerWeek = [3, 4, 7].includes(Number(profile.training_days_per_week))
-      ? Number(profile.training_days_per_week)
-      : defaultPlanSetup.trainingDaysPerWeek;
+    const sessionDurationMinutes = (sessionDurationOptions as readonly number[]).includes(
+      Number(profile.session_duration_minutes)
+    )
+      ? (Number(profile.session_duration_minutes) as PlanSetupInput["sessionDurationMinutes"])
+      : 60;
 
-    setSelectedWeekdays(availableWeekdays);
-    setPersistedSessionDuration(Number(profile.session_duration_minutes) || 60);
+    setScheduleRule((current) =>
+      current.mode === "fixed_weekdays" ? { mode: "fixed_weekdays", weekdays: availableWeekdays } : current
+    );
     setPlanSetup({
       experienceLevel: profile.experience_level as PlanSetupInput["experienceLevel"],
       goal: normalizePlanGoal(profile.goal),
@@ -371,7 +383,7 @@ export function ProgramManager() {
         return { exerciseId: exercise.id, weightKg: workingWeight ? String(workingWeight) : "", reps: "5" };
       }),
       weekCount: 4,
-      trainingDaysPerWeek
+      sessionDurationMinutes
     });
   }
 
@@ -392,9 +404,8 @@ export function ProgramManager() {
         user_id: userId,
         experience_level: parsed.value.experienceLevel,
         goal: parsed.value.goal,
-        training_days_per_week: parsed.value.trainingDaysPerWeek,
-        available_weekdays: selectedWeekdays,
-        session_duration_minutes: persistedSessionDuration,
+        available_weekdays: scheduleRule.mode === "fixed_weekdays" ? scheduleRule.weekdays : [],
+        session_duration_minutes: parsed.value.sessionDurationMinutes,
         injury_notes: parsed.value.injuryNotes || null,
         unit: "kg",
         updated_at: new Date().toISOString()
@@ -669,7 +680,7 @@ export function ProgramManager() {
       return;
     }
 
-    if (scheduleMode === "fixed_weekdays" && selectedWeekdays.length === 0) {
+    if (scheduleRule.mode === "fixed_weekdays" && scheduleRule.weekdays.length === 0) {
       setStatus("error");
       setMessage("固定星期模式至少选择一个训练日。");
       return;
@@ -689,12 +700,9 @@ export function ProgramManager() {
       if (!saved) return;
 
       const supabase = createBrowserSupabaseClient();
-      // Bridge until ScheduleRuleFields replaces this form (Task 6): a legacy flexible
-      // selection generates as a fixed-weekday plan; new plans never persist flexible.
-      const schedule: ScheduleRule =
-        scheduleMode === "cadence"
-          ? { mode: "cadence", trainDays: cadenceTrainDays, restDays: cadenceRestDays }
-          : { mode: "fixed_weekdays", weekdays: selectedWeekdays };
+      // Legacy flexible programs stay readable, but regeneration always produces a
+      // supported sequence-first rule chosen in the form above.
+      const schedule: ScheduleRule = scheduleRule;
 
       const { data: exercises, error: exercisesError } = await supabase
         .from(DB_TABLE.exercises)
@@ -748,6 +756,7 @@ export function ProgramManager() {
       const payload = buildProgramReplacementPayload({
         customTemplateName: useCustomName ? customTemplateName.trim() : null,
         exerciseIdsBySlug: new Map(exerciseRows.map((exercise) => [exercise.slug, exercise.id])),
+        holidayPolicy,
         plannedItems: plannedWorkouts,
         programTemplateType: useCustomName ? "custom" : templateType,
         schedule,
@@ -861,16 +870,13 @@ export function ProgramManager() {
   return (
     <div className="space-y-5">
       <PlanBuilder
-        cadenceRestDays={cadenceRestDays}
-        cadenceTrainDays={cadenceTrainDays}
         customTemplateName={customTemplateName}
-        scheduleMode={scheduleMode}
-        selectedWeekdays={selectedWeekdays}
-        setCadenceRestDays={setCadenceRestDays}
-        setCadenceTrainDays={setCadenceTrainDays}
+        holidayPolicy={holidayPolicy}
+        holidays={holidayDates}
+        onHolidayPolicyChange={setHolidayPolicy}
+        onRuleChange={setScheduleRule}
+        rule={scheduleRule}
         setCustomTemplateName={setCustomTemplateName}
-        setScheduleMode={setScheduleMode}
-        setSelectedWeekdays={setSelectedWeekdays}
         setTemplateType={setTemplateType}
         setUseCustomName={setUseCustomName}
         templateType={templateType}
@@ -1174,17 +1180,20 @@ export function PlanSetupForm({
 
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">
-          <span className="mb-1 block text-sm font-medium">每周训练天数</span>
+          <span className="mb-1 block text-sm font-medium">单次训练时长</span>
           <select
+            aria-label="单次训练时长"
             className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
-            onChange={(event) => update({ trainingDaysPerWeek: Number(event.target.value) })}
-            value={value.trainingDaysPerWeek}
+            onChange={(event) =>
+              update({ sessionDurationMinutes: Number(event.target.value) as PlanSetupInput["sessionDurationMinutes"] })
+            }
+            value={value.sessionDurationMinutes}
           >
-            <option value={3}>3 天</option>
-            <option value={4}>4 天</option>
-            <option value={7}>7 天</option>
+            {sessionDurationOptions.map((minutes) => (
+              <option key={minutes} value={minutes}>{minutes} 分钟</option>
+            ))}
           </select>
-          {errors.trainingDaysPerWeek ? <p className="mt-1 text-xs text-red-600">{errors.trainingDaysPerWeek}</p> : null}
+          {errors.sessionDurationMinutes ? <p className="mt-1 text-xs text-red-600">{errors.sessionDurationMinutes}</p> : null}
         </label>
         <label className="block">
           <span className="mb-1 block text-sm font-medium">计划周期</span>
@@ -1291,31 +1300,25 @@ export function PlanSetupForm({
 }
 
 function PlanBuilder({
-  cadenceRestDays,
-  cadenceTrainDays,
   customTemplateName,
-  scheduleMode,
-  selectedWeekdays,
-  setCadenceRestDays,
-  setCadenceTrainDays,
+  holidayPolicy,
+  holidays,
+  onHolidayPolicyChange,
+  onRuleChange,
+  rule,
   setCustomTemplateName,
-  setScheduleMode,
-  setSelectedWeekdays,
   setTemplateType,
   setUseCustomName,
   templateType,
   useCustomName
 }: {
-  cadenceRestDays: number;
-  cadenceTrainDays: number;
   customTemplateName: string;
-  scheduleMode: LegacyScheduleMode;
-  selectedWeekdays: number[];
-  setCadenceRestDays: (value: number) => void;
-  setCadenceTrainDays: (value: number) => void;
+  holidayPolicy: HolidayPolicy;
+  holidays: Array<{ date: string; name: string }>;
+  onHolidayPolicyChange: (policy: HolidayPolicy) => void;
+  onRuleChange: (rule: ScheduleRule) => void;
+  rule: ScheduleRule;
   setCustomTemplateName: (value: string) => void;
-  setScheduleMode: (value: LegacyScheduleMode) => void;
-  setSelectedWeekdays: (value: number[]) => void;
   setTemplateType: (value: TemplateType) => void;
   setUseCustomName: (value: boolean) => void;
   templateType: TemplateType;
@@ -1341,69 +1344,15 @@ function PlanBuilder({
         ))}
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">安排方式</span>
-          <select
-            className="h-11 w-full rounded-lg border border-line bg-field px-3 text-sm"
-            onChange={(event) => setScheduleMode(event.target.value as LegacyScheduleMode)}
-            value={scheduleMode}
-          >
-            <option value="fixed_weekdays">固定星期</option>
-            <option value="cadence">练休循环</option>
-            <option value="flexible">自由安排</option>
-          </select>
-        </label>
-        {scheduleMode === "cadence" ? (
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium">训练与休息节奏（练几休几）</span>
-            <select
-              className="h-11 w-full rounded-lg border border-line bg-field px-3 text-sm"
-              onChange={(event) => {
-                const [trainDays, restDays] = event.target.value.split("-").map(Number);
-                setCadenceTrainDays(trainDays);
-                setCadenceRestDays(restDays);
-              }}
-              value={`${cadenceTrainDays}-${cadenceRestDays}`}
-            >
-              <option value="1-0">练一休零（连续训练）</option>
-              <option value="1-1">练一休一</option>
-              <option value="1-2">练一休二</option>
-              <option value="3-1">练三休一</option>
-              <option value="4-1">练四休一</option>
-            </select>
-          </label>
-        ) : null}
-        {scheduleMode === "flexible" ? (
-          <p className="rounded-lg bg-field px-3 py-2 text-sm leading-5 text-muted">
-            计划按训练序列继续；日期只是建议，可在有空时完成下一节。
-          </p>
-        ) : null}
+      <div className="mt-4">
+        <ScheduleRuleFields
+          holidayPolicy={holidayPolicy}
+          holidays={holidays}
+          onChange={onRuleChange}
+          onHolidayPolicyChange={onHolidayPolicyChange}
+          value={rule}
+        />
       </div>
-
-      {scheduleMode === "fixed_weekdays" ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {weekdayOptions.map((weekday) => {
-            const active = selectedWeekdays.includes(weekday.value);
-            return (
-              <button
-                className={`rounded-full px-3 py-2 text-sm font-semibold ${active ? "bg-action text-white" : "border border-line bg-field text-ink"}`}
-                key={weekday.value}
-                onClick={() =>
-                  setSelectedWeekdays(
-                    active
-                      ? selectedWeekdays.filter((value) => value !== weekday.value)
-                      : [...selectedWeekdays, weekday.value].sort((a, b) => a - b)
-                  )
-                }
-                type="button"
-              >
-                {weekday.label}
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
 
       <label className="mt-4 flex items-start gap-3 rounded-lg bg-field p-3 text-sm">
         <input

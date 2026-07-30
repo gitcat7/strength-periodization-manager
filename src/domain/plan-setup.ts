@@ -1,13 +1,16 @@
 export type PlanExperienceLevel = "beginner" | "novice" | "intermediate";
 export type PlanGoal = "hypertrophy" | "hypertrophy_strength" | "fat_loss" | "body_recomposition" | "strength";
 
+export const sessionDurationOptions = [45, 60, 75, 90, 120, 150, 180] as const;
+export type SessionDurationMinutes = (typeof sessionDurationOptions)[number];
+
 export type PlanSetupInput = {
   experienceLevel: PlanExperienceLevel | "";
   goal: PlanGoal;
   injuryNotes: string;
   lifts: Array<{ exerciseId: string; weightKg: string; reps: string }>;
   weekCount: number;
-  trainingDaysPerWeek: number;
+  sessionDurationMinutes: SessionDurationMinutes;
 };
 
 export type ValidatedPlanSetup = Omit<PlanSetupInput, "experienceLevel" | "lifts"> & {
@@ -31,8 +34,8 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
       : [];
   });
 
-  if (!Number.isInteger(input.trainingDaysPerWeek) || input.trainingDaysPerWeek < 1 || input.trainingDaysPerWeek > 7) {
-    fieldErrors.trainingDaysPerWeek = "每周训练天数应为 1-7 天";
+  if (!isSessionDuration(input.sessionDurationMinutes)) {
+    fieldErrors.sessionDurationMinutes = "单次训练时长应为 45–180 分钟的可选档位";
   }
 
   if (!Number.isInteger(input.weekCount) || input.weekCount < 1 || input.weekCount > 12) {
@@ -59,9 +62,13 @@ export function validatePlanSetup(input: PlanSetupInput): PlanSetupValidationRes
       injuryNotes: input.injuryNotes.trim().slice(0, 500),
       lifts,
       weekCount: input.weekCount,
-      trainingDaysPerWeek: input.trainingDaysPerWeek
+      sessionDurationMinutes: input.sessionDurationMinutes
     }
   };
+}
+
+function isSessionDuration(value: number): value is SessionDurationMinutes {
+  return (sessionDurationOptions as readonly number[]).includes(value);
 }
 
 function isPlanExperienceLevel(value: PlanSetupInput["experienceLevel"]): value is PlanExperienceLevel {

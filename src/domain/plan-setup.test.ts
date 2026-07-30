@@ -8,7 +8,7 @@ function baseInput(overrides: Partial<PlanSetupInput> = {}): PlanSetupInput {
     injuryNotes: "",
     lifts: [{ exerciseId: "bench", weightKg: "80", reps: "5" }],
     weekCount: 4,
-    trainingDaysPerWeek: 3,
+    sessionDurationMinutes: 60,
     ...overrides
   };
 }
@@ -38,9 +38,20 @@ describe("validatePlanSetup", () => {
       value: { goal: "fat_loss", injuryNotes: "右肩不适" }
     });
     if (result.ok) {
+      expect(result.value).not.toHaveProperty("trainingDaysPerWeek");
       expect(result.value).not.toHaveProperty("availableWeekdays");
-      expect(result.value).not.toHaveProperty("sessionDurationMinutes");
     }
+  });
+
+  it("accepts every supported session duration tier", () => {
+    expect(validatePlanSetup({ ...baseInput(), sessionDurationMinutes: 180 })).toMatchObject({ ok: true });
+  });
+
+  it("rejects unsupported session durations", () => {
+    expect(validatePlanSetup({ ...baseInput(), sessionDurationMinutes: 181 as never })).toEqual({
+      ok: false,
+      fieldErrors: { sessionDurationMinutes: "单次训练时长应为 45–180 分钟的可选档位" }
+    });
   });
 
   it("accepts the combined hypertrophy_strength goal", () => {

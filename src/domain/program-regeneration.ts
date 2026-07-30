@@ -1,3 +1,4 @@
+import type { HolidayPolicy, ScheduleRule } from "@/domain/schedule-rule";
 import type {
   PlannedScheduleItem,
   ProgramTemplateType,
@@ -8,9 +9,12 @@ import type {
 export type ProgramReplacementPayload = {
   custom_template_name: string | null;
   end_date: string;
+  holiday_policy: HolidayPolicy;
   name: string;
   schedule_config: Record<string, number | number[]>;
   schedule_items: Array<{
+    cycle_index: number | null;
+    cycle_position: number | null;
     day_type: "training" | "rest";
     exercises: Array<{
       exercise_id: string;
@@ -27,6 +31,7 @@ export type ProgramReplacementPayload = {
   schedule_mode: ScheduleConfig["mode"];
   start_date: string;
   template_type: ProgramTemplateType;
+  timezone: "Asia/Shanghai";
 };
 
 export function buildRegenerationPreview(input: {
@@ -64,6 +69,7 @@ export function buildRegenerationPreview(input: {
 export function buildProgramReplacementPayload({
   customTemplateName = null,
   exerciseIdsBySlug,
+  holidayPolicy = "train",
   plannedItems,
   programTemplateType,
   schedule,
@@ -71,9 +77,10 @@ export function buildProgramReplacementPayload({
 }: {
   customTemplateName?: string | null;
   exerciseIdsBySlug: ReadonlyMap<string, string>;
+  holidayPolicy?: HolidayPolicy;
   plannedItems: PlannedScheduleItem[];
   programTemplateType?: ProgramTemplateType;
-  schedule: ScheduleConfig;
+  schedule: ScheduleRule;
   templateType: TemplateType;
 }): ProgramReplacementPayload {
   const startDate = plannedItems[0]?.scheduledDate;
@@ -83,9 +90,12 @@ export function buildProgramReplacementPayload({
   return {
     custom_template_name: customTemplateName,
     end_date: endDate,
+    holiday_policy: holidayPolicy,
     name: getProgramName(templateType),
     schedule_config: getScheduleConfig(schedule),
     schedule_items: plannedItems.map((item) => ({
+      cycle_index: item.dayType === "training" ? (item.cycleIndex ?? null) : null,
+      cycle_position: item.dayType === "training" ? (item.cyclePosition ?? null) : null,
       day_type: item.dayType,
       exercises:
         item.dayType === "rest"
@@ -108,7 +118,8 @@ export function buildProgramReplacementPayload({
     })),
     schedule_mode: schedule.mode,
     start_date: startDate,
-    template_type: programTemplateType ?? templateType
+    template_type: programTemplateType ?? templateType,
+    timezone: "Asia/Shanghai"
   };
 }
 

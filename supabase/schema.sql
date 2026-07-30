@@ -837,6 +837,10 @@ declare
   v_day_type text;
   v_sequence_index integer;
   v_schedule_index integer;
+  v_holiday_policy text;
+  v_timezone text;
+  v_cycle_index integer;
+  v_cycle_position integer;
   v_item_count integer;
   v_training_days integer := 0;
   v_rest_days integer := 0;
@@ -858,9 +862,12 @@ begin
   v_schedule_mode := p_payload ->> 'schedule_mode';
   v_schedule_config := p_payload -> 'schedule_config';
   v_items := p_payload -> 'schedule_items';
+  v_holiday_policy := coalesce(nullif(btrim(p_payload ->> 'holiday_policy'), ''), 'train');
+  v_timezone := coalesce(nullif(btrim(p_payload ->> 'timezone'), ''), 'Asia/Shanghai');
   if v_name is null or v_name = ''
     or v_template_type not in ('three_day_full_body', 'four_day_upper_lower', 'one_split', 'three_split', 'five_split', 'push_pull_squat', 'custom')
     or v_schedule_mode not in ('fixed_weekdays', 'cadence', 'flexible')
+    or v_holiday_policy not in ('train', 'rest_and_shift')
     or jsonb_typeof(v_schedule_config) <> 'object'
     or jsonb_typeof(v_items) <> 'array'
     or jsonb_array_length(v_items) = 0 then
@@ -937,15 +944,17 @@ begin
   end if;
   perform 1 from auth.users where id = v_user_id for update;
   perform 1 from public.plan_programs where user_id = v_user_id and status = 'active' for update;
-  insert into public.plan_programs (user_id, name, template_type, custom_template_name, schedule_mode, schedule_config, status, start_date, end_date)
-  values (v_user_id, v_name, v_template_type, v_custom_template_name, v_schedule_mode, v_schedule_config, 'active', v_start_date, v_end_date)
+  insert into public.plan_programs (user_id, name, template_type, custom_template_name, schedule_mode, schedule_config, holiday_policy, timezone, status, start_date, end_date)
+  values (v_user_id, v_name, v_template_type, v_custom_template_name, v_schedule_mode, v_schedule_config, v_holiday_policy, v_timezone, 'active', v_start_date, v_end_date)
   returning id into v_program_id;
   for v_item in select value from jsonb_array_elements(v_items) loop
     v_schedule_index := (v_item ->> 'schedule_index')::integer;
     v_day_type := v_item ->> 'day_type';
     v_sequence_index := case when v_day_type = 'training' then (v_item ->> 'sequence_index')::integer else null end;
-    insert into public.plan_workouts (program_id, user_id, scheduled_date, sequence_index, schedule_index, day_type, name, status)
-    values (v_program_id, v_user_id, (v_item ->> 'scheduled_date')::date, v_sequence_index, v_schedule_index, v_day_type, btrim(v_item ->> 'name'), 'scheduled')
+    v_cycle_index := case when v_day_type = 'training' and (v_item ->> 'cycle_index') ~ '^(0|[1-9][0-9]*)$' then (v_item ->> 'cycle_index')::integer else null end;
+    v_cycle_position := case when v_day_type = 'training' and (v_item ->> 'cycle_position') ~ '^(0|[1-9][0-9]*)$' then (v_item ->> 'cycle_position')::integer else null end;
+    insert into public.plan_workouts (program_id, user_id, scheduled_date, sequence_index, schedule_index, day_type, name, status, cycle_index, cycle_position)
+    values (v_program_id, v_user_id, (v_item ->> 'scheduled_date')::date, v_sequence_index, v_schedule_index, v_day_type, btrim(v_item ->> 'name'), 'scheduled', v_cycle_index, v_cycle_position)
     returning id into v_workout_id;
     if v_schedule_index = 0 then v_first_schedule_item_id := v_workout_id; end if;
     if v_day_type = 'training' then

@@ -87,6 +87,11 @@ describe("ProgramManager cache hydration", () => {
       setInputValue(view.querySelector("input[aria-label='硬拉重量 kg']")!, "150");
       setInputValue(view.querySelector("input[aria-label='推举重量 kg']")!, "50");
       generateButton?.click();
+      // The richer schedule form adds render ticks; flush all pending promises
+      // so the network failure message settles before asserting.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
       await Promise.resolve();
     });
 
