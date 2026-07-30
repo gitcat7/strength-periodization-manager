@@ -84,10 +84,17 @@ body {
 }
 
 button,
+a,
 input,
 select,
 textarea {
   font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+input[type="number"],
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 button {
