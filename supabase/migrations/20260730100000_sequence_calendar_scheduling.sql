@@ -125,3 +125,173 @@ values
   ('2027-10-02', '国庆节', true, 2027),
   ('2027-10-03', '国庆节', true, 2027)
 on conflict (date) do nothing;
+
+-- Atomically reflow a program schedule guarded by its schedule revision. The RPC
+-- derives ownership from auth.uid(), never from client-supplied fields.
+create or replace function public.reflow_program_schedule(p_payload jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid := auth.uid();
+  v_program_id uuid;
+  v_expected_revision integer;
+  v_action text;
+  v_effective_date date;
+  v_resume_route text;
+  v_reason text;
+  v_program record;
+  v_item jsonb;
+  v_workout_id uuid;
+  v_workout_status text;
+  v_updated_count integer := 0;
+  v_skipped_ids uuid[] := '{}';
+  v_event_type text;
+  v_new_revision integer;
+  v_next_workout jsonb;
+begin
+  if v_user_id is null then
+    raise exception 'Not authenticated' using errcode = 'P0001';
+  end if;
+
+  if p_payload is null or jsonb_typeof(p_payload) <> 'object' then
+    raise exception 'Schedule reflow payload is invalid' using errcode = 'P0001';
+  end if;
+
+  v_action := p_payload ->> 'action';
+  if v_action is null or v_action not in ('extra_rest', 'resume', 'holiday_override', 'unavailable_dates') then
+    raise exception 'Schedule reflow payload is invalid' using errcode = 'P0001';
+  end if;
+
+  begin
+    v_program_id := (p_payload ->> 'program_id')::uuid;
+    v_expected_revision := (p_payload ->> 'expected_revision')::integer;
+    v_effective_date := (p_payload ->> 'effective_date')::date;
+  exception when others then
+    raise exception 'Schedule reflow payload is invalid' using errcode = 'P0001';
+  end;
+
+  if v_program_id is null or v_expected_revision is null or v_expected_revision < 1 or v_effective_date is null then
+    raise exception 'Schedule reflow payload is invalid' using errcode = 'P0001';
+  end if;
+
+  v_resume_route := p_payload ->> 'resume_route';
+  if v_action = 'resume' then
+    if v_resume_route is null or v_resume_route not in ('continue_current_cycle', 'start_next_cycle') then
+      raise exception 'Resume requires an explicit route' using errcode = 'P0001';
+    end if;
+  else
+    v_resume_route := null;
+  end if;
+
+  v_reason := p_payload ->> 'reason';
+  if v_reason is not null and v_reason not in ('fatigue', 'time_conflict', 'minor_discomfort', 'injury', 'personal', 'other') then
+    raise exception 'Schedule reflow payload is invalid' using errcode = 'P0001';
+  end if;
+
+  if p_payload -> 'schedule_items' is not null and jsonb_typeof(p_payload -> 'schedule_items') <> 'array' then
+    raise exception 'Schedule reflow payload is invalid' using errcode = 'P0001';
+  end if;
+
+  select * into v_program
+  from public.plan_programs
+  where id = v_program_id
+  for update;
+
+  if not found or v_program.user_id <> v_user_id or v_program.status = 'archived' then
+    raise exception 'Program not found' using errcode = 'P0001';
+  end if;
+
+  if v_program.schedule_revision <> v_expected_revision then
+    raise exception 'Schedule changed; refresh before confirming' using errcode = 'P0001';
+  end if;
+
+  for v_item in select value from jsonb_array_elements(coalesce(p_payload -> 'schedule_items', '[]'::jsonb))
+  loop
+    begin
+      v_workout_id := (v_item ->> 'workout_id')::uuid;
+    exception when others then
+      raise exception 'Schedule reflow payload is invalid' using errcode = 'P0001';
+    end;
+
+    select w.status into v_workout_status
+    from public.plan_workouts w
+    where w.id = v_workout_id and w.program_id = v_program_id;
+
+    if not found then
+      raise exception 'Schedule reflow payload is invalid' using errcode = 'P0001';
+    end if;
+
+    if v_workout_status <> 'scheduled' then
+      raise exception 'Completed or draft training cannot be rescheduled' using errcode = 'P0001';
+    end if;
+
+    if (v_item ->> 'status') = 'skipped' then
+      update public.plan_workouts
+      set status = 'skipped',
+          skip_reason = 'recovery_strategy'
+      where id = v_workout_id;
+      v_skipped_ids := v_skipped_ids || v_workout_id;
+    else
+      update public.plan_workouts
+      set scheduled_date = (v_item ->> 'scheduled_date')::date,
+          schedule_index = (v_item ->> 'schedule_index')::integer
+      where id = v_workout_id;
+    end if;
+    v_updated_count := v_updated_count + 1;
+  end loop;
+
+  v_event_type := case v_action
+    when 'extra_rest' then 'extra_rest'
+    when 'resume' then 'resume_confirmed'
+    when 'holiday_override' then 'holiday_override'
+    else 'unavailable_date_added'
+  end;
+
+  update public.plan_programs
+  set schedule_revision = schedule_revision + 1
+  where id = v_program_id
+  returning schedule_revision into v_new_revision;
+
+  insert into public.ops_schedule_events (user_id, program_id, event_type, effective_date, metadata, schedule_revision)
+  values (
+    v_user_id,
+    v_program_id,
+    v_event_type,
+    v_effective_date,
+    jsonb_strip_nulls(jsonb_build_object(
+      'action', v_action,
+      'resume_route', v_resume_route,
+      'reason', v_reason,
+      'skipped_workout_ids', to_jsonb(v_skipped_ids),
+      'updated_item_count', v_updated_count
+    )),
+    v_new_revision
+  );
+
+  select jsonb_build_object(
+    'id', w.id,
+    'name', w.name,
+    'scheduled_date', w.scheduled_date,
+    'sequence_index', w.sequence_index
+  ) into v_next_workout
+  from public.plan_workouts w
+  where w.program_id = v_program_id
+    and w.status = 'scheduled'
+    and w.day_type = 'training'
+  order by w.scheduled_date, w.schedule_index
+  limit 1;
+
+  return jsonb_build_object(
+    'schedule_revision', v_new_revision,
+    'updated_item_count', v_updated_count,
+    'skipped_count', coalesce(array_length(v_skipped_ids, 1), 0),
+    'next_workout', v_next_workout
+  );
+end;
+$$;
+
+revoke execute on function public.reflow_program_schedule(jsonb) from public, anon;
+grant execute on function public.reflow_program_schedule(jsonb) to authenticated;
