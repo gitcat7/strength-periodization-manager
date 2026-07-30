@@ -4,7 +4,9 @@ import { DB_TABLE } from "../../lib/supabase/table-names";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Copy, Download, KeyRound, Loader2, LogOut, RefreshCcw, ShieldAlert, Trash2, UserRound, Wrench } from "lucide-react";
+import { BookOpen, Copy, Download, KeyRound, Loader2, LogOut, RefreshCcw, ShieldAlert, Trash2, UserRound } from "lucide-react";
+import { AdvancedSettingsDisclosure } from "@/components/settings/advanced-settings-disclosure";
+import { ConfirmationDialog } from "@/components/ui/confirmation-dialog";
 import { trackEvent } from "@/lib/analytics";
 import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
@@ -61,6 +63,11 @@ type AgentTokenRow = {
   revoked_at: string | null;
 };
 
+type PendingConfirmation =
+  | { type: "sign-out" }
+  | { tokenId: string; tokenName: string; type: "revoke-token" }
+  | null;
+
 export function SettingsPanel() {
   const [email, setEmail] = useState("");
   const [userId, setUserId] = useState("");
@@ -70,6 +77,8 @@ export function SettingsPanel() {
   const [newAgentToken, setNewAgentToken] = useState("");
   const [agentMessage, setAgentMessage] = useState("");
   const [agentStatus, setAgentStatus] = useState<"ready" | "working" | "error">("ready");
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation>(null);
+  const [confirmationBusy, setConfirmationBusy] = useState(false);
 
   useEffect(() => {
     async function loadSession() {
@@ -100,7 +109,7 @@ export function SettingsPanel() {
         setStatus("ready");
       } catch (error) {
         setStatus("error");
-        setMessage(error instanceof Error ? error.message : "设置读取失败，请刷新页面后重试。");
+        setMessage(taskErrorMessage("设置读取失败", error, "请刷新页面后重试。"));
       }
     }
 
@@ -140,7 +149,7 @@ export function SettingsPanel() {
 
       if (workoutError) {
         setStatus("error");
-        setMessage(workoutError.message);
+        setMessage(`CSV 导出失败：${workoutError.message}`);
         return;
       }
 
@@ -170,7 +179,7 @@ export function SettingsPanel() {
       setStatus("ready");
     } catch (error) {
       setStatus("error");
-      setMessage(error instanceof Error ? error.message : "CSV 导出失败，请稍后重试。");
+      setMessage(taskErrorMessage("CSV 导出失败", error, "请稍后重试。"));
     }
   }
 
@@ -178,16 +187,23 @@ export function SettingsPanel() {
     setStatus("working");
     setMessage("");
 
-    const supabase = createBrowserSupabaseClient();
-    const { error } = await supabase.auth.signOut();
+    try {
+      const supabase = createBrowserSupabaseClient();
+      const { error } = await supabase.auth.signOut();
 
-    if (error) {
+      if (error) {
+        setStatus("error");
+        setMessage(`退出失败：${error.message}`);
+        return false;
+      }
+
+      window.location.href = "/login";
+      return true;
+    } catch (error) {
       setStatus("error");
-      setMessage(error.message);
-      return;
+      setMessage(taskErrorMessage("退出失败", error, "请稍后重试。"));
+      return false;
     }
-
-    window.location.href = "/login";
   }
 
   async function clearLocalCache() {
@@ -209,7 +225,7 @@ export function SettingsPanel() {
       setStatus("ready");
     } catch (error) {
       setStatus("error");
-      setMessage(error instanceof Error ? error.message : "本地缓存清理失败，请刷新页面后重试。");
+      setMessage(taskErrorMessage("本地缓存清理失败", error, "请刷新页面后重试。"));
     }
   }
 
@@ -225,13 +241,14 @@ export function SettingsPanel() {
       setAgentMessage(
         error.message.includes("schema cache")
           ? "Agent 授权表尚未部署，请先执行最新数据库迁移。"
-          : error.message
+          : `设置读取失败：${error.message}`
       );
-      return;
+      return false;
     }
 
     setAgentTokens((data ?? []) as AgentTokenRow[]);
     setAgentStatus("ready");
+    return true;
   }
 
   async function createAgentToken() {
@@ -259,28 +276,44 @@ export function SettingsPanel() {
       await loadAgentTokens();
     } catch (error) {
       setAgentStatus("error");
-      setAgentMessage(error instanceof Error ? error.message : "Agent 令牌生成失败。");
+      setAgentMessage(taskErrorMessage("Agent 令牌生成失败", error, "请稍后重试。"));
     }
   }
 
   async function revokeAgentToken(tokenId: string) {
     setAgentStatus("working");
     setAgentMessage("");
-    const supabase = createBrowserSupabaseClient();
-    const { error } = await supabase
-      .from(DB_TABLE.agentAccessTokens)
-      .update({ revoked_at: new Date().toISOString() })
-      .eq("id", tokenId)
-      .eq("user_id", userId);
+    try {
+      const supabase = createBrowserSupabaseClient();
+      const { error } = await supabase
+        .from(DB_TABLE.agentAccessTokens)
+        .update({ revoked_at: new Date().toISOString() })
+        .eq("id", tokenId)
+        .eq("user_id", userId);
 
-    if (error) {
+      if (error) {
+        setAgentStatus("error");
+        setAgentMessage(`令牌撤销失败：${error.message}`);
+        return false;
+      }
+
+      setAgentMessage("Agent 令牌已撤销。使用该令牌的 Agent 将立即失去访问权限。");
+      return await loadAgentTokens();
+    } catch (error) {
       setAgentStatus("error");
-      setAgentMessage(error.message);
-      return;
+      setAgentMessage(taskErrorMessage("令牌撤销失败", error, "请稍后重试。"));
+      return false;
     }
+  }
 
-    setAgentMessage("Agent 令牌已撤销。使用该令牌的 Agent 将立即失去访问权限。");
-    await loadAgentTokens();
+  async function confirmPendingAction() {
+    if (!pendingConfirmation) return;
+    setConfirmationBusy(true);
+    const succeeded = pendingConfirmation.type === "sign-out"
+      ? await signOut()
+      : await revokeAgentToken(pendingConfirmation.tokenId);
+    setConfirmationBusy(false);
+    if (succeeded) setPendingConfirmation(null);
   }
 
   async function copyAgentToken() {
@@ -311,10 +344,42 @@ export function SettingsPanel() {
           <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
             <UserRound size={20} />
           </span>
-          <div>
-            <h2 className="font-semibold">账号</h2>
-            <p className="text-sm text-muted">{email || "已登录用户"}</p>
+          <div className="min-w-0">
+            <h2 className="font-semibold" data-settings-group>账号</h2>
+            <p className="break-all text-sm text-muted">{email || "已登录用户"}</p>
           </div>
+        </div>
+        <div className="space-y-3">
+          <Link
+            className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink transition active:scale-[0.98]"
+            href="/privacy"
+          >
+            查看隐私与数据说明
+          </Link>
+          <Link
+            className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink transition active:scale-[0.98]"
+            href="/feedback"
+          >
+            提交问题反馈
+          </Link>
+          <div className="border-t border-line pt-3">
+            <button
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 font-semibold text-red-600 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={status === "working"}
+              onClick={() => setPendingConfirmation({ type: "sign-out" })}
+              type="button"
+            >
+              <LogOut size={18} />
+              退出登录
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-line bg-white p-4">
+        <div className="mb-4">
+          <h2 className="font-semibold" data-settings-group>训练偏好</h2>
+          <p className="text-sm text-muted">调整周期参数或管理可用动作。</p>
         </div>
         <div className="space-y-3">
           <Link className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink transition active:scale-[0.98]" href="/plan">
@@ -333,7 +398,7 @@ export function SettingsPanel() {
             <Download size={20} />
           </span>
           <div>
-            <h2 className="font-semibold">数据</h2>
+            <h2 className="font-semibold" data-settings-group>数据管理</h2>
             <p className="text-sm text-muted">导出记录或清理本地缓存。</p>
           </div>
         </div>
@@ -359,42 +424,8 @@ export function SettingsPanel() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-line bg-white p-4">
-        <div className="mb-4 flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
-            <Wrench size={20} />
-          </span>
-          <div>
-            <h2 className="font-semibold">体验</h2>
-            <p className="text-sm text-muted">反馈、隐私与退出。</p>
-          </div>
-        </div>
-        <div className="space-y-3">
-          <Link
-            className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink transition active:scale-[0.98]"
-            href="/privacy"
-          >
-            查看隐私与数据说明
-          </Link>
-          <Link
-            className="inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink transition active:scale-[0.98]"
-            href="/feedback"
-          >
-            提交问题反馈
-          </Link>
-          <button
-            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-line bg-white px-4 font-semibold text-ink transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={status === "working"}
-            onClick={signOut}
-            type="button"
-          >
-            <LogOut size={18} />
-            退出登录
-          </button>
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-line bg-white p-4">
+      <AdvancedSettingsDisclosure>
+      <section>
         <div className="mb-4 flex items-center gap-3">
           <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
             <KeyRound size={20} />
@@ -416,7 +447,7 @@ export function SettingsPanel() {
             <p className="mb-2 text-xs font-semibold text-muted">新令牌（关闭页面后无法再次查看）</p>
             <code className="block break-all text-sm text-ink">{newAgentToken}</code>
             <button
-              className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-action bg-white px-3 font-semibold text-action transition active:scale-[0.98]"
+              className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-action bg-white px-3 font-semibold text-action transition active:scale-[0.98]"
               onClick={copyAgentToken}
               type="button"
             >
@@ -430,16 +461,20 @@ export function SettingsPanel() {
           {agentTokens.filter((token) => !token.revoked_at).map((token) => (
             <div className="flex items-center justify-between gap-3 rounded-lg bg-field px-3 py-3" key={token.id}>
               <div className="min-w-0 text-sm">
-                <p className="font-semibold">{token.name}</p>
-                <p className="text-xs text-muted">
+                <p className="break-words font-semibold">{token.name}</p>
+                <p className="break-words text-xs text-muted">
                   {token.last_used_at ? `最近使用 ${formatTimestamp(token.last_used_at)}` : "尚未使用"} · 到期 {formatTimestamp(token.expires_at)}
                 </p>
               </div>
               <button
                 aria-label="撤销 Agent 令牌"
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-line bg-white text-red-600 transition active:scale-[0.97] disabled:opacity-60"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-line bg-white text-red-600 transition active:scale-[0.97] disabled:opacity-60"
                 disabled={agentStatus === "working"}
-                onClick={() => revokeAgentToken(token.id)}
+                onClick={() => setPendingConfirmation({
+                  tokenId: token.id,
+                  tokenName: token.name,
+                  type: "revoke-token"
+                })}
                 title="撤销令牌"
                 type="button"
               >
@@ -458,7 +493,15 @@ export function SettingsPanel() {
           {agentStatus === "working" ? <Loader2 className="animate-spin" size={18} /> : <KeyRound size={18} />}
           生成新的 Agent 令牌
         </button>
+        <Link
+          className="mt-3 inline-flex h-11 w-full items-center justify-center rounded-lg border border-line bg-field px-4 font-semibold text-ink"
+          href="/diagnostics"
+        >
+          打开项目诊断
+        </Link>
+        <p className="mt-3 text-xs leading-5 text-muted">这些功能用于 Agent 接入、故障诊断和低频维护，日常训练无需操作。</p>
       </section>
+      </AdvancedSettingsDisclosure>
 
       <section className="rounded-xl border border-amber/30 bg-amber/10 p-4">
         <div className="mb-3 flex items-center gap-2 font-semibold">
@@ -469,6 +512,20 @@ export function SettingsPanel() {
           本产品用于训练记录和计划管理，不构成医疗、康复或个性化诊断建议。如果你有伤病、疼痛或特殊健康状况，请咨询医生、物理治疗师或专业教练。进行大重量和 PR 测试前，请充分热身并保留安全余量。
         </p>
       </section>
+
+      <ConfirmationDialog
+        busy={confirmationBusy}
+        confirmLabel={pendingConfirmation?.type === "revoke-token" ? "确认撤销" : "确认退出"}
+        description={pendingConfirmation?.type === "revoke-token"
+          ? "撤销后，使用该令牌的 Agent 将立即失去访问权限。"
+          : "退出后需要重新登录才能继续使用。"}
+        onCancel={() => setPendingConfirmation(null)}
+        onConfirm={confirmPendingAction}
+        open={pendingConfirmation !== null}
+        title={pendingConfirmation?.type === "revoke-token"
+          ? `撤销“${pendingConfirmation.tokenName}”令牌？`
+          : "退出登录？"}
+      />
     </div>
   );
 }
@@ -663,6 +720,13 @@ function formatTimestamp(value: string) {
     month: "2-digit",
     year: "numeric"
   }).format(new Date(value));
+}
+
+function taskErrorMessage(prefix: string, error: unknown, fallback: string) {
+  const detail = error instanceof Error && error.message.trim()
+    ? error.message
+    : fallback;
+  return `${prefix}：${detail}`;
 }
 
 function withTimeout<T>(promise: PromiseLike<T>, message: string, timeoutMs = 10000) {
