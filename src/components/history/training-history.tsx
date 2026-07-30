@@ -4,7 +4,7 @@ import { DB_TABLE } from "../../lib/supabase/table-names";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Brain, CalendarDays, CheckCircle2, Dumbbell, Loader2, Moon, Save, TrendingUp } from "lucide-react";
+import { CalendarDays, Loader2, Moon, TrendingUp } from "lucide-react";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
 import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
 import { filterHistoryWorkoutsByDate } from "@/domain/history-date-filter";
@@ -17,7 +17,11 @@ import { getRecommendationStatusLabel, type RecommendationType } from "@/domain/
 import { type HistoryCalendarEntry } from "@/domain/history-calendar";
 import { getHistoryWorkoutFocusId } from "./history-workout-focus";
 import { HistoryCalendar } from "./history-calendar";
-import { formatWorkoutDuration } from "@/domain/workout-duration";
+import {
+  HistoryWorkoutCard,
+  type SaveHistoryWorkoutInput,
+  type SaveHistoryWorkoutResult
+} from "./history-workout-card";
 
 type WorkoutRow = {
   day_type: "training" | "rest";
@@ -29,8 +33,9 @@ type WorkoutRow = {
   status: string;
 };
 
-type WorkoutExerciseRow = {
+export type WorkoutExerciseRow = {
   id: string;
+  exercise_id?: string | null;
   workout_id: string;
   order_index: number;
   target_sets: number;
@@ -47,7 +52,7 @@ type WorkoutExerciseRow = {
   } | null;
 };
 
-type SetLogRow = {
+export type SetLogRow = {
   id: string;
   workout_exercise_id: string;
   set_index: number;
@@ -98,7 +103,6 @@ export function TrainingHistory() {
   const [setLogs, setSetLogs] = useState<SetLogRow[]>([]);
   const [recommendations, setRecommendations] = useState<RecommendationRow[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [message, setMessage] = useState("");
   const [historySearch, setHistorySearch] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
@@ -169,7 +173,7 @@ export function TrainingHistory() {
           withTimeout(
             supabase
               .from(DB_TABLE.workoutExercises)
-              .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercise_name_snapshot,exercise_metadata_snapshot,exercise_provider,external_exercise_id,exercises(name,slug,training_direction)")
+              .select("id,workout_id,exercise_id,order_index,target_sets,target_reps,target_weight,exercise_name_snapshot,exercise_metadata_snapshot,exercise_provider,external_exercise_id,exercises(name,slug,training_direction)")
               .in("workout_id", workoutIds)
               .order("order_index", { ascending: true }),
             "历史动作读取超时，请刷新页面后重试。"
@@ -317,71 +321,14 @@ export function TrainingHistory() {
     return () => window.clearTimeout(timer);
   }, [focusedWorkoutId, status]);
 
-  function updateHistorySetLog(logId: string, patch: Partial<SetLogRow>) {
-    setSaveStatus("idle");
-    setSetLogs((currentLogs) =>
-      currentLogs.map((log) => (log.id === logId ? { ...log, ...patch } : log))
-    );
-  }
-
-  function updateHistorySetCompletion(log: SetLogRow, completed: boolean) {
-    const exercise = workoutExercises.find((item) => item.id === log.workout_exercise_id);
-    if (completed && requiresRealRpe(exercise) && !isValidRpe(log.rpe)) {
-      setSaveStatus("error");
-      setMessage(`${getExerciseName(exercise)} 第 ${log.set_index} 组：请先填写真实 RPE（1–10）后再完成该组。`);
-      return;
-    }
-
-    updateHistorySetLog(log.id, { completed });
-  }
-
-  async function saveWorkoutEdits(workoutId: string) {
-    const workoutExerciseIds = (exercisesByWorkoutId[workoutId] ?? []).map((exercise) => exercise.id);
-    const logsToSave = setLogs.filter((log) => workoutExerciseIds.includes(log.workout_exercise_id));
-
-    if (logsToSave.length === 0) return;
-
-    const exerciseById = new Map(workoutExercises.map((exercise) => [exercise.id, exercise]));
-    const normalizedLogs = logsToSave.map((log) => {
-      const values = resolveCompletedSetValues({
-        actualReps: log.actual_reps,
-        actualWeight: log.actual_weight,
-        completed: log.completed,
-        targetReps: log.target_reps,
-        targetWeight: log.target_weight
-      });
-      return { ...log, actual_reps: values.actualReps, actual_weight: values.actualWeight };
-    });
-    const invalidLog = normalizedLogs.find((log) => {
-      const exercise = exerciseById.get(log.workout_exercise_id);
-      return Object.keys(validateRecordedSet({
-        completed: log.completed,
-        reps: log.actual_reps === null ? "" : String(log.actual_reps),
-        rpe: log.rpe === null ? "" : String(log.rpe),
-        weight: log.actual_weight === null ? "" : String(log.actual_weight)
-      }, getHistoryLoadType(exercise), { requiresRpe: requiresRealRpe(exercise) })).length > 0;
-    });
-
-    if (invalidLog) {
-      const exercise = exerciseById.get(invalidLog.workout_exercise_id);
-      const errors = validateRecordedSet({
-        completed: invalidLog.completed,
-        reps: invalidLog.actual_reps === null ? "" : String(invalidLog.actual_reps),
-        rpe: invalidLog.rpe === null ? "" : String(invalidLog.rpe),
-        weight: invalidLog.actual_weight === null ? "" : String(invalidLog.actual_weight)
-      }, getHistoryLoadType(exercise), { requiresRpe: requiresRealRpe(exercise) });
-      setSaveStatus("error");
-      setMessage(`${getExerciseName(exercise)} 第 ${invalidLog.set_index} 组：${Object.values(errors).join(" ")}`);
-      return;
-    }
-
-    setSaveStatus("saving");
-    setMessage("");
-
+  async function saveWorkoutEdits(input: SaveHistoryWorkoutInput): Promise<SaveHistoryWorkoutResult> {
     const supabase = createBrowserSupabaseClient();
-    const { data, error } = await supabase.rpc("revise_completed_workout_logs", {
-      p_workout_id: workoutId,
-      p_logs: normalizedLogs.map((log) => ({
+    let response;
+    try {
+      response = await supabase.rpc("revise_completed_workout", {
+        p_workout_id: input.workoutId,
+        p_duration_seconds: input.durationSeconds,
+        p_logs: input.logs.map((log) => ({
           workout_exercise_id: log.workout_exercise_id,
           set_index: log.set_index,
           actual_weight: log.actual_weight,
@@ -389,21 +336,46 @@ export function TrainingHistory() {
           rpe: log.rpe,
           completed: log.completed
         }))
-    });
+      });
+    } catch (error) {
+      throw new Error(getHistorySaveErrorMessage(error));
+    }
+    const { data, error } = response;
 
     if (error) {
-      setSaveStatus("error");
-      setMessage(error.message);
-      return;
+      throw new Error(getHistorySaveErrorMessage(error));
     }
 
     clearTrainingDataCaches();
-    const result = data as { recommendations?: RecommendationRow[]; set_logs?: SetLogRow[] } | null;
-    const returnedLogs = Array.isArray(result?.set_logs) ? result.set_logs : normalizedLogs;
+    const result = data as {
+      duration_seconds?: number | null;
+      recommendations?: Array<Partial<RecommendationRow> & { exercise_id?: string }>;
+      set_logs?: SetLogRow[];
+    } | null;
+    const returnedLogs = Array.isArray(result?.set_logs) ? result.set_logs : input.logs;
+    const durationSeconds = result?.duration_seconds ?? input.durationSeconds;
     setSetLogs((current) => current.map((log) => returnedLogs.find((item) => item.workout_exercise_id === log.workout_exercise_id && item.set_index === log.set_index) ?? log));
-    if (Array.isArray(result?.recommendations)) setRecommendations((current) => [...current.filter((item) => item.workout_id !== workoutId || item.status !== "pending"), ...(result.recommendations ?? [])]);
-    setSaveStatus("saved");
-    setMessage("历史训练已保存，待处理 Coach 建议已按新数据重新生成；已应用的历史调整不会自动撤销。");
+    setWorkouts((current) => current.map((workout) => workout.id === input.workoutId
+      ? { ...workout, duration_seconds: durationSeconds }
+      : workout));
+    if (Array.isArray(result?.recommendations)) {
+      const exerciseByCatalogId = new Map(workoutExercises.map((exercise) => [exercise.exercise_id, exercise]));
+      const returnedRecommendations = result.recommendations.map((recommendation, index) => ({
+        id: recommendation.id ?? `${input.workoutId}-pending-${index}`,
+        workout_id: input.workoutId,
+        recommendation_type: recommendation.recommendation_type ?? "hold",
+        previous_weight: Number(recommendation.previous_weight ?? 0),
+        suggested_weight: Number(recommendation.suggested_weight ?? recommendation.previous_weight ?? 0),
+        reason: recommendation.reason ?? "已按修改后的历史训练重新计算。",
+        status: recommendation.status ?? "pending",
+        exercises: recommendation.exercises ?? exerciseByCatalogId.get(recommendation.exercise_id)?.exercises ?? null
+      }));
+      setRecommendations((current) => [
+        ...current.filter((item) => item.workout_id !== input.workoutId || item.status !== "pending"),
+        ...returnedRecommendations
+      ]);
+    }
+    return { durationSeconds, logs: returnedLogs };
   }
 
   const summary = useMemo(() => {
@@ -482,8 +454,9 @@ export function TrainingHistory() {
       ) : null}
 
       <section className="space-y-3">
+        <h2 className="text-lg font-semibold">当天训练摘要</h2>
         {message ? (
-          <p className={`rounded-lg border px-3 py-2 text-sm ${saveStatus === "error" ? "border-red-200 text-red-600" : "border-line text-muted"}`}>
+          <p className="rounded-lg border border-line px-3 py-2 text-sm text-muted">
             {message}
           </p>
         ) : null}
@@ -521,144 +494,75 @@ export function TrainingHistory() {
               ref={workout.id === focusedWorkoutId ? focusedWorkoutRef : undefined}
               tabIndex={workout.id === focusedWorkoutId ? -1 : undefined}
             >
-              <div className="mb-4 flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${isRecovery ? "bg-[#4a7a9a]/10 text-[#4a7a9a]" : "bg-action/10 text-action"}`}>
-                    {isRecovery ? <Moon size={20} /> : <CheckCircle2 size={20} />}
-                  </span>
-                  <div>
-                    <p className="text-sm text-muted">{workout.scheduled_date}</p>
-                    <h2 className="font-semibold">{workout.name}</h2>
-                    <p className="mt-1 text-sm text-muted">
-                      {review.completedSets} 组 · {Math.round(review.volume).toLocaleString()} kg
-                    </p>
-                    <p className="mt-2 text-sm text-muted">训练时长：{formatWorkoutDuration(workout.duration_seconds)}</p>
-                  </div>
-                </div>
-                <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${isRecovery ? "bg-[#4a7a9a]/10 text-[#4a7a9a]" : "bg-action/10 text-action"}`}>
-                  {isRecovery ? "已休息" : "已完成"}
-                </span>
-              </div>
+              <HistoryWorkoutCard
+                durationSeconds={workout.duration_seconds}
+                exercises={exercises.map((exercise) => ({
+                  id: exercise.id,
+                  logs: setLogsByExerciseId[exercise.id] ?? [],
+                  name: resolveWorkoutExerciseName(exercise),
+                  targetReps: exercise.target_reps,
+                  targetSets: exercise.target_sets,
+                  targetWeight: Number(exercise.target_weight)
+                }))}
+                initiallyExpanded={workout.id === focusedWorkoutId}
+                isRecovery={isRecovery}
+                name={workout.name}
+                onSave={saveWorkoutEdits}
+                onValidate={(logs) => validateHistoryWorkoutLogs({ exercises, logs })}
+                recommendations={workoutRecommendations.map((recommendation) => ({
+                  id: recommendation.id,
+                  label: `${recommendation.exercises?.name ?? "动作"} · ${formatRecommendationType(recommendation.recommendation_type)}`,
+                  previousWeight: recommendation.previous_weight,
+                  statusLabel: getRecommendationStatusLabel(recommendation.status),
+                  suggestedWeight: recommendation.suggested_weight
+                }))}
+                review={review}
+                scheduledDate={workout.scheduled_date}
+                workoutId={workout.id}
+              />
 
-              <div className={`mb-4 rounded-lg border px-3 py-3 ${getWorkoutReviewClassName(review.tone)}`}>
-                <div className="grid gap-2 text-sm sm:grid-cols-4">
-                  <ReviewMetric label="完成率" value={`${Math.round(review.completionRate * 100)}%`} />
-                  <ReviewMetric label="完成组数" value={`${review.completedSets}/${review.plannedSets}`} />
-                  <ReviewMetric label="平均 RPE" value={review.averageRpe === null ? "-" : review.averageRpe.toFixed(1)} />
-                  <ReviewMetric label="训练量" value={`${Math.round(review.volume).toLocaleString()}kg`} />
-                </div>
-                <p className="mt-3 text-sm leading-6">{review.headline}</p>
-              </div>
-
-              <div className="space-y-3">
-                {exercises.map((exercise) => {
-                  const logs = setLogsByExerciseId[exercise.id] ?? [];
-                  const bestSet = getBestSet(logs);
-
-                  return (
-                    <div className="rounded-lg bg-field px-3 py-2 text-sm" key={exercise.id}>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="font-semibold">{resolveWorkoutExerciseName(exercise)}</span>
-                        <span className="text-action">
-                          {logs.filter((log) => log.completed).length}/{logs.length} 组
-                        </span>
-                      </div>
-                      <p className="mt-1 text-muted">
-                        计划 {exercise.target_sets}x{exercise.target_reps}
-                        {Number(exercise.target_weight) > 0 ? ` @ ${Number(exercise.target_weight)}kg` : ""}
-                      </p>
-                      {bestSet ? (
-                        <p className="mt-1 text-muted">
-                          最佳组：{bestSet.actual_weight ?? 0}kg x {bestSet.actual_reps ?? 0}
-                          {bestSet.rpe ? ` · RPE ${bestSet.rpe}` : ""}
-                        </p>
-                      ) : null}
-                      <div className="mt-3 space-y-2">
-                        {logs.map((log) => (
-                          <div
-                            className="grid grid-cols-[2rem_1fr_1fr_1fr_2.25rem] items-center gap-2 rounded-lg bg-white px-2 py-2"
-                            key={log.id}
-                          >
-                            <span className="font-semibold">{log.set_index}</span>
-                            <NumberInput
-                              label="重量"
-                              min={0}
-                              step={0.5}
-                              value={log.actual_weight}
-                              onChange={(value) => updateHistorySetLog(log.id, { actual_weight: value })}
-                            />
-                            <NumberInput
-                              label="次数"
-                              min={0}
-                              step={1}
-                              value={log.actual_reps}
-                              onChange={(value) => updateHistorySetLog(log.id, { actual_reps: value })}
-                            />
-                            <NumberInput
-                              label="RPE"
-                              max={10}
-                              min={1}
-                              step={0.5}
-                              value={log.rpe}
-                              onChange={(value) => updateHistorySetLog(log.id, { rpe: value })}
-                            />
-                            <label className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white">
-                              <input
-                                aria-label={`第 ${log.set_index} 组完成`}
-                                checked={log.completed}
-                                className="h-4 w-4 accent-action"
-                                onChange={(event) => updateHistorySetCompletion(log, event.target.checked)}
-                                type="checkbox"
-                              />
-                            </label>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <button
-                className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-action bg-white px-4 text-sm font-semibold text-action transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={saveStatus === "saving"}
-                onClick={() => saveWorkoutEdits(workout.id)}
-                type="button"
-              >
-                {saveStatus === "saving" ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
-                保存本次修改
-              </button>
-
-              {workoutRecommendations.length > 0 ? (
-                <div className="mt-4 rounded-lg border border-line p-3">
-                  <div className="mb-2 flex items-center gap-2">
-                    <Brain size={16} className="text-action" />
-                    <h3 className="font-semibold">Coach 调整</h3>
-                  </div>
-                  <div className="space-y-2">
-                    {workoutRecommendations.map((recommendation) => (
-                      <div className="text-sm" key={recommendation.id}>
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="font-semibold">{recommendation.exercises?.name ?? "动作"}</span>
-                          <span className="rounded-full bg-field px-2 py-1 text-xs text-muted">
-                            {getRecommendationStatusLabel(recommendation.status)}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-muted">
-                          {recommendation.previous_weight}kg → {recommendation.suggested_weight}kg ·{" "}
-                          {formatRecommendationType(recommendation.recommendation_type)}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
             </article>
           );
         })}
       </section>
     </div>
   );
+}
+
+export function validateHistoryWorkoutLogs({
+  exercises,
+  logs
+}: {
+  exercises: WorkoutExerciseRow[];
+  logs: SetLogRow[];
+}): { ok: true; logs: SetLogRow[] } | { ok: false; message: string } {
+  const exerciseById = new Map(exercises.map((exercise) => [exercise.id, exercise]));
+  const normalizedLogs = logs.map((log) => {
+    const values = resolveCompletedSetValues({
+      actualReps: log.actual_reps,
+      actualWeight: log.actual_weight,
+      completed: log.completed,
+      targetReps: log.target_reps,
+      targetWeight: log.target_weight
+    });
+    return { ...log, actual_reps: values.actualReps, actual_weight: values.actualWeight };
+  });
+  for (const log of normalizedLogs) {
+    const exercise = exerciseById.get(log.workout_exercise_id);
+    const errors = validateRecordedSet({
+      completed: log.completed,
+      reps: log.actual_reps === null ? "" : String(log.actual_reps),
+      rpe: log.rpe === null ? "" : String(log.rpe),
+      weight: log.actual_weight === null ? "" : String(log.actual_weight)
+    }, getHistoryLoadType(exercise), { requiresRpe: requiresRealRpe(exercise) });
+    if (Object.keys(errors).length > 0) {
+      return {
+        ok: false,
+        message: `${getExerciseName(exercise)} 第 ${log.set_index} 组：${Object.values(errors).join(" ")}`
+      };
+    }
+  }
+  return { ok: true, logs: normalizedLogs };
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -669,15 +573,6 @@ function Metric({ label, value }: { label: string; value: string }) {
         <span className="text-sm">{label}</span>
       </div>
       <p className="text-xl font-semibold">{value}</p>
-    </div>
-  );
-}
-
-function ReviewMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-xs opacity-75">{label}</p>
-      <p className="mt-1 font-semibold">{value}</p>
     </div>
   );
 }
@@ -723,53 +618,6 @@ function getWorkoutReviewHeadline(
   return "这次训练整体稳定，可以结合 Coach 建议继续微调后续重量。";
 }
 
-function getWorkoutReviewClassName(tone: WorkoutReview["tone"]) {
-  if (tone === "good") return "border-action/20 bg-action/5 text-ink";
-  if (tone === "warning") return "border-amber/30 bg-amber/10 text-amber-900";
-  return "border-line bg-field text-ink";
-}
-
-function NumberInput({
-  label,
-  max,
-  min,
-  onChange,
-  step,
-  value
-}: {
-  label: string;
-  max?: number;
-  min: number;
-  onChange: (value: number | null) => void;
-  step: number;
-  value: number | null;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[11px] text-muted">{label}</span>
-      <input
-        className="h-9 w-full rounded-md border border-line bg-white px-2 text-sm outline-none focus:border-action"
-        inputMode="decimal"
-        max={max}
-        min={min}
-        onChange={(event) => {
-          const nextValue = event.target.value === "" ? null : Number(event.target.value);
-          onChange(Number.isNaN(nextValue) ? null : nextValue);
-        }}
-        step={step}
-        type="number"
-        value={value ?? ""}
-      />
-    </label>
-  );
-}
-
-function getBestSet(logs: SetLogRow[]) {
-  return logs
-    .filter((log) => log.completed)
-    .sort((a, b) => Number(b.actual_weight ?? 0) * Number(b.actual_reps ?? 0) - Number(a.actual_weight ?? 0) * Number(a.actual_reps ?? 0))[0];
-}
-
 function requiresRealRpe(exercise: WorkoutExerciseRow | undefined) {
   return requiresRpeForWorkoutExercise({
     movementPattern: exercise?.exercise_metadata_snapshot?.movementPattern,
@@ -778,10 +626,6 @@ function requiresRealRpe(exercise: WorkoutExerciseRow | undefined) {
     slug: exercise?.exercises?.slug,
     trainingDirection: exercise?.exercises?.training_direction
   });
-}
-
-function isValidRpe(rpe: number | null) {
-  return typeof rpe === "number" && Number.isFinite(rpe) && rpe >= 1 && rpe <= 10;
 }
 
 function getHistoryLoadType(exercise: WorkoutExerciseRow | undefined) {
@@ -793,6 +637,13 @@ function getHistoryLoadType(exercise: WorkoutExerciseRow | undefined) {
 
 function getExerciseName(exercise: WorkoutExerciseRow | undefined) {
   return exercise?.exercises?.name ?? exercise?.exercise_name_snapshot ?? "动作";
+}
+
+export function getHistorySaveErrorMessage(error: unknown) {
+  if (error instanceof TypeError && /load failed|failed to fetch/i.test(error.message)) {
+    return "网络连接失败，请检查网络后重试。修改草稿仍会保留。";
+  }
+  return "历史训练保存失败，请重试。修改草稿仍会保留。";
 }
 
 function formatRecommendationType(type: RecommendationType) {
