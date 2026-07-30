@@ -1,3 +1,4 @@
+import type { ScheduleRule, SupportedScheduleMode } from "@/domain/schedule-rule";
 import { roundToNearestPlate } from "@/domain/strength";
 
 export type LegacyTemplateType = "three_day_full_body" | "four_day_upper_lower";
@@ -9,12 +10,10 @@ export type TemplateType =
   | "push_pull_squat";
 export type ProgramTemplateType = TemplateType | "custom";
 
-export type ScheduleMode = "fixed_weekdays" | "cadence" | "flexible";
+export type LegacyScheduleMode = SupportedScheduleMode | "flexible";
 
-export type ScheduleConfig =
-  | { mode: "fixed_weekdays"; weekdays: number[] }
-  | { mode: "cadence"; trainDays?: number; restDays: number }
-  | { mode: "flexible" };
+// Read paths may still encounter legacy flexible plans; new plans only accept ScheduleRule.
+export type ScheduleConfig = ScheduleRule | { mode: "flexible" };
 
 export const templateOptions: Array<{ description: string; label: string; value: TemplateType }> = [
   { value: "one_split", label: "一分化", description: "全身训练，适合每周 2-3 次稳定入门。" },
@@ -57,7 +56,7 @@ export type PlannedRestDay = {
 
 export type PlannedScheduleItem = PlannedWorkout | PlannedRestDay;
 
-type PlannedTrainingWorkout = Omit<PlannedWorkout, "dayType" | "scheduleIndex">;
+export type PlannedTrainingWorkout = Omit<PlannedWorkout, "dayType" | "scheduleIndex">;
 
 export function buildSchedulePreview(items: PlannedScheduleItem[]): {
   endDate: string;
@@ -74,7 +73,8 @@ export function buildSchedulePreview(items: PlannedScheduleItem[]): {
   );
 }
 
-function expandScheduleItems(
+// Expands stored training dates into schedule items; also used to read legacy flexible plans.
+export function expandScheduleItems(
   trainingWorkouts: PlannedTrainingWorkout[],
   schedule: ScheduleConfig
 ): PlannedScheduleItem[] {
@@ -252,26 +252,21 @@ export function buildFourWeekProgram({
   schedule,
   exerciseProfiles,
   startDate = new Date(),
-  weekCount = 4,
-  trainingDaysPerWeek
+  weekCount = 4
 }: {
   templateType: TemplateType;
   availableWeekdays?: number[];
-  schedule?: ScheduleConfig;
+  schedule?: ScheduleRule;
   exerciseProfiles: ExerciseProfile[];
   startDate?: Date;
   weekCount?: number;
-  trainingDaysPerWeek?: number;
 }) {
   const template = chooseTemplate(templateType);
   const profileBySlug = new Map(exerciseProfiles.map((profile) => [profile.slug, profile]));
   const normalizedWeekCount = normalizeWeekCount(weekCount);
-  const workoutDates = buildWorkoutDates(
-    startDate,
-    schedule ?? { mode: "fixed_weekdays", weekdays: availableWeekdays ?? [1, 3, 5] },
-    normalizedWeekCount,
-    normalizeTrainingDaysPerWeek(trainingDaysPerWeek, template.length)
-  );
+  const effectiveSchedule: ScheduleRule =
+    schedule ?? { mode: "fixed_weekdays", weekdays: availableWeekdays ?? [1, 3, 5] };
+  const workoutDates = buildWorkoutDates(startDate, effectiveSchedule, normalizedWeekCount);
 
   const trainingWorkouts: PlannedTrainingWorkout[] = workoutDates.map((date, index) => {
     const weekIndex = getCalendarWeekIndex(date, startDate);
@@ -299,10 +294,7 @@ export function buildFourWeekProgram({
     };
   });
 
-  return expandScheduleItems(
-    trainingWorkouts,
-    schedule ?? { mode: "fixed_weekdays", weekdays: availableWeekdays ?? [1, 3, 5] }
-  );
+  return expandScheduleItems(trainingWorkouts, effectiveSchedule);
 }
 
 export function getTemplateType(trainingDaysPerWeek: number): TemplateType {
@@ -310,26 +302,15 @@ export function getTemplateType(trainingDaysPerWeek: number): TemplateType {
   return trainingDaysPerWeek === 4 ? "five_split" : "three_split";
 }
 
-function buildWorkoutDates(startDate: Date, schedule: ScheduleConfig, weekCount: number, trainingDaysPerWeek: number) {
+function buildWorkoutDates(startDate: Date, schedule: ScheduleRule, weekCount: number) {
   const dates: Date[] = [];
   const cursor = new Date(startDate);
   cursor.setHours(0, 0, 0, 0);
   const endExclusive = new Date(cursor);
   endExclusive.setDate(endExclusive.getDate() + weekCount * 7);
 
-  if (schedule.mode === "flexible") {
-    for (let weekIndex = 0; weekIndex < weekCount; weekIndex += 1) {
-      for (let dayIndex = 0; dayIndex < trainingDaysPerWeek; dayIndex += 1) {
-        const date = new Date(cursor);
-        date.setDate(date.getDate() + weekIndex * 7 + dayIndex);
-        dates.push(date);
-      }
-    }
-    return dates;
-  }
-
   if (schedule.mode === "cadence") {
-    const trainDays = Math.max(1, Math.floor(schedule.trainDays ?? 1));
+    const trainDays = Math.max(1, Math.floor(schedule.trainDays));
     const restDays = Math.max(0, Math.floor(schedule.restDays));
     while (cursor < endExclusive) {
       dates.push(new Date(cursor));
@@ -358,11 +339,6 @@ function getCalendarWeekIndex(date: Date, startDate: Date) {
   const normalizedDate = new Date(date);
   normalizedDate.setHours(0, 0, 0, 0);
   return Math.floor((normalizedDate.getTime() - normalizedStart.getTime()) / (7 * 24 * 60 * 60 * 1000));
-}
-
-function normalizeTrainingDaysPerWeek(value: number | undefined, fallback: number) {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 7) return fallback;
-  return value;
 }
 
 function normalizeWeekCount(value: number | undefined) {

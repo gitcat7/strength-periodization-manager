@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
-import { buildFourWeekProgram, buildSchedulePreview } from "./program";
+import {
+  buildFourWeekProgram,
+  buildSchedulePreview,
+  expandScheduleItems,
+  type PlannedTrainingWorkout
+} from "./program";
 
 const profiles = [
   { id: "bench", slug: "bench_press", workingWeight: 100, increment: 2.5 },
@@ -32,7 +37,7 @@ describe("buildFourWeekProgram", () => {
   it("builds a cadence plan from the selected template instead of weekdays", () => {
     const workouts = buildFourWeekProgram({
       templateType: "three_split",
-      schedule: { mode: "cadence", restDays: 1 },
+      schedule: { mode: "cadence", trainDays: 1, restDays: 1 },
       exerciseProfiles: profiles,
       startDate: new Date("2026-07-13T00:00:00")
     });
@@ -82,26 +87,24 @@ describe("buildFourWeekProgram", () => {
     });
   });
 
-  it("keeps sequence order when flexible scheduling only supplies suggested dates", () => {
-    const workouts = buildFourWeekProgram({
-      templateType: "one_split",
-      schedule: { mode: "flexible" },
-      exerciseProfiles: profiles,
-      startDate: new Date("2026-07-13T00:00:00"),
-      trainingDaysPerWeek: 3
-    });
+  it("keeps legacy flexible schedules readable as training-only items", () => {
+    const legacyTrainingWorkouts: PlannedTrainingWorkout[] = [
+      { name: "第 1 周 · 全身训练", scheduledDate: "2026-07-13", sequenceIndex: 0, exercises: [] },
+      { name: "第 1 周 · 全身训练", scheduledDate: "2026-07-14", sequenceIndex: 1, exercises: [] },
+      { name: "第 1 周 · 全身训练", scheduledDate: "2026-07-15", sequenceIndex: 2, exercises: [] }
+    ];
 
-    const trainingWorkouts = workouts.filter((workout) => workout.dayType === "training");
+    const items = expandScheduleItems(legacyTrainingWorkouts, { mode: "flexible" });
 
-    expect(workouts).toHaveLength(trainingWorkouts.length);
-    expect(workouts.every((workout) => workout.dayType === "training")).toBe(true);
-    expect(trainingWorkouts.slice(0, 3).map((workout) => workout.sequenceIndex)).toEqual([0, 1, 2]);
-    expect(trainingWorkouts.slice(0, 3).map((workout) => workout.scheduledDate)).toEqual([
-      "2026-07-13",
-      "2026-07-14",
-      "2026-07-15"
-    ]);
-    expect(trainingWorkouts[3]?.scheduledDate).toBe("2026-07-20");
+    expect(items.every((item) => item.dayType === "training")).toBe(true);
+    expect(items.map((item) => item.scheduleIndex)).toEqual([0, 1, 2]);
+    expect(items.map((item) => item.sequenceIndex)).toEqual([0, 1, 2]);
+  });
+
+  it("no longer accepts trainingDaysPerWeek for plan generation", () => {
+    expectTypeOf<Parameters<typeof buildFourWeekProgram>[0]>().not.toHaveProperty(
+      "trainingDaysPerWeek"
+    );
   });
 
   it("groups three training days before a one-day rest in a cadence cycle", () => {
@@ -166,24 +169,14 @@ describe("buildFourWeekProgram", () => {
     expect(items.at(-1)?.dayType).toBe("training");
   });
 
-  it("keeps flexible schedules training-only and summarizes the schedule item counts", () => {
-    const flexibleItems = buildFourWeekProgram({
-      templateType: "one_split",
-      schedule: { mode: "flexible" },
-      exerciseProfiles: profiles,
-      startDate: new Date("2026-07-13T00:00:00")
-    });
+  it("summarizes the schedule item counts", () => {
     const cadenceItems = buildFourWeekProgram({
       templateType: "three_split",
-      schedule: { mode: "cadence", restDays: 1 },
+      schedule: { mode: "cadence", trainDays: 1, restDays: 1 },
       exerciseProfiles: profiles,
       startDate: new Date("2026-07-13T00:00:00")
     });
 
-    expect(flexibleItems.every((item) => item.dayType === "training")).toBe(true);
-    expect(flexibleItems.map((item) => item.scheduleIndex)).toEqual(
-      Array.from({ length: flexibleItems.length }, (_, index) => index)
-    );
     expect(buildSchedulePreview(cadenceItems)).toEqual({
       endDate: "2026-08-08",
       restDays: 13,

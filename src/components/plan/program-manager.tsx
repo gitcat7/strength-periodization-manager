@@ -35,9 +35,10 @@ import {
   templateOptions,
   type ProgramTemplateType,
   type ScheduleConfig,
-  type ScheduleMode,
+  type LegacyScheduleMode,
   type TemplateType
 } from "@/domain/program";
+import type { ScheduleRule } from "@/domain/schedule-rule";
 import {
   buildProgramReplacementPayload,
   buildRegenerationPreview,
@@ -55,7 +56,7 @@ type ProgramRow = {
   id: string;
   name: string;
   template_type: ProgramTemplateType;
-  schedule_mode: ScheduleMode;
+  schedule_mode: LegacyScheduleMode;
   schedule_config: Record<string, unknown>;
   custom_template_name: string | null;
   status: string;
@@ -162,7 +163,7 @@ export function ProgramManager() {
   const [usesLegacyScheduleSchema, setUsesLegacyScheduleSchema] = useState(false);
   const [message, setMessage] = useState("");
   const [templateType, setTemplateType] = useState<TemplateType>("push_pull_squat");
-  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>("fixed_weekdays");
+  const [scheduleMode, setScheduleMode] = useState<LegacyScheduleMode>("fixed_weekdays");
   const [selectedWeekdays, setSelectedWeekdays] = useState<number[]>([1, 3, 5]);
   const [cadenceTrainDays, setCadenceTrainDays] = useState(1);
   const [cadenceRestDays, setCadenceRestDays] = useState(1);
@@ -688,12 +689,12 @@ export function ProgramManager() {
       if (!saved) return;
 
       const supabase = createBrowserSupabaseClient();
-      const schedule: ScheduleConfig =
-        scheduleMode === "fixed_weekdays"
-          ? { mode: "fixed_weekdays", weekdays: selectedWeekdays }
-          : scheduleMode === "cadence"
-            ? { mode: "cadence", trainDays: cadenceTrainDays, restDays: cadenceRestDays }
-            : { mode: "flexible" };
+      // Bridge until ScheduleRuleFields replaces this form (Task 6): a legacy flexible
+      // selection generates as a fixed-weekday plan; new plans never persist flexible.
+      const schedule: ScheduleRule =
+        scheduleMode === "cadence"
+          ? { mode: "cadence", trainDays: cadenceTrainDays, restDays: cadenceRestDays }
+          : { mode: "fixed_weekdays", weekdays: selectedWeekdays };
 
       const { data: exercises, error: exercisesError } = await supabase
         .from(DB_TABLE.exercises)
@@ -741,8 +742,7 @@ export function ProgramManager() {
         templateType,
         schedule,
         exerciseProfiles: [...exerciseProfiles, ...accessoryProfiles],
-        weekCount: planSetup.weekCount,
-        trainingDaysPerWeek: planSetup.trainingDaysPerWeek
+        weekCount: planSetup.weekCount
       });
 
       const payload = buildProgramReplacementPayload({
@@ -1309,12 +1309,12 @@ function PlanBuilder({
   cadenceRestDays: number;
   cadenceTrainDays: number;
   customTemplateName: string;
-  scheduleMode: ScheduleMode;
+  scheduleMode: LegacyScheduleMode;
   selectedWeekdays: number[];
   setCadenceRestDays: (value: number) => void;
   setCadenceTrainDays: (value: number) => void;
   setCustomTemplateName: (value: string) => void;
-  setScheduleMode: (value: ScheduleMode) => void;
+  setScheduleMode: (value: LegacyScheduleMode) => void;
   setSelectedWeekdays: (value: number[]) => void;
   setTemplateType: (value: TemplateType) => void;
   setUseCustomName: (value: boolean) => void;
@@ -1346,7 +1346,7 @@ function PlanBuilder({
           <span className="mb-1 block text-sm font-medium">安排方式</span>
           <select
             className="h-11 w-full rounded-lg border border-line bg-field px-3 text-sm"
-            onChange={(event) => setScheduleMode(event.target.value as ScheduleMode)}
+            onChange={(event) => setScheduleMode(event.target.value as LegacyScheduleMode)}
             value={scheduleMode}
           >
             <option value="fixed_weekdays">固定星期</option>
