@@ -126,7 +126,7 @@ describe("ProgramManager cache hydration", () => {
     expect(container.textContent).toContain("创建第一个计划");
   });
 
-  it("shows a profile-only context entry for an existing plan", async () => {
+  it("keeps profile management disclosed for an existing plan", async () => {
     supabaseClient = createSupabaseClient({ activeProgram: true });
     container = document.createElement("div");
     document.body.append(container);
@@ -139,7 +139,8 @@ describe("ProgramManager cache hydration", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain("更新体重、饮食与恢复");
+    expect(container.textContent).toContain("计划管理");
+    expect(container.textContent).not.toContain("更新体重、饮食与恢复");
   });
 
   it("keeps an existing plan in management view until the user explicitly adjusts it", async () => {
@@ -155,11 +156,28 @@ describe("ProgramManager cache hydration", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain("调整计划");
-    expect(container.textContent).toContain("按当前参数重新生成");
+    expect(container.textContent).toContain("当前周期");
+    expect(container.textContent).toContain("计划管理");
+    expect(container.textContent).not.toContain("按当前参数重新生成");
+    expect(container.querySelectorAll("a[href='/today']")).toHaveLength(1);
     expect(container.textContent).not.toContain("生成 4 周训练计划");
     expect(container.textContent).not.toContain("先选训练结构，再选安排方式");
     expect(container.textContent).not.toContain("训练安排与主项最近工作组");
+    expect(container.querySelector("[data-plan-week='1']")?.hasAttribute("open")).toBe(true);
+    expect(container.querySelector("[data-plan-cycle='1']")?.hasAttribute("open")).toBe(true);
+
+    await act(async () => {
+      clickButton(container!, "计划管理");
+    });
+
+    expect(container.textContent).toContain("调整计划");
+    expect(container.textContent).toContain("按当前参数重新生成");
+    expect(container.textContent).toContain("更新体重、饮食与恢复");
+
+    await act(async () => {
+      clickButton(container!, "全部收起");
+    });
+    expect([...container.querySelectorAll<HTMLDetailsElement>("[data-plan-week], [data-plan-cycle]")].every((item) => !item.open)).toBe(true);
 
     await act(async () => {
       clickButton(container!, "调整计划");
@@ -194,6 +212,11 @@ function createSupabaseClient({
     { default_increment: 2.5, id: "bench", is_main_lift: true, name: "卧推", slug: "bench_press" },
     { default_increment: 2.5, id: "deadlift", is_main_lift: true, name: "硬拉", slug: "deadlift" },
     { default_increment: 2.5, id: "press", is_main_lift: true, name: "推举", slug: "overhead_press" }
+  ];
+  const planWorkouts = [
+    { day_type: "training", id: "workout-1", name: "推 A", schedule_index: 0, scheduled_date: "2026-07-27", sequence_index: 0, status: "scheduled" },
+    { day_type: "training", id: "workout-2", name: "拉 B", schedule_index: 1, scheduled_date: "2026-07-28", sequence_index: 1, status: "scheduled" },
+    { day_type: "training", id: "workout-3", name: "推 A", schedule_index: 7, scheduled_date: "2026-08-03", sequence_index: 2, status: "scheduled" }
   ];
   const createQuery = (result: unknown) => {
     const promise = result instanceof Error ? Promise.reject(result) : Promise.resolve(result);
@@ -233,6 +256,8 @@ function createSupabaseClient({
           error: null
         });
       }
+      if (table === "plan_workouts") return createQuery({ data: activeProgram ? planWorkouts : [], error: null });
+      if (table === "plan_workout_exercises") return createQuery({ data: [], error: null });
       if (table === "usr_lift_profiles") return Object.assign(createQuery({ data: [], error: null }), { upsert: () => Promise.resolve({ error: null }) });
       return createQuery({ data: [], error: null });
     }

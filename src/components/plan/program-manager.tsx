@@ -3,11 +3,10 @@
 import { DB_TABLE } from "../../lib/supabase/table-names";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Brain, CheckCircle2, Dumbbell, Loader2, Moon, PlusCircle, XCircle } from "lucide-react";
 import type { RecommendationType } from "@/domain/fitness-coach";
-import { groupPlanOutline } from "@/domain/plan-outline";
+import { getDefaultPlanPosition, groupPlanOutline } from "@/domain/plan-outline";
 import { getNextWorkoutState } from "@/domain/next-workout";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
 import {
@@ -51,6 +50,8 @@ import {
   type ProgramReplacementPayload
 } from "@/domain/program-regeneration";
 import { ProgramRegenerationDialog } from "./program-regeneration-dialog";
+import { CurrentProgramOverview } from "./current-program-overview";
+import { PlanScheduleOutline } from "./plan-schedule-outline";
 import { resolveProgramRegenerationOutcome } from "./program-regeneration-outcome";
 import {
   buildConfirmationPayload,
@@ -190,6 +191,7 @@ export function ProgramManager() {
   const [planSetupErrors, setPlanSetupErrors] = useState<Record<string, string>>({});
   const [showPlanSetup, setShowPlanSetup] = useState(false);
   const [showProfileContext, setShowProfileContext] = useState(false);
+  const [managementOpen, setManagementOpen] = useState(false);
   const [scheduleExpansionMode, setScheduleExpansionMode] = useState<"default" | "all" | "collapsed">("default");
   const [regenerationDialog, setRegenerationDialog] = useState(createRegenerationDialogState);
   const confirmationInFlight = useRef(false);
@@ -214,8 +216,8 @@ export function ProgramManager() {
     }, {});
   }, [workoutExercises]);
   const planOutline = useMemo(() => program ? groupPlanOutline(workouts, program.start_date) : [], [program, workouts]);
-  const defaultPlanWeek = useMemo(
-    () => getDefaultPlanWeek(planOutline, program?.start_date ?? "", new Date()),
+  const defaultPosition = useMemo(
+    () => getDefaultPlanPosition(planOutline, program?.start_date ?? "", new Date()),
     [planOutline, program?.start_date]
   );
 
@@ -305,6 +307,7 @@ export function ProgramManager() {
 
     setProgram(programData as ProgramRow);
     setShowPlanSetup(false);
+    setScheduleExpansionMode("default");
     setTemplateType(normalizeTemplateTypeForGeneration(programData.template_type as TemplateType));
     setPlanSetup((current) => ({ ...current, weekCount: getProgramWeekCount(programData as Pick<ProgramRow, "start_date" | "end_date">) }));
     const loadedWorkouts = await loadWorkouts(programData.id);
@@ -981,6 +984,12 @@ export function ProgramManager() {
 
   const nextPlanWorkoutId =
     workouts.find((workout) => workout.day_type === "training" && workout.status !== "completed")?.id ?? null;
+  const nextPlanWorkout = workouts.find((workout) => workout.id === nextPlanWorkoutId) ?? null;
+  const nextPlanWorkoutMeta = nextPlanWorkout ? getWorkoutMeta(nextPlanWorkout.name) : null;
+  const nextPlanWorkoutState = nextPlanWorkout ? getPlanWorkoutState(nextPlanWorkout, true) : null;
+  const currentCycle = planOutline
+    .find((week) => week.week === defaultPosition.week)
+    ?.cycles.find((cycle) => cycle.index === defaultPosition.cycleIndex);
 
   return (
     <div className="space-y-5">
@@ -1071,49 +1080,30 @@ export function ProgramManager() {
           </button>
         </section>
       ) : (
-        <section className="action-surface p-4">
-          <div className="mb-4 flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
-              <CheckCircle2 size={20} />
-            </span>
-            <div>
-              <p className="page-kicker">当前周期</p>
-              <h2 className="font-bold">{program.name}</h2>
-              <p className="text-sm text-muted">
-                {program.start_date} 至 {program.end_date}
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Link className="pressable inline-flex rounded-md bg-action px-4 py-2 font-semibold text-white" href="/today">
-              查看今日训练
-            </Link>
-            <button
-              className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={status === "generating"}
-              onClick={() => setShowPlanSetup(true)}
-              ref={regenerationTriggerRef}
-              type="button"
-            >
-              调整计划
-            </button>
-            <button
-              className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink"
-              onClick={openRegenerationDialog}
-              type="button"
-            >
-              按当前参数重新生成
-            </button>
-            <button
-              className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={status === "generating"}
-              onClick={() => setShowProfileContext((current) => !current)}
-              type="button"
-            >
-              {showProfileContext ? "收起画像更新" : "更新体重、饮食与恢复"}
-            </button>
-          </div>
-        </section>
+        <CurrentProgramOverview
+          currentCycleLabel={currentCycle ? `循环 ${currentCycle.index}` : null}
+          currentWeek={defaultPosition.week}
+          endDate={program.end_date}
+          isBusy={status === "generating"}
+          managementOpen={managementOpen}
+          name={program.name}
+          nextWorkout={nextPlanWorkout && nextPlanWorkoutMeta && nextPlanWorkoutState ? {
+            date: nextPlanWorkout.scheduled_date,
+            focus: nextPlanWorkoutMeta.focus,
+            intent: nextPlanWorkoutMeta.intent,
+            name: nextPlanWorkout.name,
+            stateLabel: nextPlanWorkoutState.label
+          } : null}
+          onAdjustPlan={() => {
+            setManagementOpen(false);
+            setShowPlanSetup(true);
+          }}
+          onRegenerate={openRegenerationDialog}
+          onToggleManagement={() => setManagementOpen((current) => !current)}
+          onToggleProfile={() => setShowProfileContext((current) => !current)}
+          profileOpen={showProfileContext}
+          startDate={program.start_date}
+        />
       )}
 
       {recommendations.length > 0 ? (
@@ -1192,25 +1182,13 @@ export function ProgramManager() {
       ) : null}
 
       {workouts.length > 0 ? (
-        <section className="space-y-3">
-          <div className="flex justify-end gap-4">
-            <button className="text-sm font-semibold text-action" onClick={() => setScheduleExpansionMode("all")} type="button">
-              全部展开
-            </button>
-            <button className="text-sm font-semibold text-action" onClick={() => setScheduleExpansionMode("collapsed")} type="button">
-              全部收起
-            </button>
-          </div>
-          <div key={scheduleExpansionMode} className="space-y-3">
-          {planOutline.map(({ week, startDate, endDate, completedTrainingDays, totalTrainingDays, cycles }) => (
-            <details className="rounded-xl border border-line bg-white p-3" key={`week-${week}`} open={scheduleExpansionMode === "all" || (scheduleExpansionMode === "default" && week === defaultPlanWeek)}>
-              <summary className="cursor-pointer font-semibold">第 {week} 周 · {startDate} 至 {endDate} · 已完成 {completedTrainingDays}/{totalTrainingDays} 训练日</summary>
-              <div className="mt-3 space-y-3">
-                {cycles.map((cycle) => (
-                  <details className="rounded-lg bg-field p-3" key={`week-${week}-cycle-${cycle.index}`} open={scheduleExpansionMode === "all"}>
-                    <summary className="cursor-pointer text-sm font-semibold">循环 {cycle.index} · {cycle.label} · {cycle.startDate} 至 {cycle.endDate} · 已完成 {cycle.completedTrainingDays}/{cycle.totalTrainingDays}</summary>
-                    <div className="mt-3 space-y-3">
-                      {cycle.workouts.map((workout, index) => {
+        <PlanScheduleOutline
+          defaultCycleIndex={defaultPosition.cycleIndex}
+          defaultWeek={defaultPosition.week}
+          mode={scheduleExpansionMode}
+          onModeChange={setScheduleExpansionMode}
+          outline={planOutline}
+          renderWorkout={(workout, index) => {
             const isRestDay = workout.day_type === "rest";
             const presentation = getScheduleItemPresentation({ dayType: workout.day_type, status: workout.status });
             const workoutMeta = isRestDay ? null : getWorkoutMeta(workout.name);
@@ -1303,15 +1281,8 @@ export function ProgramManager() {
               ) : null}
             </article>
             );
-                      })}
-                    </div>
-                  </details>
-                ))}
-              </div>
-            </details>
-          ))}
-          </div>
-        </section>
+          }}
+        />
       ) : null}
       {regenerationDialog.open ? (
         <ProgramRegenerationDialog
