@@ -5,7 +5,7 @@ import { DB_TABLE } from "../../lib/supabase/table-names";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Brain, CheckCircle2, Dumbbell, Loader2, Moon, PlusCircle, XCircle } from "lucide-react";
+import { Brain, CheckCircle2, Dumbbell, Loader2, Moon, Pause, Play, PlusCircle, XCircle } from "lucide-react";
 import type { RecommendationType } from "@/domain/fitness-coach";
 import { getNextWorkoutState } from "@/domain/next-workout";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
@@ -40,7 +40,17 @@ import {
   type TemplateType
 } from "@/domain/program";
 import type { HolidayPolicy, ScheduleRule } from "@/domain/schedule-rule";
+import {
+  buildResumePreview,
+  getRecoveryLoadAdvice,
+  type PauseReason,
+  type PendingTraining,
+  type ResumeRoute
+} from "@/domain/schedule-adjustment";
+import { buildScheduleReflowPayload, type ReflowScheduleItem } from "@/domain/schedule-reflow-payload";
 import { ScheduleRuleFields } from "./schedule-rule-fields";
+import { ScheduleAdjustmentDialog } from "./schedule-adjustment-dialog";
+import { UnavailableDateManager, type UnavailableDateItem } from "./unavailable-date-manager";
 import {
   buildProgramReplacementPayload,
   buildRegenerationPreview,
@@ -64,6 +74,8 @@ type ProgramRow = {
   status: string;
   start_date: string;
   end_date: string;
+  schedule_revision?: number;
+  holiday_policy?: HolidayPolicy;
 };
 
 type WorkoutRow = {
@@ -72,8 +84,27 @@ type WorkoutRow = {
   schedule_index: number;
   scheduled_date: string;
   sequence_index: number | null;
+  cycle_index?: number | null;
+  cycle_position?: number | null;
   name: string;
   status: string;
+};
+
+type ScheduleEventRow = {
+  id: string;
+  event_type: string;
+  effective_date: string;
+  metadata: Record<string, unknown> | null;
+  schedule_revision: number;
+  created_at: string;
+};
+
+type AdjustmentDialogState = {
+  action: "resume" | "extra_rest";
+  selectedRoute: ResumeRoute | null;
+  injuryAcknowledged: boolean;
+  busy: boolean;
+  errorMessage: string | null;
 };
 
 type WorkoutExerciseRow = {
@@ -175,6 +206,14 @@ export function ProgramManager() {
   const [planSetupErrors, setPlanSetupErrors] = useState<Record<string, string>>({});
   const [showPlanSetup, setShowPlanSetup] = useState(false);
   const [regenerationDialog, setRegenerationDialog] = useState(createRegenerationDialogState);
+  const [scheduleAdjustmentSupported, setScheduleAdjustmentSupported] = useState(true);
+  const [scheduleEvents, setScheduleEvents] = useState<ScheduleEventRow[]>([]);
+  const [unavailableDates, setUnavailableDates] = useState<UnavailableDateItem[]>([]);
+  const [adjustmentDialog, setAdjustmentDialog] = useState<AdjustmentDialogState | null>(null);
+  const [showPauseForm, setShowPauseForm] = useState(false);
+  const [pauseReason, setPauseReason] = useState<PauseReason>("fatigue");
+  const [pauseResumeDate, setPauseResumeDate] = useState("");
+  const [scheduleActionBusy, setScheduleActionBusy] = useState(false);
   const confirmationInFlight = useRef(false);
   const pendingReplacementPayload = useRef<ProgramReplacementPayload | null>(null);
   const regenerationTriggerRef = useRef<HTMLButtonElement>(null);
@@ -202,6 +241,41 @@ export function ProgramManager() {
       return groups;
     }, {});
   }, [workoutExercises]);
+
+  const pauseState = useMemo(() => {
+    // Schedule events load newest-first, so the first row decides the pause state.
+    const latestEvent = scheduleEvents[0] ?? null;
+    if (latestEvent?.event_type !== "pause_started") {
+      return { paused: false, event: null as ScheduleEventRow | null, reason: null as PauseReason | null, resumeDate: null as string | null };
+    }
+    const metadata = latestEvent.metadata ?? {};
+    return {
+      paused: true,
+      event: latestEvent,
+      reason: typeof metadata.reason === "string" ? (metadata.reason as PauseReason) : null,
+      resumeDate: typeof metadata.resume_date === "string" ? metadata.resume_date : null
+    };
+  }, [scheduleEvents]);
+
+  const templateLength = useMemo(() => {
+    const positions = workouts
+      .filter((workout) => workout.day_type === "training")
+      .map((workout) => workout.cycle_position)
+      .filter((position): position is number => typeof position === "number");
+    if (positions.length > 0) return Math.max(...positions) + 1;
+    return getTemplateCycleLength(program?.template_type ?? null);
+  }, [workouts, program?.template_type]);
+
+  const pendingTrainings = useMemo<PendingTraining[]>(() => {
+    return workouts
+      .filter((workout) => workout.day_type === "training" && workout.status === "scheduled")
+      .sort((a, b) => (a.sequence_index ?? 0) - (b.sequence_index ?? 0))
+      .map((workout) => ({
+        sequenceIndex: workout.sequence_index ?? 0,
+        name: workout.name,
+        scheduledDate: workout.scheduled_date
+      }));
+  }, [workouts]);
 
   async function loadCurrentProgram({
     requireActiveProgram = false,
@@ -233,13 +307,29 @@ export function ProgramManager() {
       fetchRecommendations(userData.user.id),
       supabase
         .from(DB_TABLE.programs)
-        .select("id,name,template_type,schedule_mode,schedule_config,custom_template_name,status,start_date,end_date")
+        .select("id,name,template_type,schedule_mode,schedule_config,custom_template_name,status,start_date,end_date,schedule_revision,holiday_policy")
         .eq("user_id", userData.user.id)
         .eq("status", "active")
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle()
     ]);
+
+    let resolvedProgramResult = programResult;
+    if (programResult.error && /schedule_revision|holiday_policy/i.test(programResult.error.message)) {
+      // Pre-migration databases lack the scheduling metadata columns.
+      setScheduleAdjustmentSupported(false);
+      resolvedProgramResult = await supabase
+        .from(DB_TABLE.programs)
+        .select("id,name,template_type,schedule_mode,schedule_config,custom_template_name,status,start_date,end_date")
+        .eq("user_id", userData.user.id)
+        .eq("status", "active")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    } else {
+      setScheduleAdjustmentSupported(true);
+    }
 
     if (!recommendationsResult.ok) {
       setStatus("error");
@@ -257,7 +347,7 @@ export function ProgramManager() {
       )
     );
 
-    const { data: programData, error: programError } = programResult;
+    const { data: programData, error: programError } = resolvedProgramResult;
 
     if (programError) {
       setStatus("error");
@@ -275,6 +365,8 @@ export function ProgramManager() {
       setProgram(null);
       setWorkouts([]);
       setWorkoutExercises([]);
+      setScheduleEvents([]);
+      setUnavailableDates([]);
       writePlanCache({
         program: null,
         recommendationWeights: nextRecommendationWeights,
@@ -292,6 +384,8 @@ export function ProgramManager() {
     if (!loadedWorkouts.ok) {
       return false;
     }
+
+    await loadScheduleAdjustmentData(programData.id);
 
     writePlanCache({
       program: programData as ProgramRow,
@@ -489,7 +583,7 @@ export function ProgramManager() {
   > {
     const supabase = createBrowserSupabaseClient();
     const { data: workoutData, error: workoutError, usedLegacySchema } = await loadWorkoutsWithDayTypeFallback(
-      () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,schedule_index,day_type,name,status").eq("program_id", programId).order("schedule_index", { ascending: true }),
+      () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,schedule_index,day_type,cycle_index,cycle_position,name,status").eq("program_id", programId).order("schedule_index", { ascending: true }),
       () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,name,status").eq("program_id", programId).order("sequence_index", { ascending: true })
     );
 
@@ -529,6 +623,38 @@ export function ProgramManager() {
     const workoutExerciseRows = (exerciseData ?? []) as unknown as WorkoutExerciseRow[];
     setWorkoutExercises(workoutExerciseRows);
     return { ok: true, value: { workoutExercises: workoutExerciseRows, workouts: workoutRows } };
+  }
+
+  async function loadScheduleAdjustmentData(programId: string) {
+    if (!scheduleAdjustmentSupported) {
+      setScheduleEvents([]);
+      setUnavailableDates([]);
+      return;
+    }
+
+    const supabase = createBrowserSupabaseClient();
+    const [eventsResult, unavailableResult] = await Promise.all([
+      supabase
+        .from(DB_TABLE.scheduleEvents)
+        .select("id,event_type,effective_date,metadata,schedule_revision,created_at")
+        .eq("program_id", programId)
+        .order("created_at", { ascending: false })
+        .limit(20),
+      supabase
+        .from(DB_TABLE.unavailableDates)
+        .select("id,date,note")
+        .order("date", { ascending: true })
+    ]);
+
+    if (eventsResult.error || unavailableResult.error) {
+      setScheduleAdjustmentSupported(false);
+      setScheduleEvents([]);
+      setUnavailableDates([]);
+      return;
+    }
+
+    setScheduleEvents((eventsResult.data ?? []) as ScheduleEventRow[]);
+    setUnavailableDates((unavailableResult.data ?? []) as UnavailableDateItem[]);
   }
 
   function writePlanCache(cache: PlanCache) {
@@ -669,6 +795,244 @@ export function ProgramManager() {
     setMessage("已忽略该建议。");
     await loadRecommendations(userId);
     setStatus("ready");
+  }
+
+  function openAdjustmentDialog(action: "resume" | "extra_rest") {
+    setAdjustmentDialog({
+      action,
+      selectedRoute: null,
+      injuryAcknowledged: false,
+      busy: false,
+      errorMessage: null
+    });
+  }
+
+  async function confirmScheduleAdjustment() {
+    if (!adjustmentDialog || !adjustmentDialog.selectedRoute || !program || !userId) return;
+
+    const revision = program.schedule_revision;
+    if (typeof revision !== "number") {
+      setAdjustmentDialog({ ...adjustmentDialog, errorMessage: "数据库升级尚未完成，暂不能调整日程。" });
+      return;
+    }
+
+    const { action } = adjustmentDialog;
+    const route = adjustmentDialog.selectedRoute;
+    const today = formatDate(new Date());
+    const pendingRows = getPendingScheduleRows(workouts);
+    const rule = getRuleFromProgram(program);
+    const blockedDates = buildBlockedDateMap(program.holiday_policy ?? "train", holidayDates, unavailableDates);
+    const fromDate = action === "extra_rest" ? shiftDate(today, 1) : today;
+
+    let rowsToReflow = pendingRows;
+    let skippedItems: ReflowScheduleItem[] = [];
+
+    if (route === "start_next_cycle") {
+      const firstPending = pendingRows.find(
+        (row) => row.day_type === "training" && typeof row.sequence_index === "number"
+      );
+      if (firstPending && typeof firstPending.sequence_index === "number") {
+        const currentCycleIndex = Math.floor(firstPending.sequence_index / templateLength);
+        const skippedRows = pendingRows.filter(
+          (row) =>
+            row.day_type === "training" &&
+            typeof row.sequence_index === "number" &&
+            Math.floor(row.sequence_index / templateLength) === currentCycleIndex
+        );
+        skippedItems = skippedRows.map((row) => ({
+          workoutId: row.id,
+          scheduledDate: row.scheduled_date,
+          scheduleIndex: row.schedule_index,
+          sequenceIndex: row.sequence_index,
+          dayType: "training",
+          status: "skipped"
+        }));
+        const skippedIds = new Set(skippedRows.map((row) => row.id));
+        rowsToReflow = pendingRows.filter((row) => !skippedIds.has(row.id));
+      }
+    }
+
+    const reflowItems = buildReflowScheduleItems({
+      rows: rowsToReflow,
+      rule,
+      programStartDate: program.start_date,
+      blockedDates,
+      fromDate
+    });
+
+    let payload;
+    try {
+      payload = buildScheduleReflowPayload({
+        programId: program.id,
+        expectedRevision: revision,
+        action,
+        effectiveDate: today,
+        route: action === "resume" ? route : undefined,
+        scheduleItems: [...skippedItems, ...reflowItems]
+      });
+    } catch (error) {
+      setAdjustmentDialog({
+        ...adjustmentDialog,
+        errorMessage: error instanceof Error ? error.message : "日程调整参数无效。"
+      });
+      return;
+    }
+
+    setAdjustmentDialog({ ...adjustmentDialog, busy: true, errorMessage: null });
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase.rpc("reflow_program_schedule", { p_payload: payload });
+
+    if (error) {
+      if (/schedule changed/i.test(error.message)) {
+        setAdjustmentDialog(null);
+        await loadCurrentProgram({ showLoading: false });
+        setMessage("日程已在其他设备调整，请刷新后重新确认。");
+        return;
+      }
+      // Network and validation failures keep the dialog state and selections.
+      setAdjustmentDialog((current) =>
+        current
+          ? { ...current, busy: false, errorMessage: "提交失败，请检查网络后重试。当前选择已保留，日程尚未变化。" }
+          : current
+      );
+      return;
+    }
+
+    setAdjustmentDialog(null);
+    clearTrainingDataCaches();
+    await trackEvent({
+      eventName: "schedule_adjusted",
+      properties: { action, route },
+      supabase,
+      userId
+    });
+    await loadCurrentProgram({ showLoading: false });
+    setMessage(action === "resume" ? "已恢复训练，日程已更新。" : "已为你多安排一天休息，后续日程已顺延。");
+  }
+
+  async function confirmPause() {
+    if (!program || !userId) return;
+
+    const revision = program.schedule_revision;
+    if (typeof revision !== "number") {
+      setStatus("error");
+      setMessage("数据库升级尚未完成，暂不能暂停计划。");
+      return;
+    }
+
+    setScheduleActionBusy(true);
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase.from(DB_TABLE.scheduleEvents).insert({
+      user_id: userId,
+      program_id: program.id,
+      event_type: "pause_started",
+      effective_date: formatDate(new Date()),
+      metadata: { reason: pauseReason, resume_date: pauseResumeDate || null },
+      schedule_revision: revision
+    });
+    setScheduleActionBusy(false);
+
+    if (error) {
+      setStatus("error");
+      setMessage(error.message);
+      return;
+    }
+
+    setShowPauseForm(false);
+    setPauseResumeDate("");
+    clearTrainingDataCaches();
+    await loadCurrentProgram({ showLoading: false });
+    setMessage("计划已暂停。恢复时可以选择继续当前循环或从下个循环开始。");
+  }
+
+  async function addUnavailableDate(date: string, note: string) {
+    if (!userId || !program) return;
+
+    setScheduleActionBusy(true);
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase
+      .from(DB_TABLE.unavailableDates)
+      .insert({ user_id: userId, date, note: note || null });
+
+    if (error) {
+      setScheduleActionBusy(false);
+      setStatus("error");
+      setMessage(error.message);
+      return;
+    }
+
+    await reflowForUnavailableDates([...unavailableDates, { id: `pending-${date}`, date, note: note || null }]);
+  }
+
+  async function removeUnavailableDate(id: string) {
+    if (!program) return;
+
+    setScheduleActionBusy(true);
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase.from(DB_TABLE.unavailableDates).delete().eq("id", id);
+
+    if (error) {
+      setScheduleActionBusy(false);
+      setStatus("error");
+      setMessage(error.message);
+      return;
+    }
+
+    await reflowForUnavailableDates(unavailableDates.filter((item) => item.id !== id));
+  }
+
+  async function reflowForUnavailableDates(nextDates: UnavailableDateItem[]) {
+    if (!program) {
+      setScheduleActionBusy(false);
+      return;
+    }
+
+    const revision = program.schedule_revision;
+    if (typeof revision !== "number") {
+      setScheduleActionBusy(false);
+      await loadCurrentProgram({ showLoading: false });
+      return;
+    }
+
+    const today = formatDate(new Date());
+    const pendingRows = getPendingScheduleRows(workouts);
+    const rule = getRuleFromProgram(program);
+    const blockedDates = buildBlockedDateMap(program.holiday_policy ?? "train", holidayDates, nextDates);
+    const firstPendingDate = pendingRows[0]?.scheduled_date ?? today;
+    const scheduleItems = buildReflowScheduleItems({
+      rows: pendingRows,
+      rule,
+      programStartDate: program.start_date,
+      blockedDates,
+      fromDate: firstPendingDate < today ? today : firstPendingDate
+    });
+
+    const payload = buildScheduleReflowPayload({
+      programId: program.id,
+      expectedRevision: revision,
+      action: "unavailable_dates",
+      effectiveDate: today,
+      scheduleItems
+    });
+
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase.rpc("reflow_program_schedule", { p_payload: payload });
+    setScheduleActionBusy(false);
+
+    if (error) {
+      if (/schedule changed/i.test(error.message)) {
+        await loadCurrentProgram({ showLoading: false });
+        setMessage("日程已在其他设备调整，请刷新后重新确认。");
+        return;
+      }
+      setStatus("error");
+      setMessage(error.message);
+      return;
+    }
+
+    clearTrainingDataCaches();
+    await loadCurrentProgram({ showLoading: false });
+    setMessage("不可训练日已更新，训练日程已重新安排。");
   }
 
   async function openRegenerationDialog() {
@@ -867,6 +1231,15 @@ export function ProgramManager() {
   const nextPlanWorkoutId =
     workouts.find((workout) => workout.day_type === "training" && workout.status !== "completed")?.id ?? null;
 
+  const todayDate = formatDate(new Date());
+  const daysInterrupted = pauseState.event
+    ? Math.max(0, daysBetweenDates(pauseState.event.effective_date, todayDate))
+    : 0;
+  const recoveryAdvice = pauseState.paused ? getRecoveryLoadAdvice(daysInterrupted) : null;
+  const adjustmentControlsAvailable =
+    Boolean(program) && scheduleAdjustmentSupported && !usesLegacyScheduleSchema;
+  const hasPendingScheduleRows = getPendingScheduleRows(workouts).length > 0;
+
   return (
     <div className="space-y-5">
       <PlanBuilder
@@ -963,6 +1336,115 @@ export function ProgramManager() {
           </div>
         </section>
       )}
+
+      {adjustmentControlsAvailable ? (
+        <section className="rounded-xl border border-line bg-white p-4">
+          <div className="mb-3 flex items-center gap-3">
+            <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
+              {pauseState.paused ? <Play size={20} /> : <Pause size={20} />}
+            </span>
+            <div>
+              <h2 className="font-semibold">日程调整</h2>
+              <p className="text-sm text-muted">暂停、恢复或多休一天，训练顺序会自动保持。</p>
+            </div>
+          </div>
+
+          {pauseState.paused ? (
+            <div className="rounded-lg border border-[#c75c1a]/30 bg-[#c75c1a]/5 p-3">
+              <p className="font-semibold text-[#c75c1a]">计划已暂停</p>
+              <p className="mt-1 text-sm text-muted">
+                {pauseState.resumeDate ? `预计 ${pauseState.resumeDate} 恢复。` : "尚未设置恢复日期。"}
+                {recoveryAdvice ? ` ${recoveryAdvice.message}` : ""}
+              </p>
+              <button
+                className="pressable mt-3 inline-flex items-center gap-2 rounded-md bg-action px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={scheduleActionBusy || !hasPendingScheduleRows}
+                onClick={() => openAdjustmentDialog("resume")}
+                type="button"
+              >
+                <Play size={16} />
+                恢复训练
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-3">
+              <button
+                className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={scheduleActionBusy || !hasPendingScheduleRows}
+                onClick={() => openAdjustmentDialog("extra_rest")}
+                type="button"
+              >
+                今天多休一天
+              </button>
+              <button
+                className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink"
+                onClick={() => setShowPauseForm((current) => !current)}
+                type="button"
+              >
+                {showPauseForm ? "收起暂停设置" : "暂停计划"}
+              </button>
+            </div>
+          )}
+
+          {showPauseForm && !pauseState.paused ? (
+            <div className="mt-3 grid gap-3 rounded-lg bg-field p-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">暂停原因</span>
+                <select
+                  aria-label="暂停原因"
+                  className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+                  onChange={(event) => setPauseReason(event.target.value as PauseReason)}
+                  value={pauseReason}
+                >
+                  <option value="fatigue">疲劳累积，需要休整</option>
+                  <option value="time_conflict">工作/学习时间冲突</option>
+                  <option value="minor_discomfort">轻微不适</option>
+                  <option value="injury">受伤</option>
+                  <option value="personal">个人事务</option>
+                  <option value="other">其他</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium">预计恢复日期（可选）</span>
+                <input
+                  aria-label="预计恢复日期（可选）"
+                  className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+                  onChange={(event) => setPauseResumeDate(event.target.value)}
+                  type="date"
+                  value={pauseResumeDate}
+                />
+              </label>
+              <div className="flex gap-3 sm:col-span-2">
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-action px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={scheduleActionBusy}
+                  onClick={confirmPause}
+                  type="button"
+                >
+                  {scheduleActionBusy ? <Loader2 className="animate-spin" size={16} /> : null}
+                  确认暂停
+                </button>
+                <button
+                  className="inline-flex h-10 items-center justify-center rounded-lg border border-line bg-white px-4 text-sm font-semibold text-ink"
+                  onClick={() => setShowPauseForm(false)}
+                  type="button"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {adjustmentControlsAvailable ? (
+        <UnavailableDateManager
+          busy={scheduleActionBusy}
+          dates={unavailableDates}
+          onAdd={addUnavailableDate}
+          onRemove={removeUnavailableDate}
+        />
+      ) : null}
 
       {recommendations.length > 0 ? (
         <section className="rounded-xl border border-line bg-white p-4">
@@ -1123,6 +1605,32 @@ export function ProgramManager() {
             );
           })}
         </section>
+      ) : null}
+      {adjustmentDialog ? (
+        <ScheduleAdjustmentDialog
+          busy={adjustmentDialog.busy}
+          errorMessage={adjustmentDialog.errorMessage}
+          injuryAcknowledged={adjustmentDialog.injuryAcknowledged}
+          onCancel={() => {
+            if (!adjustmentDialog.busy) setAdjustmentDialog(null);
+          }}
+          onConfirm={confirmScheduleAdjustment}
+          onInjuryAcknowledgedChange={(acknowledged) =>
+            setAdjustmentDialog((current) => (current ? { ...current, injuryAcknowledged: acknowledged } : current))
+          }
+          onSelectRoute={(route) =>
+            setAdjustmentDialog((current) => (current ? { ...current, selectedRoute: route } : current))
+          }
+          preview={buildResumePreview({
+            route: adjustmentDialog.selectedRoute ?? "continue_current_cycle",
+            pendingTraining: pendingTrainings,
+            templateLength,
+            resumedOn: adjustmentDialog.action === "extra_rest" ? shiftDate(todayDate, 1) : todayDate
+          })}
+          recoveryAdvice={adjustmentDialog.action === "resume" ? getRecoveryLoadAdvice(daysInterrupted) : null}
+          requireInjuryAcknowledgement={adjustmentDialog.action === "resume" && pauseState.reason === "injury"}
+          selectedRoute={adjustmentDialog.selectedRoute}
+        />
       ) : null}
       {regenerationDialog.open ? (
         <ProgramRegenerationDialog
@@ -1498,6 +2006,160 @@ function getPlanWorkoutState(workout: WorkoutRow, isNextWorkout: boolean) {
           : `${nextState.daysUntil} 天后建议训练`
       : `第 ${(workout.sequence_index ?? 0) + 1} 节`
   };
+}
+
+function getPendingScheduleRows(workouts: WorkoutRow[]) {
+  return workouts
+    .filter((workout) => workout.status === "scheduled")
+    .sort((a, b) => a.schedule_index - b.schedule_index);
+}
+
+function getRuleFromProgram(program: ProgramRow): ScheduleRule | null {
+  const config = program.schedule_config ?? {};
+  if (program.schedule_mode === "fixed_weekdays" && Array.isArray(config.weekdays)) {
+    return { mode: "fixed_weekdays", weekdays: config.weekdays as number[] };
+  }
+  if (program.schedule_mode === "cadence" && typeof config.train_days === "number") {
+    return {
+      mode: "cadence",
+      trainDays: config.train_days as number,
+      restDays: typeof config.rest_days === "number" ? (config.rest_days as number) : 1
+    };
+  }
+  return null;
+}
+
+function buildBlockedDateMap(
+  holidayPolicy: HolidayPolicy,
+  holidays: Array<{ date: string; name: string }>,
+  unavailableDates: UnavailableDateItem[]
+): Map<string, string> {
+  const blocked = new Map<string, string>();
+  if (holidayPolicy === "rest_and_shift") {
+    for (const holiday of holidays) {
+      blocked.set(holiday.date, holiday.name);
+    }
+  }
+  for (const item of unavailableDates) {
+    blocked.set(item.date, item.note || "不可训练日");
+  }
+  return blocked;
+}
+
+// Re-dates pending rows day by day, keeping row count and schedule_index untouched
+// so the atomic RPC can apply the result without inserting or deleting rows.
+function buildReflowScheduleItems(input: {
+  rows: WorkoutRow[];
+  rule: ScheduleRule | null;
+  programStartDate: string;
+  blockedDates: ReadonlyMap<string, string>;
+  fromDate: string;
+}): ReflowScheduleItem[] {
+  const { rows, rule, blockedDates, fromDate } = input;
+  if (rows.length === 0) return [];
+
+  if (!rule) {
+    // Legacy schedules without a stored rule keep their relative spacing.
+    const delta = Math.max(0, daysBetweenDates(rows[0].scheduled_date, fromDate));
+    return rows.map((row) => toReflowItem(row, shiftDate(row.scheduled_date, delta)));
+  }
+
+  const trainingQueue = rows.filter((row) => row.day_type === "training");
+  const restQueue = rows.filter((row) => row.day_type === "rest");
+  const assignments: ReflowScheduleItem[] = [];
+
+  let phase = getCadencePhaseOffset(rule, input.programStartDate, fromDate, blockedDates);
+  const cursor = parseLocalDate(fromDate);
+  let guard = 0;
+
+  while ((trainingQueue.length > 0 || restQueue.length > 0) && guard < 3660) {
+    guard += 1;
+    const dateStr = formatDate(cursor);
+
+    if (blockedDates.has(dateStr)) {
+      const restRow = restQueue.shift();
+      // Blocked days host a rest row when one remains and never consume a phase.
+      if (restRow) assignments.push(toReflowItem(restRow, dateStr));
+    } else {
+      const isTrainingDay = isRuleTrainingDay(rule, cursor, phase);
+      const row = isTrainingDay
+        ? trainingQueue.shift() ?? restQueue.shift()
+        : restQueue.shift() ?? trainingQueue.shift();
+      if (row) assignments.push(toReflowItem(row, dateStr));
+      phase += 1;
+    }
+
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  for (const leftover of [...trainingQueue, ...restQueue]) {
+    assignments.push(toReflowItem(leftover, leftover.scheduled_date));
+  }
+
+  return assignments.sort((a, b) => a.scheduleIndex - b.scheduleIndex);
+}
+
+function getCadencePhaseOffset(
+  rule: ScheduleRule,
+  startDate: string,
+  targetDate: string,
+  blockedDates: ReadonlyMap<string, string>
+): number {
+  if (rule.mode !== "cadence") return 0;
+
+  let count = 0;
+  const cursor = parseLocalDate(startDate);
+  const target = parseLocalDate(targetDate);
+  let guard = 0;
+  while (cursor.getTime() < target.getTime() && guard < 3660) {
+    guard += 1;
+    if (!blockedDates.has(formatDate(cursor))) count += 1;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return count;
+}
+
+function isRuleTrainingDay(rule: ScheduleRule, date: Date, phase: number): boolean {
+  if (rule.mode === "cadence") {
+    const cycleLength = rule.trainDays + rule.restDays;
+    return phase % cycleLength < rule.trainDays;
+  }
+  return rule.weekdays.includes(date.getDay());
+}
+
+function toReflowItem(row: WorkoutRow, scheduledDate: string): ReflowScheduleItem {
+  return {
+    workoutId: row.id,
+    scheduledDate,
+    scheduleIndex: row.schedule_index,
+    sequenceIndex: row.sequence_index,
+    dayType: row.day_type,
+    status: "scheduled"
+  };
+}
+
+function getTemplateCycleLength(templateType: ProgramTemplateType | null) {
+  if (templateType === "one_split") return 1;
+  if (templateType === "three_split" || templateType === "three_day_full_body") return 3;
+  if (templateType === "five_split") return 5;
+  if (templateType === "four_day_upper_lower") return 4;
+  return 6;
+}
+
+function daysBetweenDates(fromDate: string, toDate: string) {
+  const from = parseLocalDate(fromDate).getTime();
+  const to = parseLocalDate(toDate).getTime();
+  return Math.round((to - from) / (24 * 60 * 60 * 1000));
+}
+
+function shiftDate(date: string, days: number) {
+  const shifted = parseLocalDate(date);
+  shifted.setDate(shifted.getDate() + days);
+  return formatDate(shifted);
+}
+
+function parseLocalDate(date: string) {
+  return new Date(`${date}T00:00:00`);
 }
 
 function formatDate(date: Date) {

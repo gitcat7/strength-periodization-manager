@@ -100,6 +100,7 @@ export function HomeDashboard() {
   const [prGoals, setPrGoals] = useState<PrGoalRow[]>([]);
   const [status, setStatus] = useState<"loading" | "guest" | "ready" | "error">("loading");
   const [message, setMessage] = useState("");
+  const [programPause, setProgramPause] = useState<{ eventId: string; resumeDate: string | null } | null>(null);
 
   useEffect(() => {
     const cached = readClientCache<HomeDashboardCache>(homeDashboardCacheKey);
@@ -188,7 +189,7 @@ export function HomeDashboard() {
         return;
       }
 
-      const [nextWorkoutResult, completedResult] = await Promise.all([
+      const [nextWorkoutResult, completedResult, latestEventResult] = await Promise.all([
         withTimeout(
           activeProgram
             ? loadWorkoutsWithDayTypeFallback(
@@ -204,8 +205,36 @@ export function HomeDashboard() {
             () => supabase.from(DB_TABLE.workouts).select("id,program_id,scheduled_date,name,status").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12)
           ),
           "训练历史读取超时，请刷新页面后重试。"
-        )
+        ),
+        // Schedule events ship with the calendar migration; a missing table just
+        // means pause state is unavailable on this database.
+        activeProgram
+          ? supabase
+              .from(DB_TABLE.scheduleEvents)
+              .select("id,event_type,effective_date,metadata,created_at")
+              .eq("program_id", activeProgram.id)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle()
+              .then((result) => result, () => ({ data: null, error: null }))
+          : Promise.resolve({ data: null, error: null })
       ]);
+
+      const latestScheduleEvent = (latestEventResult.data ?? null) as {
+        id: string;
+        event_type: string;
+        metadata: Record<string, unknown> | null;
+      } | null;
+
+      if (latestScheduleEvent?.event_type === "pause_started") {
+        const metadata = latestScheduleEvent.metadata ?? {};
+        setProgramPause({
+          eventId: latestScheduleEvent.id,
+          resumeDate: typeof metadata.resume_date === "string" ? metadata.resume_date : null
+        });
+      } else {
+        setProgramPause(null);
+      }
 
       const { data: nextWorkoutData, error: nextWorkoutError } = nextWorkoutResult;
 
@@ -456,16 +485,23 @@ export function HomeDashboard() {
                 <Dumbbell size={20} />
               </span>
               <div>
-                <p className="page-kicker">{nextWorkout ? "下一次训练" : "当前状态"}</p>
-                <h2 className="text-xl font-bold">{nextWorkout ? nextWorkout.name : "暂无训练计划"}</h2>
+                <p className="page-kicker">{programPause || !nextWorkout ? "当前状态" : "下一次训练"}</p>
+                <h2 className="text-xl font-bold">{programPause ? "计划已暂停" : nextWorkout ? nextWorkout.name : "暂无训练计划"}</h2>
               </div>
             </div>
-            <Link className="pressable inline-flex items-center gap-1 rounded-md bg-action px-3 py-2 text-sm font-semibold text-white" href={nextWorkout ? "/today" : "/single-workout"}>
-              {nextWorkout ? "继续今日计划" : "快速记录自由训练"}
+            <Link className="pressable inline-flex items-center gap-1 rounded-md bg-action px-3 py-2 text-sm font-semibold text-white" href={programPause ? "/plan" : nextWorkout ? "/today" : "/single-workout"}>
+              {programPause ? "前往计划页恢复" : nextWorkout ? "继续今日计划" : "快速记录自由训练"}
               <ArrowRight size={16} />
             </Link>
           </div>
-          {nextWorkout ? (
+          {programPause ? (
+            <div className="border-t border-line pt-4">
+              <p className="text-sm text-muted">
+                {programPause.resumeDate ? `计划暂停至 ${programPause.resumeDate}。` : "计划当前处于暂停状态。"}
+                恢复时可以选择继续当前循环或从下个循环开始，训练顺序会自动保持。
+              </p>
+            </div>
+          ) : nextWorkout ? (
             <>
               <div className="mb-3 border-y border-action/15 py-3">
                 <div className="flex flex-wrap items-center gap-2 text-sm">

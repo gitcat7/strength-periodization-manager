@@ -16,7 +16,8 @@ export type AnalyticsEventName =
   | "csv_exported"
   | "feedback_submitted"
   | "exercise_substituted"
-  | "rest_day_completed";
+  | "rest_day_completed"
+  | "schedule_adjusted";
 
 export async function trackEvent({
   eventName,
