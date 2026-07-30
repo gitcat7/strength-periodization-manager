@@ -9,7 +9,6 @@ import {
   Brain,
   CalendarDays,
   CheckCircle2,
-  Dumbbell,
   Loader2,
   Minus,
   Moon,
@@ -21,7 +20,6 @@ import {
   Save,
   Timer
 } from "lucide-react";
-import { buildTodayHeaderView } from "@/domain/workout-presentation";
 import {
   buildExerciseCoachRecommendation,
   buildNextCycleMainLiftRecommendation,
@@ -66,6 +64,15 @@ import { buildCompletionSummary } from "@/domain/workout-recording";
 import { getAutomaticDurationMinutes, getElapsedDurationSeconds, validateManualDurationMinutes } from "@/domain/workout-duration";
 import { WorkoutDurationEditor } from "@/components/workout/workout-duration-editor";
 import { parseCompletionResult } from "@/domain/completion-result";
+import {
+  getActiveExerciseId,
+  isExerciseExpanded,
+  reconcileExerciseExpansion,
+  toggleExerciseExpansion,
+  type ExerciseExpansionOverrides
+} from "./today-exercise-disclosure";
+import { TodayProgressHeader } from "./today-progress-header";
+import { RestTimerSurface } from "./rest-timer-surface";
 
 type WorkoutRow = {
   id: string;
@@ -308,6 +315,7 @@ export function TodayWorkout() {
   const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
   const [manualDurationMode, setManualDurationMode] = useState(false);
   const [manualDurationMinutes, setManualDurationMinutes] = useState("");
+  const [exerciseExpansion, setExerciseExpansion] = useState<ExerciseExpansionOverrides>({});
   const startRequestRef = useRef(false);
 
   useEffect(() => {
@@ -735,6 +743,12 @@ export function TodayWorkout() {
       setMessage("请先填写真实 RPE（1–10）后再完成该组。");
       return;
     }
+
+    const before = buildExerciseCompletionRows(exercises, setLogs);
+    const after = before.map((item) => item.exerciseId === exercise.id
+      ? { ...item, completedSets: Math.max(0, item.completedSets + (completed ? 1 : -1)) }
+      : item);
+    setExerciseExpansion((current) => reconcileExerciseExpansion({ after, before, overrides: current }));
 
     if (completed && !log.completed) void ensureWorkoutStarted().catch(() => setMessage("训练开始时间保存失败，请检查网络后重试。"));
     updateSetLog(exercise.id, log.set_index, {
@@ -1173,29 +1187,22 @@ export function TodayWorkout() {
     scheduledDate: workout.scheduled_date
   });
   const coachCue = getWorkoutCoachCue(workout.name);
-  const headerView = buildTodayHeaderView({ completedSets, totalSets, workoutName: workout.name });
+  const exerciseCompletion = buildExerciseCompletionRows(exercises, setLogs);
+  const activeExerciseId = getActiveExerciseId(exerciseCompletion);
 
   return (
     <section className="space-y-4">
-      <div className="action-surface p-4">
-        <div className="flex items-start gap-3">
-          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-white ${headerView.tone === "completed" ? "bg-action" : "bg-[#c75c1a]"}`}>
-            <Dumbbell size={20} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="page-kicker">{workout.scheduled_date}</p>
-              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${headerView.tone === "completed" ? "bg-action/10 text-action" : "bg-[#fff1e8] text-[#c75c1a]"}`}>
-                {headerView.progressLabel}
-              </span>
-            </div>
-            <h2 className="mt-0.5 text-xl font-bold">{workout.name}</h2>
-            <p className="mt-1 text-sm text-muted">{workoutMeta.focus}</p>
-            <p className="mt-1 text-sm text-muted">{workoutMeta.note}</p>
-          </div>
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-action/15 pt-3">
+      <TodayProgressHeader
+        completedSets={completedSets}
+        date={workout.scheduled_date}
+        elapsedLabel={elapsedSeconds === null ? null : `已训练 ${formatElapsedTime(elapsedSeconds)}`}
+        focus={workoutMeta.focus}
+        intent={workoutMeta.intent}
+        note={workoutMeta.note}
+        totalSets={totalSets}
+        workoutName={workout.name}
+      />
+      <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-white p-2">
           <button
             className="pressable inline-flex h-11 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-semibold text-ink"
             onClick={fillByPlan}
@@ -1213,7 +1220,6 @@ export function TodayWorkout() {
             {saveStatus === "saving" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
             保存记录
           </button>
-        </div>
       </div>
 
       <div className="rounded-lg border border-line bg-white p-4">
@@ -1261,7 +1267,7 @@ export function TodayWorkout() {
         </div>
       ) : null}
 
-      <RestTimerPanel
+      <RestTimerSurface
         context={restContext}
         enabled={restTimerEnabled}
         isRunning={restRunning}
@@ -1325,9 +1331,10 @@ export function TodayWorkout() {
         {exercises.map((exercise, index) => {
           const exerciseLogs = setLogs[exercise.id] ?? [];
           const completedExerciseSets = exerciseLogs.filter((log) => log.completed).length;
+          const expanded = isExerciseExpanded({ activeExerciseId, exerciseId: exercise.id, overrides: exerciseExpansion });
 
           return (
-            <article className={`rounded-lg border bg-white p-4 ${completedExerciseSets === exerciseLogs.length && exerciseLogs.length > 0 ? "border-action/30 border-l-4" : "border-line border-l-4 border-l-[#c75c1a]"}`} key={exercise.id}>
+            <article className={`rounded-lg border bg-white p-4 ${completedExerciseSets === exerciseLogs.length && exerciseLogs.length > 0 ? "border-action/30 border-l-4" : "border-line border-l-4 border-l-[#c75c1a]"}`} data-exercise-id={exercise.id} data-exercise-name={exercise.exercises?.name ?? "动作"} data-expanded={expanded} key={exercise.id}>
               <div className="flex items-start gap-3">
                 <span className={`grid h-8 w-8 place-items-center rounded-full text-sm font-semibold text-white ${completedExerciseSets === exerciseLogs.length && exerciseLogs.length > 0 ? "bg-action" : "bg-[#c75c1a]"}`}>
                   {index + 1}
@@ -1355,6 +1362,10 @@ export function TodayWorkout() {
                           targetWeight: Number(exercise.target_weight)
                         })}
                       </p>
+                      <button aria-expanded={expanded} className="pressable h-11 rounded-md border border-line px-3 text-sm font-semibold text-ink" onClick={() => setExerciseExpansion((current) => toggleExerciseExpansion(current, exercise.id, expanded))} type="button">
+                        {expanded ? "收起" : "展开"}
+                      </button>
+                      {expanded ? (
                       <button
                         className="pressable h-8 rounded-md border border-line px-2 text-xs font-semibold text-ink"
                         onClick={() => fillExerciseByPlan(exercise.id)}
@@ -1362,8 +1373,11 @@ export function TodayWorkout() {
                       >
                         填入计划
                       </button>
+                      ) : null}
                     </div>
                   </div>
+                  {expanded ? (
+                  <>
                   <p className="mt-2 text-sm text-muted">{getExerciseNote(exercise.exercises?.slug, index)}</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <ExerciseDetailLauncher
@@ -1430,6 +1444,8 @@ export function TodayWorkout() {
                       </div>
                     ))}
                   </div>
+                  </>
+                  ) : null}
                 </div>
               </div>
             </article>
@@ -1459,7 +1475,7 @@ export function TodayWorkout() {
         />
       ) : null}
 
-      {elapsedSeconds !== null ? <p className="mb-3 text-sm font-semibold text-action">已训练 {formatElapsedTime(elapsedSeconds)}</p> : null}
+      <Link className="inline-flex h-11 items-center text-sm font-semibold text-action" href="/plan">查看完整计划</Link>
 
       {completionPreview ? (
         <div aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-black/30 p-4 sm:place-items-center" role="dialog">
@@ -1499,9 +1515,6 @@ export function TodayWorkout() {
           {saveStatus === "saving" ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
           {workout.status === "completed" ? "训练已完成" : "保存并完成训练"}
         </button>
-        <Link className="inline-flex h-11 items-center justify-center rounded-lg border border-line px-4 font-semibold text-ink transition active:scale-[0.98]" href="/plan">
-          查看完整计划
-        </Link>
       </div>
     </section>
   );
@@ -1696,6 +1709,7 @@ function WeightInput({
           <Minus size={14} />
         </button>
         <input
+          aria-label={label}
           className="min-w-0 border-0 bg-white px-1 text-center text-sm outline-none"
           inputMode="decimal"
           min={min}
@@ -1741,6 +1755,7 @@ function NumberInput({
     <label className={`block ${className}`}>
       <span className="mb-1 block text-[11px] text-muted">{label}</span>
       <input
+        aria-label={label}
         className="h-9 w-full rounded-md border border-line bg-white px-2 text-sm outline-none focus:border-action"
         inputMode="decimal"
         max={max}
@@ -1838,6 +1853,17 @@ function readRestTimerSettings() {
 
 function writeRestTimerSettings(settings: { enabled: boolean; seconds: number }) {
   window.localStorage.setItem(restTimerSettingsKey, JSON.stringify(settings));
+}
+
+function buildExerciseCompletionRows(
+  exercises: WorkoutExerciseRow[],
+  setLogs: Record<string, SetLogRow[]>
+) {
+  return exercises.map((exercise) => ({
+    completedSets: (setLogs[exercise.id] ?? []).filter((log) => log.completed).length,
+    exerciseId: exercise.id,
+    totalSets: (setLogs[exercise.id] ?? []).length
+  }));
 }
 
 function buildWorkoutSummary({

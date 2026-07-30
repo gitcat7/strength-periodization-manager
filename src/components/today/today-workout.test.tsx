@@ -148,9 +148,45 @@ describe("TodayWorkout cache hydration", () => {
 
     expect(completion?.checked).toBe(true);
   });
+
+  it("focuses the first incomplete exercise, advances focus, and preserves manual reopening", async () => {
+    writeCachedWorkout({ slug: "barbell_bench_press", twoExercises: true });
+    ({ container, root } = renderTodayWorkout());
+    await act(async () => { await Promise.resolve(); });
+
+    const bench = getExercise(container, "杠铃卧推");
+    const press = getExercise(container, "站姿推举");
+    expect(bench.getAttribute("data-expanded")).toBe("true");
+    expect(press.getAttribute("data-expanded")).toBe("false");
+
+    const rpe = bench.querySelector<HTMLInputElement>('input[aria-label="RPE"]');
+    act(() => setInputValue(rpe!, "8"));
+    act(() => bench.querySelector<HTMLInputElement>('input[aria-label="第 1 组完成"]')?.click());
+
+    expect(bench.getAttribute("data-expanded")).toBe("false");
+    expect(press.getAttribute("data-expanded")).toBe("true");
+    act(() => [...bench.querySelectorAll("button")].find((button) => button.textContent === "展开")?.click());
+    expect(bench.getAttribute("data-expanded")).toBe("true");
+  });
+
+  it("shows one progressbar, a floating active rest timer, and one filled completion action", async () => {
+    writeCachedWorkout({ slug: "barbell_bench_press", targetWeight: 22.5 });
+    ({ container, root } = renderTodayWorkout());
+    await act(async () => { await Promise.resolve(); });
+    const view = container!;
+    expect(view.querySelectorAll("[role='progressbar']")).toHaveLength(1);
+    const weight = view.querySelector<HTMLInputElement>('input[aria-label="重量"]');
+    expect(weight?.value).toBe("22.5");
+    expect(weight?.className).toContain("min-w-0");
+    act(() => setInputValue(view.querySelector<HTMLInputElement>('input[aria-label="RPE"]')!, "8"));
+    act(() => view.querySelector<HTMLInputElement>('input[aria-label="第 1 组完成"]')?.click());
+    expect(view.querySelector("[data-rest-timer-floating]")).not.toBeNull();
+    const primary = [...view.querySelectorAll("button")].filter((button) => button.className.includes("bg-action") && button.textContent?.includes("保存并完成训练"));
+    expect(primary).toHaveLength(1);
+  });
 });
 
-function writeCachedWorkout({ slug, targetWeight = 100 }: { slug: string; targetWeight?: number }) {
+function writeCachedWorkout({ slug, targetWeight = 100, twoExercises = false }: { slug: string; targetWeight?: number; twoExercises?: boolean }) {
   writeClientCache("strength-training-cache:today", {
     coachRecommendations: [],
     exercises: [
@@ -169,7 +205,23 @@ function writeCachedWorkout({ slug, targetWeight = 100 }: { slug: string; target
         target_reps: 5,
         target_sets: 1,
         target_weight: targetWeight
-      }
+      },
+      ...(twoExercises ? [{
+        exercise_id: "exercise-2",
+        exercises: {
+          default_increment: 2.5,
+          movement_pattern: "vertical_press",
+          name: "站姿推举",
+          slug: "overhead_press",
+          substitution_enabled: false,
+          training_direction: "push"
+        },
+        id: "workout-exercise-2",
+        order_index: 1,
+        target_reps: 5,
+        target_sets: 1,
+        target_weight: 50
+      }] : [])
     ],
     lastCompletedWorkout: null,
     nextTraining: {
@@ -193,7 +245,19 @@ function writeCachedWorkout({ slug, targetWeight = 100 }: { slug: string; target
           target_weight: targetWeight,
           workout_exercise_id: "workout-exercise-1"
         }
-      ]
+      ],
+      ...(twoExercises ? {
+        "workout-exercise-2": [{
+          actual_reps: null,
+          actual_weight: null,
+          completed: false,
+          rpe: null,
+          set_index: 1,
+          target_reps: 5,
+          target_weight: 50,
+          workout_exercise_id: "workout-exercise-2"
+        }]
+      } : {})
     },
     userId: "user-1",
     workout: {
@@ -204,6 +268,12 @@ function writeCachedWorkout({ slug, targetWeight = 100 }: { slug: string; target
       status: "scheduled"
     }
   });
+}
+
+function getExercise(view: HTMLElement, name: string) {
+  const exercise = view.querySelector<HTMLElement>(`[data-exercise-name="${name}"]`);
+  if (!exercise) throw new Error(`Missing exercise ${name}`);
+  return exercise;
 }
 
 function renderTodayWorkout() {
