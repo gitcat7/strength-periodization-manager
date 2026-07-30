@@ -1,4 +1,5 @@
 import type { ScheduleRule, SupportedScheduleMode } from "@/domain/schedule-rule";
+import { buildSequenceCalendar, getTargetTrainingCount } from "@/domain/sequence-calendar";
 import { roundToNearestPlate } from "@/domain/strength";
 
 export type LegacyTemplateType = "three_day_full_body" | "four_day_upper_lower";
@@ -38,6 +39,8 @@ export type PlannedWorkoutExercise = {
 
 export type PlannedWorkout = {
   dayType: "training";
+  cycleIndex?: number;
+  cyclePosition?: number;
   exercises: PlannedWorkoutExercise[];
   name: string;
   scheduledDate: string;
@@ -266,17 +269,50 @@ export function buildFourWeekProgram({
   const normalizedWeekCount = normalizeWeekCount(weekCount);
   const effectiveSchedule: ScheduleRule =
     schedule ?? { mode: "fixed_weekdays", weekdays: availableWeekdays ?? [1, 3, 5] };
-  const workoutDates = buildWorkoutDates(startDate, effectiveSchedule, normalizedWeekCount);
 
-  const trainingWorkouts: PlannedTrainingWorkout[] = workoutDates.map((date, index) => {
-    const weekIndex = getCalendarWeekIndex(date, startDate);
-    const templateWorkout = template[index % template.length];
+  const normalizedStart = new Date(startDate);
+  normalizedStart.setHours(0, 0, 0, 0);
+  const startDateText = formatDate(normalizedStart);
+  const targetTrainingCount = getTargetTrainingCount({
+    startDate: startDateText,
+    trainingWeeks: normalizedWeekCount,
+    rule: effectiveSchedule
+  });
+  const calendarItems = buildSequenceCalendar({
+    startDate: startDateText,
+    targetTrainingCount,
+    rule: effectiveSchedule,
+    constraints: []
+  });
+
+  return calendarItems.map((calendarItem): PlannedScheduleItem => {
+    if (calendarItem.dayType === "rest" || calendarItem.sequenceIndex === null) {
+      return {
+        dayType: "rest",
+        exercises: [],
+        name: "休息/恢复日",
+        scheduledDate: calendarItem.scheduledDate,
+        scheduleIndex: calendarItem.scheduleIndex,
+        sequenceIndex: null
+      };
+    }
+
+    const sequenceIndex = calendarItem.sequenceIndex;
+    const weekIndex = getCalendarWeekIndex(
+      new Date(`${calendarItem.scheduledDate}T00:00:00`),
+      normalizedStart
+    );
+    const templateWorkout = template[sequenceIndex % template.length];
     const bump = weekIntensityBumps[weekIndex % weekIntensityBumps.length] ?? 0;
 
     return {
+      dayType: "training",
+      cycleIndex: Math.floor(sequenceIndex / template.length),
+      cyclePosition: sequenceIndex % template.length,
       name: `第 ${weekIndex + 1} 周 · ${templateWorkout.name}`,
-      scheduledDate: formatDate(date),
-      sequenceIndex: index,
+      scheduledDate: calendarItem.scheduledDate,
+      scheduleIndex: calendarItem.scheduleIndex,
+      sequenceIndex,
       exercises: templateWorkout.exercises.map((item) => {
         const profile = profileBySlug.get(item.slug);
         const targetWeight =
@@ -293,44 +329,11 @@ export function buildFourWeekProgram({
       })
     };
   });
-
-  return expandScheduleItems(trainingWorkouts, effectiveSchedule);
 }
 
 export function getTemplateType(trainingDaysPerWeek: number): TemplateType {
   if (trainingDaysPerWeek === 7) return "push_pull_squat";
   return trainingDaysPerWeek === 4 ? "five_split" : "three_split";
-}
-
-function buildWorkoutDates(startDate: Date, schedule: ScheduleRule, weekCount: number) {
-  const dates: Date[] = [];
-  const cursor = new Date(startDate);
-  cursor.setHours(0, 0, 0, 0);
-  const endExclusive = new Date(cursor);
-  endExclusive.setDate(endExclusive.getDate() + weekCount * 7);
-
-  if (schedule.mode === "cadence") {
-    const trainDays = Math.max(1, Math.floor(schedule.trainDays));
-    const restDays = Math.max(0, Math.floor(schedule.restDays));
-    while (cursor < endExclusive) {
-      dates.push(new Date(cursor));
-      const completedBlock = dates.length % trainDays === 0;
-      cursor.setDate(cursor.getDate() + (completedBlock ? restDays + 1 : 1));
-    }
-    return dates;
-  }
-
-  const sortedWeekdays = [...schedule.weekdays].sort((a, b) => a - b);
-  if (sortedWeekdays.length === 0) return dates;
-
-  while (cursor < endExclusive) {
-    if (sortedWeekdays.includes(cursor.getDay())) {
-      dates.push(new Date(cursor));
-    }
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return dates;
 }
 
 function getCalendarWeekIndex(date: Date, startDate: Date) {

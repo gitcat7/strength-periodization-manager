@@ -169,6 +169,25 @@ describe("buildFourWeekProgram", () => {
     expect(items.at(-1)?.dayType).toBe("training");
   });
 
+  it("assigns cycle index and position to training items for persistence", () => {
+    const workouts = buildFourWeekProgram({
+      templateType: "three_split",
+      schedule: { mode: "fixed_weekdays", weekdays: [1, 3, 5] },
+      exerciseProfiles: profiles,
+      startDate: new Date("2026-07-13T00:00:00"),
+      weekCount: 6
+    }).filter((workout) => workout.dayType === "training");
+
+    expect(workouts.slice(0, 5).map((workout) => [workout.cycleIndex, workout.cyclePosition])).toEqual([
+      [0, 0],
+      [0, 1],
+      [0, 2],
+      [1, 0],
+      [1, 1]
+    ]);
+    expect(workouts.at(-1)).toMatchObject({ cycleIndex: 5, cyclePosition: 2 });
+  });
+
   it("summarizes the schedule item counts", () => {
     const cadenceItems = buildFourWeekProgram({
       templateType: "three_split",
