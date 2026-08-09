@@ -50,22 +50,35 @@ describe("EmailLoginForm", () => {
 
     expect(mocks.signInWithOtp).toHaveBeenCalledWith({ email: "athlete@example.com" });
     expect(getInput("验证码").getAttribute("inputmode")).toBe("numeric");
-    expect(getInput("验证码").getAttribute("maxlength")).toBe("6");
+    expect(getInput("验证码").getAttribute("maxlength")).toBe("8");
   });
 
-  it("verifies exactly six digits and rejects shorter codes", async () => {
+  it("verifies exactly eight digits and rejects shorter codes", async () => {
     await renderForm();
     setInput(getInput("邮箱"), "athlete@example.com");
     await clickButton("获取验证码");
 
     const codeInput = getInput("验证码");
-    setInput(codeInput, "12345");
+    setInput(codeInput, "1234567");
     expect(getButton("登录").disabled).toBe(true);
     expect(mocks.verifyOtp).not.toHaveBeenCalled();
 
-    setInput(codeInput, "123456");
+    setInput(codeInput, "12345678");
     await clickButton("登录");
-    expect(mocks.verifyOtp).toHaveBeenCalledWith({ email: "athlete@example.com", token: "123456", type: "email" });
+    expect(mocks.verifyOtp).toHaveBeenCalledWith({ email: "athlete@example.com", token: "12345678", type: "email" });
+  });
+
+  it("accepts and verifies the production eight-digit OTP without truncation", async () => {
+    await renderForm();
+    setInput(getInput("邮箱"), "athlete@example.com");
+    await clickButton("获取验证码");
+
+    const codeInput = getInput("验证码");
+    expect(codeInput.maxLength).toBe(8);
+    setInput(codeInput, "93699484");
+    await clickButton("登录");
+
+    expect(mocks.verifyOtp).toHaveBeenCalledWith({ email: "athlete@example.com", token: "93699484", type: "email" });
   });
 
   it("keeps the code step and displays an error when verification fails", async () => {
@@ -73,7 +86,7 @@ describe("EmailLoginForm", () => {
     await renderForm();
     setInput(getInput("邮箱"), "athlete@example.com");
     await clickButton("获取验证码");
-    setInput(getInput("验证码"), "123456");
+    setInput(getInput("验证码"), "12345678");
     await clickButton("登录");
 
     expect(getInput("验证码")).toBeTruthy();

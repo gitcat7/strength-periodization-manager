@@ -9,12 +9,12 @@ async function read(relativePath) {
 }
 
 describe("email OTP login contract", () => {
-  it("keeps the form on the six-digit OTP flow", async () => {
+  it("keeps the form on the eight-digit OTP flow", async () => {
     const form = await read("src/components/auth/email-login-form.tsx");
     expect(form).toContain("signInWithOtp");
     expect(form).toContain("verifyOtp");
     expect(form).toContain('type: "email"');
-    expect(form).toContain("maxLength={6}");
+    expect(form).toContain("maxLength={8}");
     expect(form).not.toContain(["粘贴", "邮件", "链接登录"].join(""));
     expect(form).not.toContain("emailRedirect" + "To");
   });

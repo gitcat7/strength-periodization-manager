@@ -52,9 +52,9 @@ export function EmailLoginForm() {
 
   async function verifyCode(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!/^\d{6}$/.test(code)) {
+    if (!/^\d{8}$/.test(code)) {
       setStatus("error");
-      setMessage("请输入 6 位数字验证码。");
+      setMessage("请输入 8 位数字验证码。");
       return;
     }
 
@@ -97,10 +97,10 @@ export function EmailLoginForm() {
               type="text"
               inputMode="numeric"
               autoComplete="one-time-code"
-              maxLength={6}
-              pattern="[0-9]{6}"
+              maxLength={8}
+              pattern="[0-9]{8}"
               value={code}
-              onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+              onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
               autoFocus
               aria-describedby={message ? "login-code-message" : undefined}
             />
@@ -109,7 +109,7 @@ export function EmailLoginForm() {
           <button
             className="flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-action px-4 font-semibold text-white transition hover:bg-action/90 disabled:cursor-not-allowed disabled:opacity-60"
             type="submit"
-            disabled={status === "loading" || code.length !== 6}
+            disabled={status === "loading" || code.length !== 8}
           >
             <Mail size={18} />
             {status === "loading" ? "登录中" : "登录"}
