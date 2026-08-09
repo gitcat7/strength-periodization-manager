@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -7,6 +8,13 @@ const migrationPath = fileURLToPath(
 );
 const schemaPath = fileURLToPath(new URL("../supabase/schema.sql", import.meta.url));
 const tableNamesPath = fileURLToPath(new URL("../src/lib/supabase/table-names.ts", import.meta.url));
+const packageJsonPath = fileURLToPath(new URL("../package.json", import.meta.url));
+const planPath = fileURLToPath(new URL("../docs/superpowers/plans/2026-07-30-sequence-calendar-scheduling-phase-1.md", import.meta.url));
+const smokePath = fileURLToPath(new URL("./sequence-calendar-smoke.test.mjs", import.meta.url));
+const pgTapPath = fileURLToPath(new URL("../supabase/tests/sequence_calendar_scheduling.test.sql", import.meta.url));
+const reflowFixMigrationPath = fileURLToPath(
+  new URL("../supabase/migrations/20260809010000_defer_reflow_schedule_index_constraint.sql", import.meta.url)
+);
 
 async function readSql() {
   const [migration, schema] = await Promise.all([readFile(migrationPath, "utf8"), readFile(schemaPath, "utf8")]);
@@ -107,5 +115,59 @@ describe("sequence calendar scheduling schema contract", () => {
     expect(tableNames).toContain('calendarDates: "cfg_cn_calendar_dates"');
     expect(tableNames).toContain('unavailableDates: "usr_unavailable_dates"');
     expect(tableNames).toContain('scheduleEvents: "ops_schedule_events"');
+  });
+
+  it("uses the public replacement payload exercises field in both baselines", async () => {
+    const { migration, schema } = await readSql();
+
+    for (const sql of [migration, schema]) {
+      expect(sql).toMatch(/jsonb_typeof\(v_item -> 'exercises'\) <> 'array'/i);
+      expect(sql).toMatch(/jsonb_array_elements\(v_item -> 'exercises'\)/i);
+      expect(sql).not.toMatch(/v_item -> 'cfg_exercises'/i);
+    }
+  });
+
+  it("exposes a repeatable dedicated pgTAP command for this migration", async () => {
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
+    expect(packageJson.scripts["test:db:sequence"]).toBe(
+      "pnpm dlx supabase@2.34.3 test db supabase/tests/sequence_calendar_scheduling.test.sql --local"
+    );
+  });
+
+  it("keeps the phase-one plan free of the obsolete --file database command", async () => {
+    const plan = await readFile(planPath, "utf8");
+    expect(plan).not.toContain("pnpm test:db -- --file");
+    expect(plan).toContain("pnpm test:db:sequence");
+  });
+
+  it("calls single-jsonb scheduling RPCs with their named p_payload argument", async () => {
+    const smoke = await readFile(smokePath, "utf8");
+    expect(smoke).toMatch(/body:\s*JSON\.stringify\(\{\s*p_payload:\s*payload\s*\}\)/);
+  });
+
+  it("reflows swapped schedule indexes with a transaction-deferred uniqueness check", async () => {
+    const { schema } = await readSql();
+    const pgTap = await readFile(pgTapPath, "utf8");
+    expect(existsSync(reflowFixMigrationPath)).toBe(true);
+    const reflowFixMigration = await readFile(reflowFixMigrationPath, "utf8");
+
+    for (const sql of [schema, reflowFixMigration]) {
+      expect(sql).toMatch(/unique\s*\(\s*program_id\s*,\s*schedule_index\s*\)\s*deferrable\s+initially\s+deferred/i);
+    }
+    expect(pgTap).toContain('"workout_id": "00000000-0000-0000-0000-000000002405", "scheduled_date": "2026-08-22", "schedule_index": 3');
+    expect(pgTap).toContain("swapped schedule indexes remain unique after reflow");
+  });
+
+  it("keeps the sequence pgTAP auth fixture independent of Supabase confirmation timestamp columns", async () => {
+    const pgTap = await readFile(pgTapPath, "utf8");
+    expect(pgTap).not.toContain("email_confirmed_at");
+    expect(pgTap).not.toContain("confirmed_at");
+  });
+
+  it("keeps the sequence pgTAP plan count aligned with its assertions", async () => {
+    const pgTap = await readFile(pgTapPath, "utf8");
+    const planned = Number(pgTap.match(/select plan\((\d+)\);/)?.[1]);
+    const assertions = (pgTap.match(/^select (?:has_function|is\(|throws_ok\()/gm) ?? []).length;
+    expect(planned).toBe(assertions);
   });
 });

@@ -117,6 +117,26 @@ where w.day_type = 'rest';
 - 休息日只能由本人、在当天、且状态为 `scheduled` 或 `draft` 时完成一次；完成休息不改变训练量、e1RM、PR、推荐或力量完成率。
 - 线上执行 `BASE_URL=https://你的-vercel-默认域名 pnpm vitest run scripts/rest-day-smoke.test.mjs`。
 
+### 顺序日历排程（第一期）发布门禁
+
+- 在部署依赖排程代码之前，先完成数据库备份，并按文件名顺序在 Supabase SQL Editor 执行 `supabase/migrations/20260730100000_sequence_calendar_scheduling.sql` 与 `supabase/migrations/20260809010000_defer_reflow_schedule_index_constraint.sql`。后者让日程互换索引时的唯一约束在事务提交时检查；不要跳过或手工改写其中的约束定义。
+- 默认 `pnpm release:check` 和 `pnpm smoke` 保持无认证、快速执行；它们**不**替代排程的认证验收。
+- 生产部署完成后，使用一个普通权限、专用的 QA 账号运行认证冒烟。凭据只能临时设置在当前终端或安全 CI Secret，绝不提交、绝不写入 Vercel 环境变量：
+
+```powershell
+$env:BASE_URL='https://你的-vercel-默认域名'
+$env:NEXT_PUBLIC_SUPABASE_URL='https://你的项目.supabase.co'
+$env:NEXT_PUBLIC_SUPABASE_ANON_KEY='你的匿名公钥'
+$env:QA_SMOKE_EMAIL='qa-scheduling@example.com'
+$env:QA_SMOKE_PASSWORD='仅用于冒烟的密码'
+pnpm vitest run scripts/sequence-calendar-smoke.test.mjs
+```
+
+- 此认证冒烟必须验证：练几休几预览、工作日训练/周末双休、法定节假日顺延、个人不可训练日、暂停状态、恢复前不预选路径、过期排程版本报错，以及从下个循环恢复时仅产生指定的 `recovery_strategy` 跳过记录。
+- 数据库 pgTAP 必须用专用命令运行：`pnpm test:db:sequence`。不要给现有 `pnpm test:db` 追加 `--file`，它固定运行 standalone 草稿测试，Supabase CLI 会将该参数拒绝。
+- 若缺少上述 QA 凭据，认证冒烟为**未完成的发布硬门禁**，必须记录缺失项；不得以跳过测试或使用管理员权限代替通过。
+- 执行后按 `docs/12_database_release_runbook.md` 的排程验证 SQL 检查 `schedule_revision`、跳过原因和 RLS，再记录执行时间、部署版本和 QA 账号别名（不记录密码）。
+
 ## 5. 邮件发送
 
 MVP 内测早期可以先用 Supabase 默认邮件，但如果继续出现 `email rate limit exceeded`，必须配置自定义 SMTP。

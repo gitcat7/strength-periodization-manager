@@ -60,6 +60,68 @@
 3. 先在 Supabase SQL Editor 手动执行。
 4. 执行后立即打开 `/diagnostics`。
 
+### 顺序日历排程第一期（20260730100000）
+
+该期迁移文件为 `supabase/migrations/20260730100000_sequence_calendar_scheduling.sql`。它新增排程版本、节假日策略、日历/不可训练日/审计事件表，并更新 `replace_active_program` 与 `reflow_program_schedule`。发布顺序必须如下：
+
+1. 完成第 1 节备份并记录备份时间；本次至少应能恢复 `plan_programs`、`plan_workouts`、`plan_workout_exercises`、`usr_unavailable_dates` 和 `ops_schedule_events`。
+2. 在生产 SQL Editor 一次执行该唯一迁移；保存 SQL Editor 成功记录。若执行失败，停止前端部署，保留报错和备份，不要手工执行迁移中的部分语句。
+3. 确认迁移成功后部署与该迁移匹配的固定前端提交；未确认前禁止部署依赖新排程字段/RPC 的前端。
+
+随后执行 `supabase/migrations/20260809010000_defer_reflow_schedule_index_constraint.sql`。该补丁将 `(program_id, schedule_index)` 的唯一约束设为 `DEFERRABLE INITIALLY DEFERRED`，使一次原子 reflow 中的相邻索引互换不会在中间更新时触发重复键；事务结束时仍严格保证唯一。执行后可用以下查询确认：
+
+```sql
+select conname, condeferrable, condeferred
+from pg_constraint
+where conrelid = 'public.plan_workouts'::regclass
+  and contype = 'u'
+  and pg_get_constraintdef(oid) like 'UNIQUE (program_id, schedule_index)%';
+```
+
+预期 `condeferrable` 与 `condeferred` 均为 `true`。若不符合，停止部署，先恢复该约束的正确状态；不要删除已有训练记录。
+4. 部署后用普通权限的专用 QA 账号，按 `docs/11_mvp_release_checklist.md` 运行 `scripts/sequence-calendar-smoke.test.mjs`。缺少 QA 凭据时必须标记为未完成，不能用 service-role 或 SQL Editor 身份替代。
+5. 在本地 Docker/Supabase 已就绪时运行 `pnpm test:db:sequence` 验证本期 pgTAP。该专用脚本固定指向 `supabase/tests/sequence_calendar_scheduling.test.sql`；不要执行 `pnpm test:db -- --file ...`，旧命令的位置参数不接受 `--file`。
+
+迁移后验证（在 SQL Editor 运行；查询不输出用户训练组明细）：
+
+```sql
+-- 活动计划具备并递增排程版本，节假日策略和时区受约束。
+select id, schedule_revision, holiday_policy, timezone, status
+from public.plan_programs
+where status = 'active'
+order by updated_at desc
+limit 20;
+
+-- 恢复策略跳过只允许使用明确原因，且不会混入已完成记录。
+select status, skip_reason, count(*) as workout_count
+from public.plan_workouts
+where skip_reason is not null
+group by status, skip_reason
+order by status, skip_reason;
+
+-- 每次重排只产生一条可审计事件；版本与计划当前版本可关联核验。
+select e.program_id, e.event_type, e.schedule_revision, e.effective_date, e.created_at
+from public.ops_schedule_events e
+order by e.created_at desc
+limit 50;
+
+-- 浏览器角色只能读法定日历，用户数据表都启用 RLS。
+select c.relname, c.relrowsecurity
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relname in ('cfg_cn_calendar_dates', 'usr_unavailable_dates', 'ops_schedule_events')
+order by c.relname;
+
+select tablename, policyname, roles, cmd
+from pg_policies
+where schemaname = 'public'
+  and tablename in ('cfg_cn_calendar_dates', 'usr_unavailable_dates', 'ops_schedule_events')
+order by tablename, policyname;
+```
+
+预期：三个表均 `relrowsecurity = true`；`cfg_cn_calendar_dates` 仅有已登录用户的 `select` 策略，`usr_unavailable_dates` 和 `ops_schedule_events` 的读写策略均以 `auth.uid() = user_id` 隔离。
+
 表前缀迁移后，旧表名保留为仅供读取的兼容视图；新应用代码必须只访问带前缀的物理表。不要向旧名称写入，也不要在验证完成前删除这些兼容视图。
 
 结构与备注验收（不读取用户训练数据）：
@@ -153,6 +215,8 @@ where w.day_type = 'rest';
 3. 用最近备份恢复受影响表。
 4. 如仅是前端错误，优先回滚 Vercel 部署。
 5. 恢复后重新执行 `/api/health`、`pnpm smoke` 或线上 `BASE_URL=... pnpm smoke`。
+
+顺序日历排程的回滚补充：该迁移涉及已创建的计划和审计记录，不能通过删除列或删除表“回滚”。若生产出现问题，先将 Vercel 回退到最后一个不依赖排程 RPC 的稳定前端版本，并暂停新的排程调整；随后基于本次发布前备份和已记录的 `ops_schedule_events` 制定数据修复方案。任何数据恢复或补偿均需先在非生产环境演练，并保留用户已完成训练记录。
 
 ## 6. 内测期间节奏
 

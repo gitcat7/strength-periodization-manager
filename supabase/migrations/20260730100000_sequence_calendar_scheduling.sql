@@ -378,7 +378,7 @@ begin
       or nullif(btrim(v_item ->> 'name'), '') is null
       or (v_item ->> 'schedule_index') !~ '^(0|[1-9][0-9]*)$'
       or v_item ->> 'day_type' not in ('training', 'rest')
-      or jsonb_typeof(v_item -> 'cfg_exercises') <> 'array' then
+      or jsonb_typeof(v_item -> 'exercises') <> 'array' then
       raise exception 'Replacement schedule item is invalid' using errcode = 'P0001';
     end if;
     begin
@@ -390,18 +390,18 @@ begin
     v_schedule_indexes := array_append(v_schedule_indexes, v_schedule_index);
     v_day_type := v_item ->> 'day_type';
     if v_day_type = 'training' then
-      if (v_item ->> 'sequence_index') !~ '^(0|[1-9][0-9]*)$' or jsonb_array_length(v_item -> 'cfg_exercises') = 0 then
+      if (v_item ->> 'sequence_index') !~ '^(0|[1-9][0-9]*)$' or jsonb_array_length(v_item -> 'exercises') = 0 then
         raise exception 'Training schedule items require sequence indexes and prescriptions' using errcode = 'P0001';
       end if;
       v_training_days := v_training_days + 1;
     elsif not (v_item ? 'sequence_index' and v_item -> 'sequence_index' = 'null'::jsonb)
-      or jsonb_array_length(v_item -> 'cfg_exercises') <> 0 then
+      or jsonb_array_length(v_item -> 'exercises') <> 0 then
       raise exception 'Rest schedule items require null sequence indexes and no prescriptions' using errcode = 'P0001';
     else
       v_rest_days := v_rest_days + 1;
     end if;
     v_exercise_indexes := '{}';
-    for v_exercise in select value from jsonb_array_elements(v_item -> 'cfg_exercises') loop
+    for v_exercise in select value from jsonb_array_elements(v_item -> 'exercises') loop
       if jsonb_typeof(v_exercise) <> 'object'
         or jsonb_typeof(v_exercise -> 'exercise_id') <> 'string'
         or (v_exercise ->> 'exercise_id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
@@ -447,7 +447,7 @@ begin
     returning id into v_workout_id;
     if v_schedule_index = 0 then v_first_schedule_item_id := v_workout_id; end if;
     if v_day_type = 'training' then
-      for v_exercise in select value from jsonb_array_elements(v_item -> 'cfg_exercises') loop
+      for v_exercise in select value from jsonb_array_elements(v_item -> 'exercises') loop
         insert into public.plan_workout_exercises (workout_id, exercise_id, order_index, target_sets, target_reps, target_weight)
         values (v_workout_id, (v_exercise ->> 'exercise_id')::uuid, (v_exercise ->> 'order_index')::integer, (v_exercise ->> 'target_sets')::integer, (v_exercise ->> 'target_reps')::integer, (v_exercise ->> 'target_weight')::numeric);
       end loop;

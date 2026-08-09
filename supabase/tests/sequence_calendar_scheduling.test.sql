@@ -1,11 +1,13 @@
 begin;
 
-select plan(19);
+select plan(20);
 
-insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+-- The fixture authenticates with request.jwt.claim.sub, so it deliberately avoids
+-- auth confirmation timestamp columns that differ between Supabase releases.
+insert into auth.users (id, instance_id, aud, role, email, encrypted_password, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values
-  ('00000000-0000-0000-0000-000000002101', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'reflow-owner@example.test', 'not-used', now(), '{}'::jsonb, '{}'::jsonb, now(), now()),
-  ('00000000-0000-0000-0000-000000002102', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'reflow-other@example.test', 'not-used', now(), '{}'::jsonb, '{}'::jsonb, now(), now());
+  ('00000000-0000-0000-0000-000000002101', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'reflow-owner@example.test', 'not-used', '{}'::jsonb, '{}'::jsonb, now(), now()),
+  ('00000000-0000-0000-0000-000000002102', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'reflow-other@example.test', 'not-used', '{}'::jsonb, '{}'::jsonb, now(), now());
 
 insert into public.plan_programs (id, user_id, name, template_type, schedule_mode, status, start_date, end_date)
 values
@@ -82,7 +84,8 @@ select public.reflow_program_schedule('{
   "effective_date": "2026-08-20",
   "schedule_items": [
     {"workout_id": "00000000-0000-0000-0000-000000002403", "scheduled_date": "2026-08-05", "schedule_index": 2, "sequence_index": 2, "day_type": "training", "status": "skipped", "skip_reason": "recovery_strategy"},
-    {"workout_id": "00000000-0000-0000-0000-000000002404", "scheduled_date": "2026-08-23", "schedule_index": 3, "sequence_index": 3, "day_type": "training", "status": "scheduled"}
+    {"workout_id": "00000000-0000-0000-0000-000000002404", "scheduled_date": "2026-08-23", "schedule_index": 4, "sequence_index": 3, "day_type": "training", "status": "scheduled"},
+    {"workout_id": "00000000-0000-0000-0000-000000002405", "scheduled_date": "2026-08-22", "schedule_index": 3, "sequence_index": null, "day_type": "rest", "status": "scheduled"}
   ]
 }'::jsonb);
 
@@ -100,6 +103,13 @@ select is(
   (select count(*) from public.plan_workouts where id = '00000000-0000-0000-0000-000000002404' and status = 'scheduled' and scheduled_date = '2026-08-23'),
   1::bigint,
   'pending scheduled items move to the domain-computed dates'
+);
+
+select is(
+  (select count(*) from public.plan_workouts where id = '00000000-0000-0000-0000-000000002404' and schedule_index = 4)
+  + (select count(*) from public.plan_workouts where id = '00000000-0000-0000-0000-000000002405' and schedule_index = 3),
+  2::bigint,
+  'swapped schedule indexes remain unique after reflow'
 );
 
 select is(
