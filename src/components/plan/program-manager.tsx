@@ -363,6 +363,7 @@ export function ProgramManager() {
         ])
       );
       setProgram(null);
+      setShowPlanSetup(false);
       setWorkouts([]);
       setWorkoutExercises([]);
       setScheduleEvents([]);
@@ -380,6 +381,7 @@ export function ProgramManager() {
     }
 
     setProgram(programData as ProgramRow);
+    setShowPlanSetup(false);
     const loadedWorkouts = await loadWorkouts(programData.id);
     if (!loadedWorkouts.ok) {
       return false;
@@ -1242,19 +1244,21 @@ export function ProgramManager() {
 
   return (
     <div className="space-y-5">
-      <PlanBuilder
-        customTemplateName={customTemplateName}
-        holidayPolicy={holidayPolicy}
-        holidays={holidayDates}
-        onHolidayPolicyChange={setHolidayPolicy}
-        onRuleChange={setScheduleRule}
-        rule={scheduleRule}
-        setCustomTemplateName={setCustomTemplateName}
-        setTemplateType={setTemplateType}
-        setUseCustomName={setUseCustomName}
-        templateType={templateType}
-        useCustomName={useCustomName}
-      />
+      {!program || showPlanSetup ? (
+        <PlanBuilder
+          customTemplateName={customTemplateName}
+          holidayPolicy={holidayPolicy}
+          holidays={holidayDates}
+          onHolidayPolicyChange={setHolidayPolicy}
+          onRuleChange={setScheduleRule}
+          rule={scheduleRule}
+          setCustomTemplateName={setCustomTemplateName}
+          setTemplateType={setTemplateType}
+          setUseCustomName={setUseCustomName}
+          templateType={templateType}
+          useCustomName={useCustomName}
+        />
+      ) : null}
 
       {(!program || showPlanSetup) ? (
         <PlanSetupForm
@@ -1311,28 +1315,34 @@ export function ProgramManager() {
             <Link className="pressable inline-flex rounded-md bg-action px-4 py-2 font-semibold text-white" href="/today">
               查看今日训练
             </Link>
-            <button
-              className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={status === "generating"}
-              onClick={() => {
-                if (!showPlanSetup) {
-                  setShowPlanSetup(true);
-                  return;
-                }
-                openRegenerationDialog();
-              }}
-              ref={regenerationTriggerRef}
-              type="button"
-            >
-              {showPlanSetup ? "预览并重新生成计划" : "调整周期并重新生成"}
-            </button>
-            <button
-              className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink"
-              onClick={() => setShowPlanSetup((current) => !current)}
-              type="button"
-            >
-              {showPlanSetup ? "收起计划参数" : "调整计划参数"}
-            </button>
+            {!showPlanSetup ? (
+              <button
+                className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink"
+                onClick={() => setShowPlanSetup(true)}
+                type="button"
+              >
+                修改计划
+              </button>
+            ) : (
+              <>
+                <button
+                  className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={status === "generating"}
+                  onClick={openRegenerationDialog}
+                  ref={regenerationTriggerRef}
+                  type="button"
+                >
+                  预览并重新生成计划
+                </button>
+                <button
+                  className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink"
+                  onClick={() => setShowPlanSetup(false)}
+                  type="button"
+                >
+                  取消修改
+                </button>
+              </>
+            )}
           </div>
         </section>
       )}

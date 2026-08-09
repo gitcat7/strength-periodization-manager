@@ -99,14 +99,56 @@ describe("ProgramManager cache hydration", () => {
     expect(view.textContent).not.toContain("TypeError: Load failed");
     expect(generateButton).not.toHaveProperty("disabled", true);
   });
+
+  it("hides plan generation controls for an active program until the user chooses to modify it", async () => {
+    supabaseClient = createSupabaseClient({
+      program: {
+        id: "active-program",
+        name: "推/拉/蹲 A-B 周期",
+        template_type: "push_pull_squat",
+        schedule_mode: "fixed_weekdays",
+        schedule_config: { weekdays: [1, 3, 5] },
+        custom_template_name: null,
+        status: "active",
+        start_date: "2026-08-01",
+        end_date: "2026-08-28"
+      }
+    });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("当前周期");
+    expect(container.textContent).toContain("修改计划");
+    expect(container.textContent).not.toContain("先选训练结构，再选安排方式");
+    expect(container.textContent).not.toContain("训练安排与主项最近工作组");
+
+    const modifyButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("修改计划"));
+    expect(modifyButton).toBeTruthy();
+    await act(async () => {
+      modifyButton?.click();
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain("先选训练结构，再选安排方式");
+    expect(container.textContent).toContain("训练安排与主项最近工作组");
+  });
 });
 
 function createSupabaseClient({
   pendingAuth = false,
-  profileUpsertError
+  profileUpsertError,
+  program = null
 }: {
   pendingAuth?: boolean;
   profileUpsertError?: Error;
+  program?: Record<string, unknown> | null;
 }) {
   const mainLifts = [
     { default_increment: 2.5, id: "squat", is_main_lift: true, name: "深蹲", slug: "squat" },
@@ -136,7 +178,7 @@ function createSupabaseClient({
       if (table === "usr_athlete_profiles") return profileTable;
       if (table === "cfg_exercises") return createQuery({ data: mainLifts, error: null });
       if (table === "log_recommendations") return createQuery({ data: [], error: null });
-      if (table === "plan_programs") return createQuery({ data: null, error: null });
+      if (table === "plan_programs") return createQuery({ data: program, error: null });
       if (table === "usr_lift_profiles") return Object.assign(createQuery({ data: [], error: null }), { upsert: () => Promise.resolve({ error: null }) });
       return createQuery({ data: [], error: null });
     }
