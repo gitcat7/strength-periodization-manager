@@ -11,12 +11,18 @@ async function read(relativePath) {
 describe("email OTP login contract", () => {
   it("keeps the form on the eight-digit OTP flow", async () => {
     const form = await read("src/components/auth/email-login-form.tsx");
+    const loginPage = await read("src/app/login/page.tsx");
+    const smoke = await read("scripts/smoke-check.mjs");
     expect(form).toContain("signInWithOtp");
     expect(form).toContain("verifyOtp");
     expect(form).toContain('type: "email"');
     expect(form).toContain("maxLength={8}");
     expect(form).not.toContain(["粘贴", "邮件", "链接登录"].join(""));
     expect(form).not.toContain("emailRedirect" + "To");
+    expect(loginPage).toContain("8 位验证码");
+    expect(loginPage).not.toContain("6 位验证码");
+    expect(smoke).toContain("8 位验证码");
+    expect(smoke).toContain("mustNotInclude");
   });
 
   it("documents the Supabase token template and removes link-only setup", async () => {

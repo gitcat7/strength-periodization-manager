@@ -20,7 +20,7 @@ export default function LoginPage() {
             <h1 className="text-2xl font-semibold">登录或注册</h1>
           </div>
           <p className="text-sm leading-6 text-muted">
-            输入邮箱获取 6 位验证码，在当前页面完成登录。
+            输入邮箱获取 8 位验证码，在当前页面完成登录。
           </p>
         </div>
 

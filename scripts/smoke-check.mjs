@@ -9,7 +9,12 @@ const baseUrl = (process.env.BASE_URL || "http://127.0.0.1:3000").replace(/\/$/,
 
 const checks = [
   { path: "/", type: "html", mustInclude: ["力训周期管家"] },
-  { path: "/login", type: "html", mustInclude: ["登录或注册", "获取验证码"] },
+  {
+    path: "/login",
+    type: "html",
+    mustInclude: ["登录或注册", "获取验证码", "8 位验证码"],
+    mustNotInclude: ["6 位验证码"]
+  },
   { path: "/diagnostics", type: "html", mustInclude: ["项目诊断"] },
   { path: "/onboarding", type: "redirect", location: "/plan" },
   { path: "/plan", type: "html", mustInclude: ["生成训练计划"] },
@@ -50,6 +55,11 @@ for (const check of checks) {
       for (const text of check.mustInclude ?? []) {
         if (!body.includes(text)) {
           failures.push(`${check.path} does not include "${text}"`);
+        }
+      }
+      for (const text of check.mustNotInclude ?? []) {
+        if (body.includes(text)) {
+          failures.push(`${check.path} must not include "${text}"`);
         }
       }
     }
