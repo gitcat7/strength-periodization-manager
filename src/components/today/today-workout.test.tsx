@@ -135,6 +135,21 @@ describe("TodayWorkout cache hydration", () => {
     expect(numberInputs[2]?.value).toBe("");
   });
 
+  it("keeps desktop weight controls wide enough for decimal kilograms", async () => {
+    writeCachedWorkout({ slug: "barbell_bench_press", targetWeight: 62.5 });
+    ({ container, root } = renderTodayWorkout());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const setRow = [...container.querySelectorAll("div")].find((element) =>
+      element.className.includes("sm:grid-cols-[2.5rem_minmax(8rem,1.2fr)_minmax(7rem,1fr)_minmax(6rem,1fr)_2.25rem]")
+    );
+    expect(setRow).not.toBeUndefined();
+    expect(container.textContent).toContain("62.5");
+  });
+
   it("keeps the no-RPE completion exception for cardio", async () => {
     writeCachedWorkout({ slug: "cardio_zone2", targetWeight: 0 });
     ({ container, root } = renderTodayWorkout());

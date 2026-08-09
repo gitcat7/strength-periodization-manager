@@ -1455,7 +1455,7 @@ export function TodayWorkout() {
                   <div className="mt-4 space-y-2">
                     {exerciseLogs.map((log) => (
                       <div
-                        className={`grid grid-cols-[2.25rem_1fr_1fr_2.25rem] items-center gap-2 rounded-lg px-2 py-2 text-sm transition sm:grid-cols-[2.5rem_1fr_1fr_1fr_2.25rem] ${
+                        className={`grid grid-cols-[2.25rem_1fr_1fr_2.25rem] items-center gap-2 rounded-lg px-2 py-2 text-sm transition sm:grid-cols-[2.5rem_minmax(8rem,1.2fr)_minmax(7rem,1fr)_minmax(6rem,1fr)_2.25rem] ${
                           log.completed ? "bg-action/10 ring-1 ring-action/20" : "bg-field"
                         }`}
                         key={`${exercise.id}-${log.set_index}`}
@@ -1746,9 +1746,9 @@ function WeightInput({
   }
 
   return (
-    <label className="block">
+    <label className="block min-w-0">
       <span className="mb-1 block text-[11px] text-muted">{label}</span>
-      <div className="grid h-9 grid-cols-[2rem_1fr_2rem] overflow-hidden rounded-md border border-line bg-white focus-within:border-action">
+      <div className="grid h-9 min-w-0 grid-cols-[2rem_minmax(0,1fr)_2rem] overflow-hidden rounded-md border border-line bg-white focus-within:border-action">
         <button
           aria-label={`${label}减少 ${increment}kg`}
           className="grid place-items-center border-r border-line text-muted disabled:opacity-40"
