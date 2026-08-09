@@ -90,28 +90,27 @@ SQL Editor -> New query
 
 该 SQL 会创建 MVP 核心表、插入基础动作，并开启 RLS。不要在前端环境变量中使用 service role key。
 
-## Supabase Auth 回调地址
+## Supabase Auth 邮箱验证码配置
 
-为了让邮箱登录链接能回到本地开发页面，请在 Supabase Dashboard 中检查：
+邮箱登录使用当前页面输入 6 位验证码，不需要登录回调地址。请在 Supabase Dashboard 中检查：
 
 ```text
 Authentication -> URL Configuration
 ```
 
-开发期建议配置：
+开发期建议配置 Site URL：
 
 ```text
 Site URL: http://127.0.0.1:3000
-Redirect URLs: http://127.0.0.1:3000/**
 ```
 
-当前登录邮件会回跳到：
+在 `Authentication -> Email Templates` 的登录邮件模板中保留验证码变量：
 
 ```text
-http://127.0.0.1:3000/auth/callback?next=/diagnostics
+你的登录验证码是：{{ .Token }}
 ```
 
-后续部署到 Vercel 后，再把 Vercel 默认域名也加入 Redirect URLs。
+不要只配置确认链接模板；验证码邮件必须实际显示 `{{ .Token }}`。同时确认 Auth 邮件限流允许至少 60 秒后再次发送。
 
 ## 配置验收方式
 

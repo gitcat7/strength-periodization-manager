@@ -6,7 +6,7 @@
 
 本地 MVP 已具备：
 
-- 邮箱登录和登录回调。
+- 邮箱 6 位验证码登录。
 - 训练画像。
 - 推/拉/蹲 A/B 训练计划生成。
 - 今日训练记录、草稿保存、完成训练。
@@ -87,7 +87,7 @@ SUPABASE_SERVICE_ROLE_KEY=
 
 8. 点击 Deploy。
 
-## 4. Supabase Auth 线上回调
+## 4. Supabase Auth 线上验证码配置
 
 拿到 Vercel 默认域名后，到 Supabase Dashboard：
 
@@ -95,25 +95,19 @@ SUPABASE_SERVICE_ROLE_KEY=
 Authentication -> URL Configuration
 ```
 
-设置：
+设置 Site URL：
 
 ```text
 Site URL: https://你的-vercel-默认域名
 ```
 
-Redirect URLs 至少包含：
+在 `Authentication -> Email Templates` 的登录邮件模板中确认包含：
 
 ```text
-http://127.0.0.1:3000/auth/callback
-http://localhost:3000/auth/callback
-https://你的-vercel-默认域名/auth/callback
+你的登录验证码是：{{ .Token }}
 ```
 
-如果 Supabase 页面支持通配符，也可以额外加入：
-
-```text
-https://你的-vercel-默认域名/**
-```
+不依赖旧邮件链接回调；确认 Auth 邮件限流至少允许 60 秒后再次发送。
 
 ## 5. 线上验收顺序
 

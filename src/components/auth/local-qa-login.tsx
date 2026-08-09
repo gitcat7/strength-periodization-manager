@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { CircleAlert, Loader2 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { getLoginNext } from "@/lib/supabase/magic-link";
+import { getLoginNext } from "@/lib/supabase/auth-redirect";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type QaSessionResponse = {

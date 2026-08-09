@@ -44,7 +44,7 @@ Vercel 默认域名：
 部署版本：
 ```
 
-## 3. Supabase Auth 配置
+## 3. Supabase Auth 邮箱验证码配置
 
 在 Supabase 项目后台配置：
 
@@ -54,20 +54,20 @@ Site URL：
 https://你的-vercel-默认域名
 ```
 
-Redirect URLs：
+登录邮件模板：
 
 ```text
-http://127.0.0.1:3000/auth/callback
-http://localhost:3000/auth/callback
-https://你的-vercel-默认域名/auth/callback
+你的登录验证码是：{{ .Token }}
 ```
+
+不再配置或依赖旧的邮件链接登录回调；验证码必须在登录页当前会话内输入。确认 Auth 邮件限流至少允许 60 秒后再次发送。
 
 验收：
 
 - 本地邮箱登录可完成。
 - 线上邮箱登录可完成。
 - 登录后刷新页面仍保持登录态。
-- 邮件链接过期时页面显示明确错误，不白屏。
+- 错误或过期验证码保留在验证码阶段并显示明确错误。
 
 ## 4. Supabase 数据库
 
@@ -137,7 +137,7 @@ pnpm vitest run scripts/sequence-calendar-smoke.test.mjs
 - 若缺少上述 QA 凭据，认证冒烟为**未完成的发布硬门禁**，必须记录缺失项；不得以跳过测试或使用管理员权限代替通过。
 - 执行后按 `docs/12_database_release_runbook.md` 的排程验证 SQL 检查 `schedule_revision`、跳过原因和 RLS，再记录执行时间、部署版本和 QA 账号别名（不记录密码）。
 
-## 5. 邮件发送
+## 5. 邮箱验证码邮件
 
 MVP 内测早期可以先用 Supabase 默认邮件，但如果继续出现 `email rate limit exceeded`，必须配置自定义 SMTP。
 
@@ -149,9 +149,9 @@ MVP 内测早期可以先用 Supabase 默认邮件，但如果继续出现 `emai
 
 验收：
 
-- 连续 3 个测试邮箱能收到登录邮件。
-- 邮件链接能跳回线上 `/auth/callback`。
-- Gmail 复制跳转链接后，粘贴登录入口也能完成登录。
+- 测试邮箱能收到包含 6 位 `{{ .Token }}` 的登录邮件。
+- 登录页发送成功后进入验证码阶段，验证码错误不会丢失邮箱。
+- 60 秒内不能重复发送，倒计时结束后可重新发送。
 
 ## 6. 功能冒烟测试
 

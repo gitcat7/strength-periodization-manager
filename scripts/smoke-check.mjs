@@ -9,7 +9,7 @@ const baseUrl = (process.env.BASE_URL || "http://127.0.0.1:3000").replace(/\/$/,
 
 const checks = [
   { path: "/", type: "html", mustInclude: ["力训周期管家"] },
-  { path: "/login", type: "html", mustInclude: ["登录或注册", "发送登录链接"] },
+  { path: "/login", type: "html", mustInclude: ["登录或注册", "获取验证码"] },
   { path: "/diagnostics", type: "html", mustInclude: ["项目诊断"] },
   { path: "/onboarding", type: "redirect", location: "/plan" },
   { path: "/plan", type: "html", mustInclude: ["生成训练计划"] },
