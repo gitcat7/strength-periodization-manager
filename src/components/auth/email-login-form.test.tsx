@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 describe("EmailLoginForm", () => {
-  it("sends an email OTP and reveals the six-digit code step", async () => {
+  it("sends an email OTP and reveals the eight-digit code step", async () => {
     await renderForm();
     const emailInput = getInput("邮箱");
     setInput(emailInput, "athlete@example.com");

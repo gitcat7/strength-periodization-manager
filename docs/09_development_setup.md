@@ -92,7 +92,7 @@ SQL Editor -> New query
 
 ## Supabase Auth 邮箱验证码配置
 
-邮箱登录使用当前页面输入 6 位验证码，不需要登录回调地址。请在 Supabase Dashboard 中检查：
+邮箱登录使用当前页面输入 8 位验证码，不需要登录回调地址。请在 Supabase Dashboard 中检查：
 
 ```text
 Authentication -> URL Configuration

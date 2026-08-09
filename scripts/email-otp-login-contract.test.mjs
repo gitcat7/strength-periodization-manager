@@ -28,6 +28,8 @@ describe("email OTP login contract", () => {
     const combined = docs.join("\n");
     const legacyCallback = ["/auth", "callback"].join("/");
     expect(combined).toContain("{{ .Token }}");
+    expect(combined).toContain("8 位");
+    expect(combined).not.toContain("6 位");
     expect(combined).not.toContain("Gm" + "ail 复制跳转链接");
     expect(combined).not.toContain(legacyCallback);
     expect(combined).not.toContain("邮件链接能跳回");
