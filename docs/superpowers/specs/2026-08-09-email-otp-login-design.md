@@ -27,7 +27,7 @@
 ### 移除内容
 
 - 删除粘贴链接输入框、粘贴链接按钮和“外部浏览器/Gmail 跳转链接”说明。
-- 不删除 `/auth/callback` 和旧的 magic-link 解析代码，以便已经发出的旧链接仍可完成登录；它们不再作为登录页入口。
+- 不保留旧邮件链接登录兼容；移除登录页不再需要的 callback 跳转和 magic-link 解析代码，避免产品继续暴露两套登录方式。
 
 ## Supabase 配置边界
 
@@ -39,7 +39,8 @@
 
 - 修改 `src/components/auth/email-login-form.tsx`：实现两阶段邮箱 OTP UI，移除粘贴链接逻辑。
 - 新增或修改 `src/components/auth/email-login-form.test.tsx`：覆盖邮箱校验、发送成功、60 秒重发限制、验证码验证、错误提示和修改邮箱。
-- 修改 `src/lib/supabase/magic-link.test.ts`（如需要）：确保 `next` 路径行为保持不变。
+- 删除或替换 `src/lib/supabase/magic-link.ts` 及其测试：不再保留旧链接解析和 callback 登录路径；保留与验证码流程无关的安全 `next` 路径校验。
+- 删除或改造 `src/components/auth/auth-callback-handler.tsx` 与 `/auth/callback` 页面：不再作为登录入口。
 - 修改 `docs/11_mvp_release_checklist.md` 与 `docs/13_vercel_deployment_handoff.md`：将登录验收从粘贴链接改为邮箱验证码，并记录邮件模板配置。
 
 ## 验收标准
@@ -48,6 +49,6 @@
 2. 输入合法邮箱后可发送验证码；无效邮箱不会调用发送接口。
 3. 验证码必须为 6 位数字；验证成功后进入原有登录后的目标页面。
 4. 发送频率限制和验证码错误不会导致页面丢失邮箱或进入错误状态。
-5. 现有 callback、`next` 安全校验和未登录路由行为不回归。
+5. 不再提供旧邮件链接登录入口；验证码登录的 `next` 安全校验和未登录路由行为不回归。
 6. 不修改数据库结构，不改变现有用户数据归属。
 7. Supabase 邮件模板配置完成后，真实邮箱验证码登录可完成一次端到端验证。
