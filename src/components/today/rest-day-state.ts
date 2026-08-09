@@ -16,6 +16,7 @@ export type TrainingScheduleItem = {
 
 export type TodayScheduleState =
   | { kind: "training"; workout: TrainingScheduleItem }
+  | { kind: "upcoming"; workout: TrainingScheduleItem; daysUntil: number }
   | { kind: "rest"; restItem: RestScheduleItem; nextTraining: TrainingScheduleItem | null }
   | { kind: "paused"; resumeDate: string | null }
   | { kind: "adjustment_required"; eventId: string }
@@ -44,8 +45,21 @@ export function getTodayScheduleState(input: {
   );
 
   if (restItem) return { kind: "rest", restItem, nextTraining: nextTraining ?? null };
+  if (nextTraining?.scheduledDate && nextTraining.scheduledDate > input.now) {
+    return {
+      kind: "upcoming",
+      workout: nextTraining,
+      daysUntil: daysBetweenIsoDates(input.now, nextTraining.scheduledDate)
+    };
+  }
   if (nextTraining) return { kind: "training", workout: nextTraining };
   return { kind: "empty" };
+}
+
+function daysBetweenIsoDates(start: string, end: string) {
+  const startMs = Date.parse(`${start}T00:00:00Z`);
+  const endMs = Date.parse(`${end}T00:00:00Z`);
+  return Math.max(0, Math.round((endMs - startMs) / 86400000));
 }
 
 export function canCompleteRestDay(item: { dayType: string; status: string }): boolean {

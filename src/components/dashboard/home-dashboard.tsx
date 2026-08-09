@@ -17,7 +17,7 @@ import {
   Trophy
 } from "lucide-react";
 import { getDaysUntilTarget } from "@/domain/pr-planner";
-import { getNextWorkoutState } from "@/domain/next-workout";
+import { getNextWorkoutActionLabel, getNextWorkoutState } from "@/domain/next-workout";
 import { selectNextProgramWorkout } from "@/domain/next-program-workout";
 import { formatPrescription, getWorkoutMeta } from "@/domain/training-format";
 import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
@@ -490,7 +490,13 @@ export function HomeDashboard() {
               </div>
             </div>
             <Link className="pressable inline-flex items-center gap-1 rounded-md bg-action px-3 py-2 text-sm font-semibold text-white" href={programPause ? "/plan" : nextWorkout ? "/today" : "/single-workout"}>
-              {programPause ? "前往计划页恢复" : nextWorkout ? "继续今日计划" : "快速记录自由训练"}
+              {programPause
+                ? "前往计划页恢复"
+                : nextWorkout
+                  ? nextWorkoutState
+                    ? getNextWorkoutActionLabel(nextWorkoutState)
+                    : "查看下一节训练"
+                  : "快速记录自由训练"}
               <ArrowRight size={16} />
             </Link>
           </div>

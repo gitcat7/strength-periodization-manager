@@ -12,3 +12,9 @@ export function getNextWorkoutState(scheduledDate: string, now = new Date()): Ne
   if (dayDifference === 0) return { kind: "today" };
   return { kind: "upcoming", daysUntil: dayDifference };
 }
+
+export function getNextWorkoutActionLabel(state: NextWorkoutState) {
+  if (state.kind === "today") return "继续今日计划";
+  if (state.kind === "overdue") return "继续未完成训练";
+  return "查看下一节训练";
+}

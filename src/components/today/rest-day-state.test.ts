@@ -94,6 +94,29 @@ describe("getTodayScheduleState", () => {
       })
     ).toEqual({ kind: "training", workout: training });
   });
+
+  it("does not turn a future next session into today's executable workout", () => {
+    expect(
+      getTodayScheduleState({
+        now: "2026-07-14",
+        restItems: [],
+        trainingItems: [
+          {
+            dayType: "training",
+            id: "train-future",
+            name: "拉 B · 容量",
+            scheduledDate: "2026-07-16",
+            sequenceIndex: 1,
+            status: "scheduled"
+          }
+        ]
+      })
+    ).toEqual({
+      kind: "upcoming",
+      workout: expect.objectContaining({ id: "train-future" }),
+      daysUntil: 2
+    });
+  });
 });
 
 describe("canCompleteRestDay", () => {
@@ -127,7 +150,7 @@ describe("resolveTodayScheduleState", () => {
           }
         ])
       })
-    ).resolves.toMatchObject({ kind: "training", workout: { id: "train-1" } });
+    ).resolves.toMatchObject({ kind: "upcoming", workout: { id: "train-1" }, daysUntil: 2 });
 
     expect(onRestQueryError).toHaveBeenCalledWith(restQueryError);
   });

@@ -521,6 +521,30 @@ export function TodayWorkout() {
           return;
         }
 
+        if (scheduleState.kind === "upcoming") {
+          setScheduleBlock(null);
+          setRestItem(null);
+          setNextTraining(scheduleState.workout);
+          setWorkout(null);
+          setExercises([]);
+          setSetLogs({});
+          setCoachRecommendations([]);
+          setLastCompletedWorkout(null);
+          writeClientCache<TodayCache>(todayCacheKey, {
+            coachRecommendations: [],
+            exercises: [],
+            lastCompletedWorkout: null,
+            nextTraining: scheduleState.workout,
+            restItem: null,
+            setLogs: {},
+            userId: user.id,
+            workout: null
+          });
+          setScheduleResolved(true);
+          setStatus("ready");
+          return;
+        }
+
         const workoutData: WorkoutRow = {
           id: scheduleState.workout.id,
           name: scheduleState.workout.name,
@@ -591,6 +615,14 @@ export function TodayWorkout() {
         setRestItem(cachedRestItem);
         setNextTraining(cached.nextTraining ?? null);
         if (cachedRestItem) {
+          setWorkout(null);
+          setExercises([]);
+          setSetLogs({});
+          setLastCompletedWorkout(null);
+          setCoachRecommendations([]);
+        } else if (cached.workout?.scheduled_date && cached.workout.scheduled_date > formatDate(new Date())) {
+          // A cached future workout must not briefly become today's executable session
+          // while the authoritative schedule query is still loading.
           setWorkout(null);
           setExercises([]);
           setSetLogs({});
@@ -1205,6 +1237,27 @@ export function TodayWorkout() {
           </p>
         ) : null}
       </div>
+    );
+  }
+
+  if (!workout && nextTraining?.scheduledDate && nextTraining.scheduledDate > formatDate(new Date())) {
+    return (
+      <section className="rounded-xl border border-line p-4">
+        <div className="mb-4 flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
+            <CalendarDays size={20} />
+          </span>
+          <div>
+            <h2 className="font-semibold">下一次训练尚未到日期</h2>
+            <p className="text-sm text-muted">
+              计划安排在 {nextTraining.scheduledDate}，不会自动提前到今天；今天不再重复安排周期训练。
+            </p>
+          </div>
+        </div>
+        <Link className="inline-flex h-11 items-center justify-center rounded-lg border border-action px-4 font-semibold text-action" href="/single-workout">
+          记录自由训练
+        </Link>
+      </section>
     );
   }
 

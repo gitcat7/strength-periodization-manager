@@ -102,6 +102,42 @@ describe("TodayWorkout cache hydration", () => {
     expect(container.textContent).not.toContain("还没有可执行的训练计划");
   });
 
+  it("does not open a future planned session as today's workout", () => {
+    writeClientCache("strength-training-cache:today", {
+      coachRecommendations: [],
+      exercises: [],
+      lastCompletedWorkout: null,
+      nextTraining: {
+        dayType: "training",
+        id: "future-training",
+        name: "拉 B · 容量",
+        scheduledDate: "2999-01-01",
+        sequenceIndex: 2,
+        status: "scheduled"
+      },
+      restItem: null,
+      setLogs: {},
+      userId: "user-1",
+      workout: {
+        id: "future-training",
+        name: "拉 B · 容量",
+        scheduled_date: "2999-01-01",
+        sequence_index: 2,
+        status: "scheduled"
+      }
+    });
+
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    act(() => root?.render(<TodayWorkout />));
+
+    expect(container.textContent).toContain("下一次训练尚未到日期");
+    expect(container.textContent).toContain("不会自动提前到今天");
+    expect(container.textContent).not.toContain("保存并完成训练");
+  });
+
   it("requires a real strength RPE before a set can be marked complete", async () => {
     writeCachedWorkout({ slug: "barbell_bench_press" });
     ({ container, root } = renderTodayWorkout());

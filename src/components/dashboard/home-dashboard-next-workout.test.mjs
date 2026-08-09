@@ -14,7 +14,7 @@ describe("home dashboard next workout source contract", () => {
     const source = await readFile(sourcePath, "utf8");
     expect(source).toContain('href="/plan"');
     expect(source).toContain('href="/single-workout"');
-    expect(source).toContain("继续今日计划");
+    expect(source).toContain("getNextWorkoutActionLabel");
     expect(source).toContain("快速记录自由训练");
     expect(source).toContain("创建周期计划");
     expect(source).not.toContain("训练画像");
