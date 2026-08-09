@@ -919,6 +919,7 @@ export function TodayWorkout() {
       setWorkout({ ...workout, status: "completed" });
       setValidationIssues([]);
       setWorkoutSummary(summary);
+      setCompletionPreview(null);
       await trackEvent({
         eventName: "workout_completed",
         properties: {

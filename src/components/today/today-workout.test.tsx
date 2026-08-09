@@ -16,6 +16,24 @@ vi.mock("@/lib/supabase/browser", () => ({
   createBrowserSupabaseClient: () => ({
     auth: {
       getSession: () => new Promise(() => {})
+    },
+    from: () => {
+      const result = { data: null, error: null };
+      const builder = {
+        select: () => builder,
+        eq: () => builder,
+        in: () => builder,
+        lt: () => builder,
+        order: () => builder,
+        limit: () => builder,
+        maybeSingle: () => Promise.resolve(result),
+        upsert: () => Promise.resolve(result),
+        update: () => builder,
+        insert: () => Promise.resolve(result),
+        then: (resolve: (value: typeof result) => unknown, reject?: (reason: unknown) => unknown) =>
+          Promise.resolve(result).then(resolve, reject)
+      };
+      return builder;
     }
   })
 }));
@@ -118,6 +136,33 @@ describe("TodayWorkout cache hydration", () => {
     expect(completion?.checked).toBe(true);
   });
 
+  it("closes the completion preview after a successful confirmation", async () => {
+    writeCachedWorkout({ slug: "barbell_bench_press" });
+    ({ container, root } = renderTodayWorkout());
+    const view = container!;
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const numberInputs = view.querySelectorAll<HTMLInputElement>('input[type="number"]');
+    act(() => setInputValue(numberInputs[2]!, "7"));
+    act(() => view.querySelector<HTMLInputElement>('input[aria-label="第 1 组完成"]')?.click());
+
+    const completeButton = [...view.querySelectorAll("button")].find((button) => button.textContent === "保存并完成训练");
+    act(() => completeButton?.click());
+    expect(view.querySelector('[role="dialog"]')).not.toBeNull();
+
+    const confirmButton = [...view.querySelectorAll("button")].find((button) => button.textContent === "确认完成");
+    await act(async () => {
+      confirmButton?.click();
+      await Promise.resolve();
+    });
+
+    expect(view.querySelector('[role="dialog"]')).toBeNull();
+    expect(view.textContent).toContain("本次训练摘要");
+  });
+
   it("fills planned strength values without fabricating RPE or completion", async () => {
     writeCachedWorkout({ slug: "barbell_bench_press" });
     ({ container, root } = renderTodayWorkout());
@@ -143,11 +188,11 @@ describe("TodayWorkout cache hydration", () => {
       await Promise.resolve();
     });
 
-    const setRow = [...container.querySelectorAll("div")].find((element) =>
+    const setRow = [...container!.querySelectorAll("div")].find((element) =>
       element.className.includes("sm:grid-cols-[2.5rem_minmax(8rem,1.2fr)_minmax(7rem,1fr)_minmax(6rem,1fr)_2.25rem]")
     );
     expect(setRow).not.toBeUndefined();
-    expect(container.textContent).toContain("62.5");
+    expect(container!.textContent).toContain("62.5");
   });
 
   it("keeps the no-RPE completion exception for cardio", async () => {
