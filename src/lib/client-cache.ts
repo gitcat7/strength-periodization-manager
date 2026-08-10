@@ -126,6 +126,13 @@ export function clearWorkoutDrafts(workoutIds: string[]): boolean {
   }
 }
 
+/** Clear all plan/today data that can contain a stale prescription after an atomic edit. */
+export function clearWorkoutPrescriptionCaches(workoutId: string): boolean {
+  clearTrainingDataCaches();
+  clearTodayAndPlanCaches();
+  return clearWorkoutDrafts([workoutId]);
+}
+
 export function clearWorkoutDraftsByExerciseIds(workoutExerciseIds: string[]): boolean {
   if (workoutExerciseIds.length === 0) return true;
   if (typeof window === "undefined") return false;

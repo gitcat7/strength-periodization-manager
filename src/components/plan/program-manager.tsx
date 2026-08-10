@@ -65,6 +65,7 @@ import {
 import { ProgramRegenerationDialog } from "./program-regeneration-dialog";
 import { CurrentProgramOverview } from "./current-program-overview";
 import { PlanScheduleOutline } from "./plan-schedule-outline";
+import { WorkoutPrescriptionEditor } from "./workout-prescription-editor";
 import { resolveProgramRegenerationOutcome } from "./program-regeneration-outcome";
 import {
   buildConfirmationPayload,
@@ -96,6 +97,8 @@ type WorkoutRow = {
   cycle_position?: number | null;
   name: string;
   status: string;
+  program_id?: string | null;
+  prescription_revision?: number | null;
 };
 
 type ScheduleEventRow = {
@@ -118,13 +121,16 @@ type AdjustmentDialogState = {
 type WorkoutExerciseRow = {
   id: string;
   workout_id: string;
+  exercise_id: string;
   order_index: number;
   target_sets: number;
   target_reps: number;
   target_weight: number;
+  exercise_provider?: string | null;
   exercises: {
     name: string;
     slug: string;
+    training_direction?: "push" | "pull" | "squat" | "cardio" | null;
   } | null;
 };
 
@@ -154,6 +160,7 @@ type ExerciseRow = {
   name: string;
   default_increment: number;
   is_main_lift?: boolean;
+  training_direction?: "push" | "pull" | "squat" | "cardio" | null;
 };
 
 type LiftProfileRow = {
@@ -219,6 +226,7 @@ export function ProgramManager() {
   const [useCustomName, setUseCustomName] = useState(false);
   const [mainLifts, setMainLifts] = useState<ExerciseRow[]>([]);
   const [accessoryExercises, setAccessoryExercises] = useState<ExerciseRow[]>([]);
+  const [prescriptionExercises, setPrescriptionExercises] = useState<ExerciseRow[]>([]);
   const [planSetup, setPlanSetup] = useState<PlanSetupInput>(defaultPlanSetup);
   const [planSetupErrors, setPlanSetupErrors] = useState<Record<string, string>>({});
   const [showPlanSetup, setShowPlanSetup] = useState(false);
@@ -447,7 +455,7 @@ export function ProgramManager() {
         .maybeSingle(),
       supabase
         .from(DB_TABLE.exercises)
-        .select("id,slug,name,default_increment,is_main_lift")
+        .select("id,slug,name,default_increment,is_main_lift,training_direction")
         .order("created_at", { ascending: true })
     ]);
 
@@ -457,6 +465,7 @@ export function ProgramManager() {
     }
 
     const allExercises = (mainLiftsResult.data ?? []) as ExerciseRow[];
+    setPrescriptionExercises(allExercises);
     const loadedMainLifts = allExercises.filter((exercise) => exercise.is_main_lift);
     setMainLifts(loadedMainLifts);
     setAccessoryExercises(allExercises.filter((exercise) => !exercise.is_main_lift && isCalibratableAccessory(exercise.slug)));
@@ -679,7 +688,7 @@ export function ProgramManager() {
   > {
     const supabase = createBrowserSupabaseClient();
     const { data: workoutData, error: workoutError, usedLegacySchema } = await loadWorkoutsWithDayTypeFallback(
-      () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,schedule_index,day_type,cycle_index,cycle_position,name,status").eq("program_id", programId).order("schedule_index", { ascending: true }),
+      () => supabase.from(DB_TABLE.workouts).select("id,program_id,scheduled_date,sequence_index,schedule_index,day_type,cycle_index,cycle_position,name,status,prescription_revision").eq("program_id", programId).order("schedule_index", { ascending: true }),
       () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,name,status").eq("program_id", programId).order("sequence_index", { ascending: true })
     );
 
@@ -706,7 +715,7 @@ export function ProgramManager() {
 
     const { data: exerciseData, error: exerciseError } = await supabase
       .from(DB_TABLE.workoutExercises)
-      .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
+      .select("id,workout_id,exercise_id,exercise_provider,order_index,target_sets,target_reps,target_weight,exercises(name,slug,training_direction)")
       .in("workout_id", workoutIds)
       .order("order_index", { ascending: true });
 
@@ -1763,6 +1772,33 @@ export function ProgramManager() {
                     </div>
                   ))}
                 </div>
+              ) : null}
+              {!isRestDay ? (
+                <WorkoutPrescriptionEditor
+                  catalog={prescriptionExercises.map((exercise) => ({
+                    id: exercise.id,
+                    slug: exercise.slug,
+                    name: exercise.name,
+                    training_direction: exercise.training_direction
+                  }))}
+                  exercises={(workoutExercisesByWorkoutId[workout.id] ?? []).map((exercise) => ({
+                    ...exercise,
+                    exercise_id: exercise.exercise_id,
+                    exercises: exercise.exercises
+                  }))}
+                  onSaved={async () => {
+                    await loadCurrentProgram({ requireActiveProgram: true, showLoading: false });
+                    setMessage("本日训练处方已更新，今日训练将使用新安排。 ");
+                  }}
+                  workout={{
+                    day_type: workout.day_type,
+                    id: workout.id,
+                    name: workout.name,
+                    program_id: program?.id,
+                    prescription_revision: workout.prescription_revision,
+                    status: workout.status
+                  }}
+                />
               ) : null}
             </article>
             );

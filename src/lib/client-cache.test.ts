@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   clearTodayAndPlanCaches,
   clearProgramRegenerationCaches,
+  clearWorkoutPrescriptionCaches,
   clearWorkoutDrafts,
   clearWorkoutDraftsByExerciseIds
 } from "./client-cache";
@@ -127,6 +128,19 @@ describe("clearProgramRegenerationCaches", () => {
 });
 
 describe("clearTodayAndPlanCaches", () => {
+  it("clears plan/today caches and the edited workout draft together", () => {
+    const localStorage = createMockStorage();
+    setMockLocalStorage(localStorage);
+    localStorage.setItem("strength-training-cache:plan", "stale");
+    localStorage.setItem("strength-training-cache:today", "stale");
+    localStorage.setItem("strength-training-draft:workout-1", "stale");
+
+    expect(clearWorkoutPrescriptionCaches("workout-1")).toBe(true);
+    expect(localStorage.getItem("strength-training-cache:plan")).toBeNull();
+    expect(localStorage.getItem("strength-training-cache:today")).toBeNull();
+    expect(localStorage.getItem("strength-training-draft:workout-1")).toBeNull();
+  });
+
   it("clears only today and plan caches in local and session storage", () => {
     const localStorage = createMockStorage();
     const sessionStorage = createMockStorage();
