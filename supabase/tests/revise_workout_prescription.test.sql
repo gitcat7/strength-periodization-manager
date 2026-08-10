@@ -1,6 +1,6 @@
 begin;
 
-select plan(28);
+select plan(31);
 
 select has_column('public', 'plan_workouts', 'prescription_revision', 'workout prescription revision exists');
 select has_table('public', 'ops_workout_revision_events', 'workout revision audit table exists');
@@ -17,7 +17,8 @@ insert into public.cfg_exercises (id, slug, name, category, default_increment, i
 values
   ('00000000-0000-0000-0000-000000003201', 'test-squat', '测试深蹲', 'strength', 2.5, true, 'squat', 'squat', true),
   ('00000000-0000-0000-0000-000000003202', 'test-front-squat', '测试前蹲', 'strength', 2.5, true, 'squat', 'squat', true),
-  ('00000000-0000-0000-0000-000000003203', 'test-bench', '测试卧推', 'strength', 2.5, true, 'push', 'horizontal_push', true)
+  ('00000000-0000-0000-0000-000000003203', 'test-bench', '测试卧推', 'strength', 2.5, true, 'push', 'horizontal_push', true),
+  ('00000000-0000-0000-0000-000000003204', 'test-leg-press', '测试腿举', 'strength', 2.5, false, 'squat', 'knee_dominant', true)
 on conflict (id) do nothing;
 
 insert into public.plan_programs (id, user_id, name, template_type, schedule_mode, status, start_date, end_date)
@@ -79,16 +80,22 @@ select public.revise_workout_prescription('00000000-0000-0000-0000-000000003401'
 select is((select doc ->> 'prescription_revision' from prescription_result), '2', 'successful edit increments revision');
 select is((select count(*) from public.plan_workout_exercises where workout_id = '00000000-0000-0000-0000-000000003401' and exercise_id = '00000000-0000-0000-0000-000000003202' and order_index = 1 and target_sets = 4 and target_reps = 6 and target_weight = 105), 1::bigint, 'successful edit replaces local prescription');
 
+insert into prescription_result
+select public.revise_workout_prescription('00000000-0000-0000-0000-000000003401', 2, '{"exercises":[{"exercise_id":"00000000-0000-0000-0000-000000003204","order_index":1,"target_sets":2,"target_reps":10,"target_weight":80},{"exercise_id":"00000000-0000-0000-0000-000000003202","order_index":2,"target_sets":4,"target_reps":6,"target_weight":105}]}'::jsonb);
+select is((select doc ->> 'prescription_revision' from prescription_result order by doc ->> 'prescription_revision' desc limit 1), '3', 'second edit increments revision once');
+select is((select count(*) from public.plan_workout_exercises where workout_id = '00000000-0000-0000-0000-000000003401'), 2::bigint, 'second edit adds and removes in one replacement');
+select is((select count(*) from public.plan_workout_exercises where workout_id = '00000000-0000-0000-0000-000000003401' and exercise_id = '00000000-0000-0000-0000-000000003204' and order_index = 1), 1::bigint, 'second edit preserves requested order');
+
 reset role;
-select is((select count(*) from public.ops_workout_revision_events where workout_id = '00000000-0000-0000-0000-000000003401'), 1::bigint, 'successful edit writes one audit event');
-select is((select count(*) from public.plan_workouts where id = '00000000-0000-0000-0000-000000003401' and prescription_revision = 2), 1::bigint, 'stored revision is incremented');
+select is((select count(*) from public.ops_workout_revision_events where workout_id = '00000000-0000-0000-0000-000000003401'), 2::bigint, 'each successful edit writes one audit event');
+select is((select count(*) from public.plan_workouts where id = '00000000-0000-0000-0000-000000003401' and prescription_revision = 3), 1::bigint, 'stored revision is incremented');
 
 set local role authenticated;
 select throws_ok($$select public.revise_workout_prescription('00000000-0000-0000-0000-000000003401', 1, '{"exercises":[{"exercise_id":"00000000-0000-0000-0000-000000003201","order_index":1,"target_sets":3,"target_reps":5,"target_weight":100}]}'::jsonb)$$, 'P0001', 'Workout prescription revision is stale', 'old revision cannot overwrite new prescription');
 
-select throws_ok($$select public.revise_workout_prescription('00000000-0000-0000-0000-000000003401', 2, '{"exercises":[{"exercise_id":"00000000-0000-0000-0000-000000003202","order_index":1,"target_sets":4,"target_reps":6,"target_weight":105},{"exercise_id":"00000000-0000-0000-0000-000000003203","order_index":2,"target_sets":4,"target_reps":6,"target_weight":105}]}'::jsonb)$$, 'P0001', 'Workout exercise direction is incompatible', 'invalid second item rolls back the complete edit');
-select is((select prescription_revision from public.plan_workouts where id = '00000000-0000-0000-0000-000000003401'), 2, 'failed edit leaves revision unchanged');
-select is((select count(*) from public.plan_workout_exercises where workout_id = '00000000-0000-0000-0000-000000003401'), 1::bigint, 'failed edit leaves rows unchanged');
+select throws_ok($$select public.revise_workout_prescription('00000000-0000-0000-0000-000000003401', 3, '{"exercises":[{"exercise_id":"00000000-0000-0000-0000-000000003202","order_index":1,"target_sets":4,"target_reps":6,"target_weight":105},{"exercise_id":"00000000-0000-0000-0000-000000003203","order_index":2,"target_sets":4,"target_reps":6,"target_weight":105}]}'::jsonb)$$, 'P0001', 'Workout exercise direction is incompatible', 'invalid second item rolls back the complete edit');
+select is((select prescription_revision from public.plan_workouts where id = '00000000-0000-0000-0000-000000003401'), 3, 'failed edit leaves revision unchanged');
+select is((select count(*) from public.plan_workout_exercises where workout_id = '00000000-0000-0000-0000-000000003401'), 2::bigint, 'failed edit leaves rows unchanged');
 
 select * from finish();
 rollback;
