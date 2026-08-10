@@ -17,6 +17,68 @@ export type ExerciseCoachRecommendation = {
   reason: string;
 };
 
+/** A conservative recommendation intended for the next cycle, never an automatic change. */
+export function buildNextCycleMainLiftRecommendation({
+  exerciseName,
+  increment,
+  logs,
+  targetWeight,
+  consecutiveMissedSessions
+}: {
+  exerciseName: string;
+  increment: number;
+  logs: CoachSetLog[];
+  targetWeight: number;
+  consecutiveMissedSessions: number;
+}): ExerciseCoachRecommendation {
+  const plateIncrement = increment > 0 ? increment : 2.5;
+  if (logs.length === 0) {
+    return { type: "hold", suggestedWeight: targetWeight, reason: `${exerciseName}数据不足，保持当前处方。` };
+  }
+
+  if (consecutiveMissedSessions >= 2) {
+    return {
+      type: "deload",
+      suggestedWeight: roundToNearestPlate(targetWeight * 0.9, plateIncrement),
+      reason: `${exerciseName}连续缺训 ${consecutiveMissedSessions} 次，下一循环建议减量恢复。`
+    };
+  }
+
+  const summary = summarizeSetLogs(logs);
+  if (summary.completionRatio <= 0.5) {
+    return {
+      type: "deload",
+      suggestedWeight: roundToNearestPlate(targetWeight * 0.9, plateIncrement),
+      reason: `${exerciseName}完成不足一半，下一循环建议减量恢复。`
+    };
+  }
+  if (summary.completionRatio < 1 || summary.targetAttainmentRatio < 1) {
+    return {
+      type: "decrease",
+      suggestedWeight: roundToNearestPlate(targetWeight * 0.95, plateIncrement),
+      reason: `${exerciseName}未稳定完成目标重量或次数，下一循环建议小幅降重。`
+    };
+  }
+  if (summary.averageRpe === null) {
+    return { type: "hold", suggestedWeight: targetWeight, reason: `${exerciseName}缺少有效 RPE，保持当前处方。` };
+  }
+  if (summary.averageRpe >= 9) {
+    return {
+      type: "decrease",
+      suggestedWeight: roundToNearestPlate(targetWeight * 0.95, plateIncrement),
+      reason: `${exerciseName}实际 RPE 偏高，下一循环建议小幅降重。`
+    };
+  }
+  if (summary.averageRpe <= 7) {
+    return {
+      type: "increase",
+      suggestedWeight: roundToNearestPlate(targetWeight + plateIncrement, plateIncrement),
+      reason: `${exerciseName}已达标且 RPE 较低，下一循环可小幅加重。`
+    };
+  }
+  return { type: "hold", suggestedWeight: targetWeight, reason: `${exerciseName}完成质量合适，保持当前处方。` };
+}
+
 export function getRecommendationStatusLabel(status: string) {
   if (status === "accepted") return "已更新下次训练";
   if (status === "modified") return "修改后已更新下次训练";
@@ -95,6 +157,13 @@ export function getWorkoutCoachCue(workoutName: string) {
 
 export function summarizeSetLogs(logs: CoachSetLog[]) {
   const completedLogs = logs.filter((log) => log.completed);
+  const targetAttainedLogs = completedLogs.filter(
+    (log) =>
+      typeof log.actualWeight === "number" &&
+      typeof log.actualReps === "number" &&
+      log.actualWeight >= log.targetWeight &&
+      log.actualReps >= log.targetReps
+  );
   const rpeValues = completedLogs
     .map((log) => log.rpe)
     .filter((rpe): rpe is number => typeof rpe === "number");
@@ -106,6 +175,7 @@ export function summarizeSetLogs(logs: CoachSetLog[]) {
   return {
     averageRpe,
     completionRatio,
+    targetAttainmentRatio: logs.length > 0 ? targetAttainedLogs.length / logs.length : 0,
     completedSets: completedLogs.length,
     totalSets: logs.length,
     totalActualReps,
@@ -150,6 +220,14 @@ export function buildExerciseCoachRecommendation({
       type: "hold",
       suggestedWeight: targetWeight,
       reason: `${exerciseName} 本次没有全部完成，下次先保持重量，目标是补齐计划组数。`
+    };
+  }
+
+  if (summary.targetAttainmentRatio < 1) {
+    return {
+      type: "hold",
+      suggestedWeight: targetWeight,
+      reason: `${exerciseName} 虽已勾选完成，但未达到全部计划重量和次数。下次先保持重量，优先完成目标。`
     };
   }
 

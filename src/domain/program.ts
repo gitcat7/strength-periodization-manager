@@ -1,6 +1,6 @@
 import type { ScheduleRule, SupportedScheduleMode } from "@/domain/schedule-rule";
 import { buildSequenceCalendar, getTargetTrainingCount } from "@/domain/sequence-calendar";
-import { roundToNearestPlate } from "@/domain/strength";
+import { getPrescriptionPolicy, getPrescriptionRole, getRelatedPrimarySlug, resolvePrescriptionWeight } from "@/domain/training-prescription";
 
 export type LegacyTemplateType = "three_day_full_body" | "four_day_upper_lower";
 export type TemplateType =
@@ -16,6 +16,12 @@ export type LegacyScheduleMode = SupportedScheduleMode | "flexible";
 // Read paths may still encounter legacy flexible plans; new plans only accept ScheduleRule.
 export type ScheduleConfig = ScheduleRule | { mode: "flexible" };
 
+export type MovementRestriction =
+  | "avoid_overhead_press"
+  | "avoid_horizontal_push"
+  | "avoid_deep_knee_flexion"
+  | "avoid_deadlift_hip_hinge";
+
 export const templateOptions: Array<{ description: string; label: string; value: TemplateType }> = [
   { value: "one_split", label: "一分化", description: "全身训练，适合每周 2-3 次稳定入门。" },
   { value: "three_split", label: "三分化", description: "胸肩三头 / 背二头 / 腿，按顺序循环。" },
@@ -26,9 +32,16 @@ export const templateOptions: Array<{ description: string; label: string; value:
 export type ExerciseProfile = {
   slug: string;
   id: string;
+  estimatedOneRepMax?: number;
+  trainingMax?: number;
   workingWeight: number;
   increment: number;
 };
+
+export type PlanGoal = "strength" | "hypertrophy" | "hypertrophy_strength" | "fat_loss" | "body_recomposition";
+export type ExperienceLevel = "beginner" | "novice" | "intermediate";
+export type NutritionAdherence = "low" | "moderate" | "high";
+export type RecoveryStatus = "low" | "normal" | "high";
 
 export type PlannedWorkoutExercise = {
   exerciseSlug: string;
@@ -132,6 +145,77 @@ type TemplateWorkout = {
   exercises: TemplateExercise[];
 };
 
+export type SessionDurationMinutes = 30 | 45 | 60 | 90;
+
+const exerciseBudgetBySessionDuration: Record<SessionDurationMinutes, number> = {
+  30: 2,
+  45: 3,
+  60: 4,
+  90: Number.POSITIVE_INFINITY
+};
+
+export function normalizeSessionDurationMinutes(value: number | undefined): SessionDurationMinutes {
+  // Extended checkpoint profiles retain their values, while prescription
+  // budgeting maps them onto the nearest supported resource envelope.
+  if (value === 75) return 60;
+  if (value === 120 || value === 150 || value === 180) return 90;
+  if (value === 30 || value === 45 || value === 60 || value === 90) return value;
+  return 60;
+}
+
+function applySessionDurationBudget(template: TemplateWorkout[], duration: number | undefined) {
+  const exerciseBudget = exerciseBudgetBySessionDuration[normalizeSessionDurationMinutes(duration)];
+  return template.map((workout) => ({
+    ...workout,
+    // Template order intentionally puts the day's lead movement first.
+    exercises: workout.exercises.slice(0, exerciseBudget)
+  }));
+}
+
+const restrictedSlugs: Record<MovementRestriction, string[]> = {
+  avoid_overhead_press: ["overhead_press"],
+  avoid_horizontal_push: ["bench_press", "incline_dumbbell_press"],
+  avoid_deep_knee_flexion: ["back_squat", "leg_press"],
+  avoid_deadlift_hip_hinge: ["deadlift", "romanian_deadlift", "barbell_row"]
+};
+
+const controlledReplacements: Record<string, string[]> = {
+  overhead_press: ["triceps_pushdown"],
+  bench_press: ["overhead_press", "triceps_pushdown"],
+  incline_dumbbell_press: ["overhead_press", "triceps_pushdown"],
+  back_squat: ["romanian_deadlift", "leg_curl"],
+  leg_press: ["romanian_deadlift", "leg_curl"],
+  deadlift: ["leg_press", "leg_curl"],
+  romanian_deadlift: ["leg_press", "leg_curl"],
+  barbell_row: ["seated_cable_row"]
+};
+
+function isRestricted(slug: string, restrictions: MovementRestriction[]) {
+  return restrictions.some((restriction) => restrictedSlugs[restriction].includes(slug));
+}
+
+function applyMovementRestrictions(template: TemplateWorkout[], restrictions: MovementRestriction[]) {
+  if (restrictions.length === 0) return template;
+
+  return template.map((workout) => {
+    const exercises = workout.exercises.flatMap((exercise) => {
+      if (!isRestricted(exercise.slug, restrictions)) return [exercise];
+      const replacement = (controlledReplacements[exercise.slug] ?? [])
+        .find((slug) => !isRestricted(slug, restrictions));
+      return replacement ? [{ ...exercise, slug: replacement }] : [];
+    });
+    const hasMainOrSecondary = exercises.some((exercise) => {
+      const role = getPrescriptionRole(exercise.slug);
+      return role === "primary" || role === "secondary";
+    });
+    if (!hasMainOrSecondary) {
+      const direction = workout.name.includes("腿") || workout.name.includes("蹲") ? "腿部" : "当前训练方向";
+      throw new Error(`当前限制条件下，${direction}训练没有可安全替代的动作，请调整限制或咨询专业人士后再生成计划。`);
+    }
+    return { ...workout, exercises };
+  });
+}
+
 // The user's reference plan defines the schedule format, not a plan to copy verbatim.
 // MVP defaults use push/pull/squat focus plus A/B day intent, then choose broadly useful movements.
 const pushPullSquatTemplate: TemplateWorkout[] = [
@@ -216,6 +300,47 @@ const threeSplitTemplate: TemplateWorkout[] = [
   { ...pushPullSquatTemplate[2], name: "腿" }
 ];
 
+const fourDayUpperLowerTemplate: TemplateWorkout[] = [
+  {
+    name: "上肢 A · 强度",
+    exercises: [
+      { slug: "bench_press", sets: 4, reps: 5, intensity: 0.95 },
+      { slug: "overhead_press", sets: 3, reps: 5, intensity: 0.9 },
+      { slug: "lat_pulldown", sets: 4, reps: 8, intensity: 0.72 },
+      { slug: "seated_cable_row", sets: 3, reps: 8, intensity: 0.72 },
+      { slug: "triceps_pushdown", sets: 3, reps: 10, intensity: 0.45 }
+    ]
+  },
+  {
+    name: "下肢 A · 强度",
+    exercises: [
+      { slug: "back_squat", sets: 4, reps: 5, intensity: 0.95 },
+      { slug: "romanian_deadlift", sets: 3, reps: 6, intensity: 0.75 },
+      { slug: "leg_curl", sets: 3, reps: 10, intensity: 0.42 },
+      { slug: "standing_calf_raise", sets: 4, reps: 10, intensity: 0.45 }
+    ]
+  },
+  {
+    name: "上肢 B · 容量",
+    exercises: [
+      { slug: "bench_press", sets: 3, reps: 8, intensity: 0.78 },
+      { slug: "incline_dumbbell_press", sets: 3, reps: 10, intensity: 0.72 },
+      { slug: "lat_pulldown", sets: 3, reps: 12, intensity: 0.7 },
+      { slug: "lateral_raise", sets: 4, reps: 15, intensity: 0.3 },
+      { slug: "dumbbell_curl", sets: 3, reps: 12, intensity: 0.35 }
+    ]
+  },
+  {
+    name: "下肢 B · 容量",
+    exercises: [
+      { slug: "leg_press", sets: 4, reps: 10, intensity: 0.85 },
+      { slug: "romanian_deadlift", sets: 3, reps: 10, intensity: 0.65 },
+      { slug: "leg_curl", sets: 3, reps: 15, intensity: 0.38 },
+      { slug: "standing_calf_raise", sets: 4, reps: 15, intensity: 0.4 }
+    ]
+  }
+];
+
 const fiveSplitTemplate: TemplateWorkout[] = [
   { ...pushPullSquatTemplate[0], name: "胸" },
   { ...pushPullSquatTemplate[1], name: "背" },
@@ -240,12 +365,21 @@ const fiveSplitTemplate: TemplateWorkout[] = [
   }
 ];
 
-const weekIntensityBumps = [0, 0.025, 0.05, -0.075];
+export function resolveProfileWorkingWeight({
+  estimatedOneRepMax,
+  trainingMax
+}: {
+  estimatedOneRepMax: number;
+  trainingMax: number;
+}) {
+  return Number.isFinite(trainingMax) && trainingMax > 0 ? trainingMax : estimatedOneRepMax;
+}
 
 export function chooseTemplate(type: TemplateType) {
   if (type === "push_pull_squat") return pushPullSquatTemplate;
   if (type === "one_split") return oneSplitTemplate;
   if (type === "three_split" || type === "three_day_full_body") return threeSplitTemplate;
+  if (type === "four_day_upper_lower") return fourDayUpperLowerTemplate;
   return type === "five_split" ? fiveSplitTemplate : pushPullSquatTemplate.slice(0, 4);
 }
 
@@ -255,7 +389,17 @@ export function buildFourWeekProgram({
   schedule,
   exerciseProfiles,
   startDate = new Date(),
-  weekCount = 4
+  weekCount = 4,
+  goal = "strength",
+  experienceLevel = "intermediate",
+  nutritionAdherence = "moderate",
+  proteinTargetMet = false,
+  recoveryStatus = "normal",
+  currentBodyWeightKg = null,
+  targetWeightChangeKgPerWeek = null,
+  weightChangeLast14DaysKg = null,
+  restrictions = [],
+  sessionDurationMinutes
 }: {
   templateType: TemplateType;
   availableWeekdays?: number[];
@@ -263,10 +407,33 @@ export function buildFourWeekProgram({
   exerciseProfiles: ExerciseProfile[];
   startDate?: Date;
   weekCount?: number;
+  goal?: PlanGoal;
+  experienceLevel?: ExperienceLevel;
+  nutritionAdherence?: NutritionAdherence;
+  proteinTargetMet?: boolean;
+  recoveryStatus?: RecoveryStatus;
+  currentBodyWeightKg?: number | null;
+  targetWeightChangeKgPerWeek?: number | null;
+  weightChangeLast14DaysKg?: number | null;
+  restrictions?: MovementRestriction[];
+  sessionDurationMinutes?: number;
 }) {
-  const template = chooseTemplate(templateType);
+  const template = applySessionDurationBudget(
+    applyMovementRestrictions(chooseTemplate(templateType), restrictions),
+    sessionDurationMinutes
+  );
   const profileBySlug = new Map(exerciseProfiles.map((profile) => [profile.slug, profile]));
   const normalizedWeekCount = normalizeWeekCount(weekCount);
+  const prescriptionPolicy = getPrescriptionPolicy({
+    goal,
+    experienceLevel,
+    nutritionAdherence,
+    proteinTargetMet,
+    recoveryStatus,
+    currentBodyWeightKg,
+    targetWeightChangeKgPerWeek,
+    weightChangeLast14DaysKg
+  });
   const effectiveSchedule: ScheduleRule =
     schedule ?? { mode: "fixed_weekdays", weekdays: availableWeekdays ?? [1, 3, 5] };
 
@@ -303,7 +470,15 @@ export function buildFourWeekProgram({
       normalizedStart
     );
     const templateWorkout = template[sequenceIndex % template.length];
-    const bump = weekIntensityBumps[weekIndex % weekIntensityBumps.length] ?? 0;
+    const blockWeek = weekIndex % 4;
+    const bump = blockWeek === 0
+      ? 0
+      : blockWeek === 1
+        ? prescriptionPolicy.progressionPercent
+        : blockWeek === 2
+          ? prescriptionPolicy.progressionPercent * 2
+          : -0.075;
+    const isDeloadWeek = blockWeek === 3;
 
     return {
       dayType: "training",
@@ -315,15 +490,33 @@ export function buildFourWeekProgram({
       sequenceIndex,
       exercises: templateWorkout.exercises.map((item) => {
         const profile = profileBySlug.get(item.slug);
-        const targetWeight =
-          profile && item.intensity > 0
-            ? roundToNearestPlate(profile.workingWeight * (item.intensity + bump), profile.increment)
-            : 0;
+        const role = getPrescriptionRole(item.slug);
+        const targetReps = item.reps + (role === "primary"
+          ? prescriptionPolicy.primaryRepAdjustment
+          : role === "secondary"
+            ? prescriptionPolicy.secondaryRepAdjustment
+            : 0);
+        const targetWeight = resolvePrescriptionWeight({
+          role,
+          profile: profile ?? null,
+          relatedProfile: profileBySlug.get(getRelatedPrimarySlug(item.slug)) ?? null,
+          targetReps,
+          baseRatio: role === "accessory" || role === "bodyweight"
+            ? 1
+            : item.intensity + bump + prescriptionPolicy.loadAdjustment,
+          increment: profile?.increment ?? 2.5
+        });
+        const targetSets = Math.max(2, item.sets + prescriptionPolicy.setsAdjustment + (isDeloadWeek ? -1 : 0));
+        const hasRequiredAnchor = role === "secondary"
+          ? Boolean(profileBySlug.get(getRelatedPrimarySlug(item.slug)))
+          : role === "primary"
+            ? Boolean(profile)
+            : true;
 
         return {
           exerciseSlug: item.slug,
-          targetSets: item.sets,
-          targetReps: item.reps,
+          targetSets: experienceLevel === "beginner" && !hasRequiredAnchor ? Math.min(3, targetSets) : targetSets,
+          targetReps,
           targetWeight
         };
       })
@@ -332,8 +525,59 @@ export function buildFourWeekProgram({
 }
 
 export function getTemplateType(trainingDaysPerWeek: number): TemplateType {
-  if (trainingDaysPerWeek === 7) return "push_pull_squat";
-  return trainingDaysPerWeek === 4 ? "five_split" : "three_split";
+  if (trainingDaysPerWeek <= 2) return "one_split";
+  if (trainingDaysPerWeek === 3) return "three_split";
+  if (trainingDaysPerWeek === 4) return "push_pull_squat";
+  if (trainingDaysPerWeek === 5) return "five_split";
+  return "push_pull_squat";
+}
+
+export function normalizeTemplateTypeForGeneration(templateType: TemplateType): TemplateType {
+  return templateType === "four_day_upper_lower" ? "push_pull_squat" : templateType;
+}
+
+const compatibleTrainingDays: Record<TemplateType, number[]> = {
+  one_split: [1, 2],
+  three_split: [3],
+  three_day_full_body: [3],
+  four_day_upper_lower: [4],
+  five_split: [5],
+  push_pull_squat: [4, 6, 7]
+};
+
+export function validateScheduleAndTemplate({
+  templateType,
+  trainingDaysPerWeek,
+  schedule
+}: {
+  templateType: TemplateType;
+  trainingDaysPerWeek: number;
+  schedule: ScheduleConfig;
+}): { ok: true } | { ok: false; message: string } {
+  if (schedule.mode === "fixed_weekdays" && schedule.weekdays.length !== trainingDaysPerWeek) {
+    return {
+      ok: false,
+      message: `固定星期已选 ${schedule.weekdays.length} 天，请选择 ${trainingDaysPerWeek} 天以匹配每周训练天数。`
+    };
+  }
+  if (schedule.mode === "cadence") {
+    const trainDays = Math.max(1, schedule.trainDays ?? 1);
+    const cycleDays = trainDays + Math.max(0, schedule.restDays);
+    if (trainDays * 7 / cycleDays > trainingDaysPerWeek) {
+      return {
+        ok: false,
+        message: `当前练休循环平均每周超过 ${trainingDaysPerWeek} 天训练，请增加休息日或调整每周训练天数。`
+      };
+    }
+  }
+  if (!compatibleTrainingDays[templateType].includes(trainingDaysPerWeek)) {
+    const label = templateOptions.find((option) => option.value === templateType)?.label ?? "当前模板";
+    return {
+      ok: false,
+      message: `${label}适合每周 ${compatibleTrainingDays[templateType].join(" 或 ")} 天训练；请调整训练天数或选择匹配的模板。`
+    };
+  }
+  return { ok: true };
 }
 
 function getCalendarWeekIndex(date: Date, startDate: Date) {

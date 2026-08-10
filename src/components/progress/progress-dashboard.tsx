@@ -10,6 +10,12 @@ import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts"
 import { readClientCache, writeClientCache } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
+import {
+  formatPeriodChange,
+  isDateInProgressRange,
+  type ProgressRangeWeeks
+} from "@/domain/progress-range";
+import { ProgressRangeSwitcher } from "./progress-range-switcher";
 
 type WorkoutRow = {
   day_type: "training" | "rest";
@@ -76,6 +82,7 @@ export function ProgressDashboard() {
   const [setLogs, setSetLogs] = useState<SetLogRow[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [message, setMessage] = useState("");
+  const [rangeWeeks, setRangeWeeks] = useState<ProgressRangeWeeks>(8);
 
   useEffect(() => {
     async function loadProgress() {
@@ -196,7 +203,9 @@ export function ProgressDashboard() {
   }, []);
 
   const progress = useMemo(() => {
-    const trainingWorkouts = filterTrainingMetricWorkouts(workouts.map((workout) => ({ ...workout, dayType: workout.day_type })));
+    const trainingWorkouts = filterTrainingMetricWorkouts(
+      workouts.map((workout) => ({ ...workout, dayType: workout.day_type }))
+    ).filter((workout) => isDateInProgressRange(workout.scheduled_date, rangeWeeks));
     const trainingWorkoutIds = new Set(trainingWorkouts.map((workout) => workout.id));
     const trainingExercises = workoutExercises.filter((exercise) => trainingWorkoutIds.has(exercise.workout_id));
     const workoutById = new Map(trainingWorkouts.map((workout) => [workout.id, workout]));
@@ -208,18 +217,24 @@ export function ProgressDashboard() {
     );
     const plannedSets = trainingExercises.reduce((sum, exercise) => sum + Number(exercise.target_sets ?? 0), 0);
     const completionRate = plannedSets > 0 ? completedLogs.length / plannedSets : 0;
-    const weeklyTrends = buildWeeklyTrends({ workoutById, exerciseById, workoutExercises: trainingExercises, setLogs });
+    const weeklyTrends = buildWeeklyTrends({
+      workoutById,
+      exerciseById,
+      workoutExercises: trainingExercises,
+      setLogs
+    }).slice(-rangeWeeks);
     const liftTrends = buildLiftTrends({ workoutById, exerciseById, setLogs });
     const insight = buildProgressInsight({ completionRate, liftTrends, weeklyTrends });
 
     return {
       completionRate,
+      filteredWorkoutCount: trainingWorkouts.length,
       insight,
       liftTrends,
       totalVolume,
       weeklyTrends
     };
-  }, [setLogs, workoutExercises, workouts]);
+  }, [rangeWeeks, setLogs, workoutExercises, workouts]);
 
   if (status === "loading") {
     return (
@@ -255,47 +270,62 @@ export function ProgressDashboard() {
 
   return (
     <div className="space-y-5">
-      <ProgressInsightCard insight={progress.insight} />
+      <ProgressRangeSwitcher onChange={setRangeWeeks} value={rangeWeeks} />
 
-      <section className="grid gap-3 sm:grid-cols-3">
-        <Metric icon={<Activity size={16} />} label="完成训练" value={`${workouts.length} 次`} />
-        <Metric icon={<BarChart3 size={16} />} label="总训练量" value={`${Math.round(progress.totalVolume).toLocaleString()} kg`} />
-        <Metric icon={<TrendingUp size={16} />} label="完成率" value={`${Math.round(progress.completionRate * 100)}%`} />
-      </section>
+      {progress.filteredWorkoutCount === 0 ? (
+        <section className="rounded-xl border border-line bg-white p-4">
+          <h2 className="font-semibold">所选范围暂无训练数据</h2>
+          <p className="mt-1 text-sm text-muted">可以切换到更长时间范围查看已有记录。</p>
+        </section>
+      ) : (
+        <>
+          <ProgressInsightCard insight={progress.insight} />
 
-      <section className="rounded-xl border border-line bg-white p-4">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div>
-            <h2 className="font-semibold">每周训练量</h2>
-            <p className="mt-1 text-sm text-muted">按完成组计算，帮助观察训练负荷是否稳定推进。</p>
-          </div>
-        </div>
-        <div className="space-y-3">
-          {progress.weeklyTrends.map((week) => (
-            <BarRow
-              key={week.weekKey}
-              label={week.label}
-              max={Math.max(...progress.weeklyTrends.map((item) => item.volume), 1)}
-              note={`${week.completedSets}/${week.plannedSets} 组`}
-              value={week.volume}
-            />
-          ))}
-        </div>
-      </section>
+          <section className="grid gap-3 sm:grid-cols-3">
+            <Metric icon={<Activity size={16} />} label="完成训练" value={`${progress.filteredWorkoutCount} 次`} />
+            <Metric icon={<BarChart3 size={16} />} label="总训练量" value={`${Math.round(progress.totalVolume).toLocaleString()} kg`} />
+            <Metric icon={<TrendingUp size={16} />} label="完成率" value={`${Math.round(progress.completionRate * 100)}%`} />
+          </section>
 
-      <section className="rounded-xl border border-line bg-white p-4">
-        <h2 className="font-semibold">主项 e1RM 趋势</h2>
-        <p className="mt-1 text-sm text-muted">仅统计 1-10 次的完成组，避免高次数辅助组扭曲估算。</p>
-        <div className="mt-4 space-y-3">
-          {progress.liftTrends.length > 0 ? (
-            progress.liftTrends.map((lift) => <LiftTrendCard key={lift.slug} trend={lift} />)
-          ) : (
-            <p className="rounded-lg bg-field px-3 py-3 text-sm text-muted">
-              还没有主项完成组。完成深蹲、卧推、硬拉或推举后会显示 e1RM。
-            </p>
-          )}
-        </div>
-      </section>
+          <section className="rounded-xl border border-line bg-white p-4">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="font-semibold">每周训练量</h2>
+                <p className="mt-1 text-sm text-muted">按完成组计算，帮助观察训练负荷是否稳定推进。</p>
+              </div>
+            </div>
+            <div className="space-y-3">
+              {progress.weeklyTrends.map((week, index) => (
+                <BarRow
+                  key={week.weekKey}
+                  label={week.label}
+                  max={Math.max(...progress.weeklyTrends.map((item) => item.volume), 1)}
+                  note={`${week.completedSets}/${week.plannedSets} 组 · ${
+                    index === 0
+                      ? "暂无上周基线"
+                      : formatPeriodChange(week.volume, progress.weeklyTrends[index - 1]?.volume ?? 0)
+                  }`}
+                  value={week.volume}
+                />
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-xl border border-line bg-white p-4">
+            <h2 className="font-semibold">主项 e1RM 趋势</h2>
+            <p className="mt-1 text-sm text-muted">仅统计 1-10 次的完成组，避免高次数辅助组扭曲估算。</p>
+            <div className="mt-4 space-y-3">
+              {progress.liftTrends.length > 0 ? (
+                progress.liftTrends.map((lift) => <LiftTrendCard key={lift.slug} trend={lift} />)
+              ) : (
+                <p className="rounded-lg bg-field px-3 py-3 text-sm text-muted">
+                  还没有主项完成组。完成深蹲、卧推、硬拉或推举后会显示 e1RM。
+                </p>
+              )}
+            </div>
+          </section>
+        </>
+      )}
     </div>
   );
 }
@@ -379,16 +409,20 @@ function LiftTrendCard({ trend }: { trend: LiftTrend }) {
           {trend.points.length} 次
         </span>
       </div>
-      <div className="grid h-24 grid-flow-col items-end gap-2">
-        {trend.points.map((point) => (
-          <div className="flex h-full flex-col justify-end gap-1" key={`${trend.slug}-${point.date}-${point.e1rm}`}>
-            <div
-              className="min-h-2 rounded-t-md bg-action/80"
-              title={`${point.date} ${point.e1rm.toFixed(1)}kg`}
-              style={{ height: `${Math.max(8, Math.round((point.e1rm / max) * 100))}%` }}
-            />
-          </div>
-        ))}
+      <div className="overflow-x-auto">
+        <div className="grid min-w-max grid-flow-col items-end gap-3">
+          {trend.points.map((point) => (
+            <div className="flex w-20 flex-col justify-end gap-1" key={`${trend.slug}-${point.date}-${point.e1rm}`}>
+              <span className="text-center text-xs font-semibold text-ink">{point.e1rm.toFixed(1)}kg</span>
+              <div
+                aria-hidden="true"
+                className="min-h-2 rounded-t-md bg-action/80"
+                style={{ height: `${Math.max(8, Math.round((point.e1rm / max) * 80))}px` }}
+              />
+              <span className="text-center text-[11px] text-muted">{point.date}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </article>
   );
@@ -490,7 +524,7 @@ function buildWeeklyTrends({
     current.volume += Number(log.actual_weight ?? 0) * Number(log.actual_reps ?? 0);
   }
 
-  return Array.from(weeklyMap.values()).sort((a, b) => a.weekKey.localeCompare(b.weekKey)).slice(-8);
+  return Array.from(weeklyMap.values()).sort((a, b) => a.weekKey.localeCompare(b.weekKey));
 }
 
 function buildLiftTrends({

@@ -9,7 +9,6 @@ import {
   Brain,
   CalendarDays,
   CheckCircle2,
-  Dumbbell,
   Loader2,
   Minus,
   Moon,
@@ -21,9 +20,9 @@ import {
   Save,
   Timer
 } from "lucide-react";
-import { buildTodayHeaderView } from "@/domain/workout-presentation";
 import {
   buildExerciseCoachRecommendation,
+  buildNextCycleMainLiftRecommendation,
   getInterruptionAdvice,
   getWorkoutCoachCue,
   type ExerciseCoachRecommendation
@@ -62,6 +61,18 @@ import {
 } from "./rest-day-state";
 import { completeRestDayCheckIn, getCurrentRestItem } from "./rest-day-actions";
 import { buildCompletionSummary } from "@/domain/workout-recording";
+import { getAutomaticDurationMinutes, getElapsedDurationSeconds, validateManualDurationMinutes } from "@/domain/workout-duration";
+import { WorkoutDurationEditor } from "@/components/workout/workout-duration-editor";
+import { parseCompletionResult } from "@/domain/completion-result";
+import {
+  getActiveExerciseId,
+  isExerciseExpanded,
+  reconcileExerciseExpansion,
+  toggleExerciseExpansion,
+  type ExerciseExpansionOverrides
+} from "./today-exercise-disclosure";
+import { TodayProgressHeader } from "./today-progress-header";
+import { RestTimerSurface } from "./rest-timer-surface";
 
 type WorkoutRow = {
   id: string;
@@ -69,6 +80,8 @@ type WorkoutRow = {
   sequence_index: number;
   name: string;
   status: string;
+  started_at?: string | null;
+  duration_seconds?: number | null;
 };
 
 type WorkoutExerciseRow = {
@@ -302,6 +315,20 @@ export function TodayWorkout() {
   const [restRunning, setRestRunning] = useState(false);
   const [restContext, setRestContext] = useState("完成一组后自动开始休息");
   const [reloadTrigger, setReloadTrigger] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number | null>(null);
+  const [manualDurationMode, setManualDurationMode] = useState(false);
+  const [manualDurationMinutes, setManualDurationMinutes] = useState("");
+  const [exerciseExpansion, setExerciseExpansion] = useState<ExerciseExpansionOverrides>({});
+  const startRequestRef = useRef(false);
+
+  useEffect(() => {
+    const startedAt = workout?.started_at ?? null;
+    if (!startedAt || workout?.status === "completed") { setElapsedSeconds(null); return; }
+    const update = () => setElapsedSeconds(getElapsedDurationSeconds(startedAt));
+    update();
+    const timerId = window.setInterval(update, 1000);
+    return () => window.clearInterval(timerId);
+  }, [workout?.started_at, workout?.status]);
 
   useEffect(() => {
     if (!scheduleResolved || !workout || restItem) return;
@@ -743,7 +770,18 @@ export function TodayWorkout() {
     return groupedLogs;
   }
 
+  async function ensureWorkoutStarted() {
+    if (!workout || workout.started_at || startRequestRef.current) return workout?.started_at ?? null;
+    startRequestRef.current = true;
+    const { data, error } = await createBrowserSupabaseClient().rpc("start_training_workout", { p_workout_id: workout.id });
+    startRequestRef.current = false;
+    if (error || typeof data !== "string") throw new Error(error?.message ?? "训练开始时间保存失败。");
+    setWorkout((current) => current ? { ...current, started_at: data } : current);
+    return data;
+  }
+
   function updateSetLog(workoutExerciseId: string, setIndex: number, patch: Partial<SetLogRow>) {
+    void ensureWorkoutStarted().catch(() => setMessage("训练开始时间保存失败，请检查网络后重试。"));
     setSaveStatus("idle");
     setValidationIssues([]);
     setSetLogs((current) => {
@@ -794,6 +832,13 @@ export function TodayWorkout() {
       return;
     }
 
+    const before = buildExerciseCompletionRows(exercises, setLogs);
+    const after = before.map((item) => item.exerciseId === exercise.id
+      ? { ...item, completedSets: Math.max(0, item.completedSets + (completed ? 1 : -1)) }
+      : item);
+    setExerciseExpansion((current) => reconcileExerciseExpansion({ after, before, overrides: current }));
+
+    if (completed && !log.completed) void ensureWorkoutStarted().catch(() => setMessage("训练开始时间保存失败，请检查网络后重试。"));
     updateSetLog(exercise.id, log.set_index, {
       actual_weight: log.actual_weight ?? log.target_weight,
       actual_reps: log.actual_reps ?? log.target_reps,
@@ -901,52 +946,27 @@ export function TodayWorkout() {
     }
 
     if (completeWorkout) {
-      clearDraftLogs(workout.id);
-      clearTrainingDataCaches();
-      const { error: workoutError } = await supabase
-        .from(DB_TABLE.workouts)
-        .update({
-          status: "completed",
-          completed_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", workout.id);
+      const shouldUseManualDuration = manualDurationMode || !workout.started_at;
+      const manualDuration = shouldUseManualDuration ? validateManualDurationMinutes(manualDurationMinutes) : null;
+      if (shouldUseManualDuration && !manualDuration?.ok) { setSaveStatus("error"); setMessage(manualDuration?.message ?? "训练时长请输入 1–720 的整数分钟。"); return; }
+      if (!workout.started_at && !manualDuration) { setSaveStatus("error"); setMessage("尚未记录开始时间，请填写实际训练时长。"); return; }
+      const { data: completionData, error: workoutError } = await supabase.rpc("complete_training_workout", {
+        p_workout_id: workout.id,
+        p_duration_seconds: manualDuration?.ok ? manualDuration.seconds : null
+      });
 
       if (workoutError) {
         setSaveStatus("error");
         setMessage(workoutError.message);
         return;
       }
+      let completionResult;
+      try { completionResult = parseCompletionResult(completionData); } catch { setSaveStatus("error"); setMessage("训练完成结果无效，请稍后重试。"); return; }
 
-      const recommendations = buildCoachRecommendationsFromCurrentLogs();
-      const recommendationPayload = recommendations
-        .filter((item) => item.targetWeight > 0)
-        .map((item) => ({
-          user_id: userId,
-          exercise_id: item.exerciseId,
-          workout_id: workout.id,
-          recommendation_type: item.recommendation.type,
-          previous_weight: item.targetWeight,
-          suggested_weight: item.recommendation.suggestedWeight,
-          reason: item.recommendation.reason,
-          status: "pending"
-        }));
+      clearDraftLogs(workout.id);
+      clearTrainingDataCaches();
 
-      if (recommendationPayload.length > 0) {
-        const { error: recommendationError } = await supabase.from(DB_TABLE.recommendations).insert(recommendationPayload);
-        if (recommendationError) {
-          setSaveStatus("error");
-          setMessage(recommendationError.message);
-          return;
-        }
-      }
-
-      setCoachRecommendations(
-        recommendations.map((item) => ({
-          ...item.recommendation,
-          exerciseName: item.exerciseName
-        }))
-      );
+      setCoachRecommendations(completionResult.recommendations.map((item) => ({ type: item.recommendation_type, suggestedWeight: item.suggested_weight, reason: item.reason, exerciseName: exercises.find((exercise) => exercise.exercise_id === item.exercise_id)?.exercises?.name ?? "动作" })));
       const summary = buildWorkoutSummary({ exercises, setLogs });
       setWorkout({ ...workout, status: "completed" });
       setValidationIssues([]);
@@ -958,7 +978,7 @@ export function TodayWorkout() {
           completed_sets: allLogs.filter((log) => log.completed).length,
           average_rpe: summary.averageRpe,
           completion_rate: summary.completionRate,
-          recommendations: recommendationPayload.length,
+          recommendations: completionResult.recommendations.length,
           total_volume: summary.totalVolume,
           workout_name: workout.name
         },
@@ -990,18 +1010,28 @@ export function TodayWorkout() {
 
   function buildCoachRecommendationsFromCurrentLogs() {
     return exercises.map((exercise) => {
-      const recommendation = buildExerciseCoachRecommendation({
+      const logs = (setLogs[exercise.id] ?? []).map((log) => ({
+        targetWeight: Number(log.target_weight),
+        targetReps: Number(log.target_reps),
+        actualWeight: log.actual_weight,
+        actualReps: log.actual_reps,
+        rpe: log.rpe,
+        completed: log.completed
+      }));
+      const isMainLift = exercise.exercises?.is_main_lift ?? false;
+      const recommendation = isMainLift ? buildNextCycleMainLiftRecommendation({
         exerciseName: exercise.exercises?.name ?? "动作",
         increment: Number(exercise.exercises?.default_increment) || 2.5,
-        isMainLift: exercise.exercises?.is_main_lift ?? false,
-        logs: (setLogs[exercise.id] ?? []).map((log) => ({
-          targetWeight: Number(log.target_weight),
-          targetReps: Number(log.target_reps),
-          actualWeight: log.actual_weight,
-          actualReps: log.actual_reps,
-          rpe: log.rpe,
-          completed: log.completed
-        })),
+        logs,
+        targetWeight: Number(exercise.target_weight),
+        // Missed-session history is not available in the active workout payload;
+        // the conservative decision still handles incomplete logged sets.
+        consecutiveMissedSessions: 0
+      }) : buildExerciseCoachRecommendation({
+        exerciseName: exercise.exercises?.name ?? "动作",
+        increment: Number(exercise.exercises?.default_increment) || 2.5,
+        isMainLift,
+        logs,
         targetWeight: Number(exercise.target_weight)
       });
 
@@ -1293,29 +1323,22 @@ export function TodayWorkout() {
     scheduledDate: workout.scheduled_date
   });
   const coachCue = getWorkoutCoachCue(workout.name);
-  const headerView = buildTodayHeaderView({ completedSets, totalSets, workoutName: workout.name });
+  const exerciseCompletion = buildExerciseCompletionRows(exercises, setLogs);
+  const activeExerciseId = getActiveExerciseId(exerciseCompletion);
 
   return (
     <section className="space-y-4">
-      <div className="action-surface p-4">
-        <div className="flex items-start gap-3">
-          <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-white ${headerView.tone === "completed" ? "bg-action" : "bg-[#c75c1a]"}`}>
-            <Dumbbell size={20} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="page-kicker">{workout.scheduled_date}</p>
-              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${headerView.tone === "completed" ? "bg-action/10 text-action" : "bg-[#fff1e8] text-[#c75c1a]"}`}>
-                {headerView.progressLabel}
-              </span>
-            </div>
-            <h2 className="mt-0.5 text-xl font-bold">{workout.name}</h2>
-            <p className="mt-1 text-sm text-muted">{workoutMeta.focus}</p>
-            <p className="mt-1 text-sm text-muted">{workoutMeta.note}</p>
-          </div>
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-action/15 pt-3">
+      <TodayProgressHeader
+        completedSets={completedSets}
+        date={workout.scheduled_date}
+        elapsedLabel={elapsedSeconds === null ? null : `已训练 ${formatElapsedTime(elapsedSeconds)}`}
+        focus={workoutMeta.focus}
+        intent={workoutMeta.intent}
+        note={workoutMeta.note}
+        totalSets={totalSets}
+        workoutName={workout.name}
+      />
+      <div className="grid grid-cols-2 gap-2 rounded-lg border border-line bg-white p-2">
           <button
             className="pressable inline-flex h-11 items-center justify-center gap-2 rounded-md border border-line bg-white px-3 text-sm font-semibold text-ink"
             onClick={fillByPlan}
@@ -1333,7 +1356,6 @@ export function TodayWorkout() {
             {saveStatus === "saving" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
             保存记录
           </button>
-        </div>
       </div>
 
       <div className="rounded-lg border border-line bg-white p-4">
@@ -1381,7 +1403,7 @@ export function TodayWorkout() {
         </div>
       ) : null}
 
-      <RestTimerPanel
+      <RestTimerSurface
         context={restContext}
         enabled={restTimerEnabled}
         isRunning={restRunning}
@@ -1445,9 +1467,10 @@ export function TodayWorkout() {
         {exercises.map((exercise, index) => {
           const exerciseLogs = setLogs[exercise.id] ?? [];
           const completedExerciseSets = exerciseLogs.filter((log) => log.completed).length;
+          const expanded = isExerciseExpanded({ activeExerciseId, exerciseId: exercise.id, overrides: exerciseExpansion });
 
           return (
-            <article className={`rounded-lg border bg-white p-4 ${completedExerciseSets === exerciseLogs.length && exerciseLogs.length > 0 ? "border-action/30 border-l-4" : "border-line border-l-4 border-l-[#c75c1a]"}`} key={exercise.id}>
+            <article className={`rounded-lg border bg-white p-4 ${completedExerciseSets === exerciseLogs.length && exerciseLogs.length > 0 ? "border-action/30 border-l-4" : "border-line border-l-4 border-l-[#c75c1a]"}`} data-exercise-id={exercise.id} data-exercise-name={exercise.exercises?.name ?? "动作"} data-expanded={expanded} key={exercise.id}>
               <div className="flex items-start gap-3">
                 <span className={`grid h-8 w-8 place-items-center rounded-full text-sm font-semibold text-white ${completedExerciseSets === exerciseLogs.length && exerciseLogs.length > 0 ? "bg-action" : "bg-[#c75c1a]"}`}>
                   {index + 1}
@@ -1475,6 +1498,10 @@ export function TodayWorkout() {
                           targetWeight: Number(exercise.target_weight)
                         })}
                       </p>
+                      <button aria-expanded={expanded} className="pressable h-11 rounded-md border border-line px-3 text-sm font-semibold text-ink" onClick={() => setExerciseExpansion((current) => toggleExerciseExpansion(current, exercise.id, expanded))} type="button">
+                        {expanded ? "收起" : "展开"}
+                      </button>
+                      {expanded ? (
                       <button
                         className="pressable h-8 rounded-md border border-line px-2 text-xs font-semibold text-ink"
                         onClick={() => fillExerciseByPlan(exercise.id)}
@@ -1482,8 +1509,11 @@ export function TodayWorkout() {
                       >
                         填入计划
                       </button>
+                      ) : null}
                     </div>
                   </div>
+                  {expanded ? (
+                  <>
                   <p className="mt-2 text-sm text-muted">{getExerciseNote(exercise.exercises?.slug, index)}</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <ExerciseDetailLauncher
@@ -1550,6 +1580,8 @@ export function TodayWorkout() {
                       </div>
                     ))}
                   </div>
+                  </>
+                  ) : null}
                 </div>
               </div>
             </article>
@@ -1579,6 +1611,8 @@ export function TodayWorkout() {
         />
       ) : null}
 
+      <Link className="inline-flex h-11 items-center text-sm font-semibold text-action" href="/plan">查看完整计划</Link>
+
       {completionPreview ? (
         <div aria-modal="true" className="fixed inset-0 z-50 grid place-items-end bg-black/30 p-4 sm:place-items-center" role="dialog">
           <div className="w-full max-w-md rounded-lg bg-white p-4">
@@ -1589,6 +1623,7 @@ export function TodayWorkout() {
               <p><span className="block text-muted">总吨位</span><strong>{completionPreview.totalTonnage === null ? "不适用" : `${completionPreview.totalTonnage} kg`}</strong></p>
               <p><span className="block text-muted">最高 e1RM</span><strong>{completionPreview.bestE1rm === null ? "不适用" : `${completionPreview.bestE1rm} kg`}</strong></p>
             </div>
+            <div className="mt-4"><WorkoutDurationEditor automaticMinutes={getAutomaticDurationMinutes(workout.started_at ?? null)} manualMinutes={manualDurationMinutes} manualMode={manualDurationMode} onManualMinutesChange={setManualDurationMinutes} onManualModeChange={setManualDurationMode} /></div>
             <div className="mt-4 flex gap-2"><button className="rounded-md border border-line px-3 py-2 text-sm font-semibold" onClick={() => setCompletionPreview(null)} type="button">返回继续记录</button><button className="rounded-md bg-action px-3 py-2 text-sm font-semibold text-white" disabled={saveStatus === "saving"} onClick={() => void saveLogs({ completeWorkout: true, confirmed: true })} type="button">{completionPreview.incompleteSetCount ? "仍然结束训练" : "确认完成"}</button></div>
           </div>
         </div>
@@ -1616,9 +1651,6 @@ export function TodayWorkout() {
           {saveStatus === "saving" ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
           {workout.status === "completed" ? "训练已完成" : "保存并完成训练"}
         </button>
-        <Link className="inline-flex h-11 items-center justify-center rounded-lg border border-line px-4 font-semibold text-ink transition active:scale-[0.98]" href="/plan">
-          查看完整计划
-        </Link>
       </div>
     </section>
   );
@@ -1813,6 +1845,7 @@ function WeightInput({
           <Minus size={14} />
         </button>
         <input
+          aria-label={label}
           className="min-w-0 border-0 bg-white px-1 text-center text-sm outline-none"
           inputMode="decimal"
           min={min}
@@ -1858,6 +1891,7 @@ function NumberInput({
     <label className={`block ${className}`}>
       <span className="mb-1 block text-[11px] text-muted">{label}</span>
       <input
+        aria-label={label}
         className="h-9 w-full rounded-md border border-line bg-white px-2 text-sm outline-none focus:border-action"
         inputMode="decimal"
         max={max}
@@ -1955,6 +1989,17 @@ function readRestTimerSettings() {
 
 function writeRestTimerSettings(settings: { enabled: boolean; seconds: number }) {
   window.localStorage.setItem(restTimerSettingsKey, JSON.stringify(settings));
+}
+
+function buildExerciseCompletionRows(
+  exercises: WorkoutExerciseRow[],
+  setLogs: Record<string, SetLogRow[]>
+) {
+  return exercises.map((exercise) => ({
+    completedSets: (setLogs[exercise.id] ?? []).filter((log) => log.completed).length,
+    exerciseId: exercise.id,
+    totalSets: (setLogs[exercise.id] ?? []).length
+  }));
 }
 
 function buildWorkoutSummary({
@@ -2144,6 +2189,13 @@ function formatRestTimer(seconds: number) {
 function formatRestOption(seconds: number) {
   if (seconds < 60) return `${seconds} 秒`;
   return `${Math.floor(seconds / 60)} 分${seconds % 60 === 0 ? "" : `${seconds % 60} 秒`}`;
+}
+
+function formatElapsedTime(seconds: number) {
+  const hours = Math.floor(seconds / 3600).toString().padStart(2, "0");
+  const minutes = Math.floor((seconds % 3600) / 60).toString().padStart(2, "0");
+  const remainder = (seconds % 60).toString().padStart(2, "0");
+  return `${hours}:${minutes}:${remainder}`;
 }
 
 function formatRecommendationType(type: ExerciseCoachRecommendation["type"]) {

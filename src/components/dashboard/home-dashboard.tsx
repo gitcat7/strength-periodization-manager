@@ -458,25 +458,11 @@ export function HomeDashboard() {
           </Link>
         </header>
 
-        <section className="grid divide-x divide-line overflow-hidden rounded-lg border border-line bg-white sm:grid-cols-3">
+        <section className="grid grid-cols-3 divide-x divide-line overflow-hidden rounded-lg border border-line bg-white" data-home-metrics>
           <Metric icon={<CheckCircle2 size={16} />} label="近 12 次训练" value={`${summary.workouts} 次`} />
           <Metric icon={<Activity size={16} />} label="训练量" value={`${Math.round(summary.volume).toLocaleString()} kg`} />
           <Metric icon={<Trophy size={16} />} label="PR 目标" value={`${prGoals.length} 个`} />
         </section>
-
-        {recentTraining ? (
-          <Link className="block rounded-lg border border-line bg-white p-4 transition hover:border-action/50 focus:outline-none focus:ring-2 focus:ring-action/40" href={`/history?workout=${recentTraining.id}`}>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="page-kicker">最近一次训练</p>
-                <h2 className="mt-1 font-semibold">{recentTraining.trainingType}</h2>
-                <p className="mt-1 text-sm text-muted">{recentTraining.scheduledDate}</p>
-              </div>
-              <ArrowRight className="mt-1 shrink-0 text-action" size={18} />
-            </div>
-            <p className="mt-3 text-sm text-muted">{recentTraining.completedSets} 组 · {Math.round(recentTraining.volume).toLocaleString()} kg</p>
-          </Link>
-        ) : null}
 
         <section className={`action-surface p-4 ${nextWorkoutMeta?.intent === "强度" ? "tone-intensity" : ""}`}>
           <div className="mb-4 flex items-center justify-between gap-3">
@@ -489,14 +475,18 @@ export function HomeDashboard() {
                 <h2 className="text-xl font-bold">{programPause ? "计划已暂停" : nextWorkout ? nextWorkout.name : "暂无训练计划"}</h2>
               </div>
             </div>
-            <Link className="pressable inline-flex items-center gap-1 rounded-md bg-action px-3 py-2 text-sm font-semibold text-white" href={programPause ? "/plan" : nextWorkout ? "/today" : "/single-workout"}>
+            <Link
+              className="pressable inline-flex h-11 items-center gap-1 rounded-md bg-action px-4 text-sm font-semibold text-white"
+              href={programPause ? "/plan" : nextWorkout ? "/today" : "/plan"}
+              title={programPause ? "前往计划页恢复" : nextWorkout ? "打开下一节训练" : "创建周期计划"}
+            >
               {programPause
                 ? "前往计划页恢复"
                 : nextWorkout
                   ? nextWorkoutState
                     ? getNextWorkoutActionLabel(nextWorkoutState)
                     : "查看下一节训练"
-                  : "快速记录自由训练"}
+                  : "创建周期计划"}
               <ArrowRight size={16} />
             </Link>
           </div>
@@ -537,27 +527,30 @@ export function HomeDashboard() {
                   </div>
                 ))}
               </div>
-              <Link className="pressable mt-4 inline-flex rounded-md border border-action px-3 py-2 text-sm font-semibold text-action" href="/single-workout">
-                快速记录自由训练
-              </Link>
             </>
           ) : (
             <div className="border-t border-line pt-4">
               <p className="text-sm text-muted">可以先记录一场训练；单次记录会进入历史和进展，但不会生成或修改周期计划。</p>
-              <Link className="pressable mt-3 inline-flex rounded-md border border-action px-3 py-2 text-sm font-semibold text-action" href="/plan">
-                创建周期计划
-              </Link>
             </div>
           )}
+          <Link className="pressable mt-4 inline-flex h-11 items-center rounded-md border border-action px-4 text-sm font-semibold text-action" href="/single-workout" title="快速记录自由训练">
+            自由训练
+          </Link>
         </section>
 
-        <div className="flex items-center justify-between px-1">
-          <h2 className="section-heading">训练管理</h2>
-          <Link className="pressable inline-flex items-center gap-1 text-sm font-semibold text-action" href="/exercises">
-            <BookOpen size={16} />
-            动作库
+        {recentTraining ? (
+          <Link className="block rounded-lg border border-line bg-white p-4 transition hover:border-action/50 focus:outline-none focus:ring-2 focus:ring-action/40" href={`/history?workout=${recentTraining.id}`}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="page-kicker">最近一次训练</p>
+                <h2 className="mt-1 font-semibold">{recentTraining.trainingType}</h2>
+                <p className="mt-1 text-sm text-muted">{recentTraining.scheduledDate}</p>
+              </div>
+              <ArrowRight className="mt-1 shrink-0 text-action" size={18} />
+            </div>
+            <p className="mt-3 text-sm text-muted">{recentTraining.completedSets} 组 · {Math.round(recentTraining.volume).toLocaleString()} kg</p>
           </Link>
-        </div>
+        ) : null}
 
         <section className="grid gap-4 lg:grid-cols-2">
           <Panel
@@ -568,7 +561,7 @@ export function HomeDashboard() {
           >
             {recommendations.length > 0 ? (
               <div className="space-y-3">
-                {recommendations.map((recommendation) => (
+                {recommendations.slice(0, 1).map((recommendation) => (
                   <div className="rounded-lg bg-field px-3 py-2 text-sm" key={recommendation.id}>
                     <div className="flex items-center justify-between gap-3">
                       <span className="font-semibold">{recommendation.exercises?.name ?? "动作"}</span>
@@ -579,6 +572,9 @@ export function HomeDashboard() {
                     <p className="mt-1 line-clamp-2 text-muted">{recommendation.reason}</p>
                   </div>
                 ))}
+                {recommendations.length > 1 ? (
+                  <p className="text-sm font-semibold text-action">另有 {recommendations.length - 1} 条待处理建议</p>
+                ) : null}
               </div>
             ) : (
               <p className="text-sm leading-6 text-muted">暂无待处理建议。完成训练后，Coach 会在这里提示是否加重、保持或降载。</p>
@@ -605,6 +601,19 @@ export function HomeDashboard() {
             )}
           </Panel>
         </section>
+
+        <div className="flex items-center justify-between px-1">
+          <h2 className="section-heading">训练管理</h2>
+          <div className="flex items-center gap-4">
+            <Link className="pressable inline-flex h-11 items-center gap-1 text-sm font-semibold text-action" href="/history">
+              训练历史
+            </Link>
+            <Link className="pressable inline-flex h-11 items-center gap-1 text-sm font-semibold text-action" href="/exercises">
+              <BookOpen size={16} />
+              动作库
+            </Link>
+          </div>
+        </div>
       </section>
     </main>
   );
@@ -620,12 +629,12 @@ function Metric({
   value: string;
 }) {
   return (
-    <div className="bg-white px-3 py-4">
-      <div className="mb-2 flex items-center gap-2 text-muted">
-        {icon}
-        <span className="text-sm">{label}</span>
+    <div className="min-w-0 bg-white px-2 py-4 sm:px-3">
+      <div className="mb-2 flex min-w-0 items-center gap-1.5 text-muted sm:gap-2">
+        <span className="shrink-0">{icon}</span>
+        <span className="min-w-0 text-xs sm:text-sm">{label}</span>
       </div>
-      <p className="text-xl font-bold">{value}</p>
+      <p className="truncate text-base font-bold sm:text-xl">{value}</p>
     </div>
   );
 }

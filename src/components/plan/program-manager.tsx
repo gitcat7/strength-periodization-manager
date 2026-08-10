@@ -3,19 +3,21 @@
 import { DB_TABLE } from "../../lib/supabase/table-names";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Brain, CheckCircle2, Dumbbell, Loader2, Moon, Pause, Play, PlusCircle, XCircle } from "lucide-react";
 import type { RecommendationType } from "@/domain/fitness-coach";
+import { getDefaultPlanPosition, groupPlanOutline } from "@/domain/plan-outline";
 import { getNextWorkoutState } from "@/domain/next-workout";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
 import {
   sessionDurationOptions,
+  validateProfileContext,
   validatePlanSetup,
   type PlanSetupInput,
   type PlanSetupValidationResult
 } from "@/domain/plan-setup";
 import { calculateTrainingMax, estimateOneRepMax, roundToNearestPlate } from "@/domain/strength";
+import { applyRecommendationWeight } from "@/domain/recommendation-application";
 import { trackEvent } from "@/lib/analytics";
 import {
   clearProgramRegenerationCaches,
@@ -32,6 +34,10 @@ import {
 } from "@/domain/training-format";
 import {
   buildFourWeekProgram,
+  getTemplateType,
+  normalizeTemplateTypeForGeneration,
+  resolveProfileWorkingWeight,
+  validateScheduleAndTemplate,
   type ExerciseProfile,
   templateOptions,
   type ProgramTemplateType,
@@ -57,6 +63,8 @@ import {
   type ProgramReplacementPayload
 } from "@/domain/program-regeneration";
 import { ProgramRegenerationDialog } from "./program-regeneration-dialog";
+import { CurrentProgramOverview } from "./current-program-overview";
+import { PlanScheduleOutline } from "./plan-schedule-outline";
 import { resolveProgramRegenerationOutcome } from "./program-regeneration-outcome";
 import {
   buildConfirmationPayload,
@@ -179,9 +187,17 @@ const defaultPlanSetup: PlanSetupInput = {
   experienceLevel: "",
   goal: "strength",
   injuryNotes: "",
+  movementRestrictions: [],
   lifts: [],
-  weekCount: 4,
-  sessionDurationMinutes: 60
+  accessoryLifts: [],
+  nutritionAdherence: "moderate",
+  proteinTargetMet: false,
+  recoveryStatus: "normal",
+  currentBodyWeightKg: "",
+  targetBodyWeightKg: "",
+  weightChangeLast14DaysKg: "",
+  sessionDurationMinutes: 60,
+  weekCount: 4
 };
 
 export function ProgramManager() {
@@ -195,16 +211,20 @@ export function ProgramManager() {
   const [status, setStatus] = useState<"loading" | "ready" | "generating" | "error">("loading");
   const [usesLegacyScheduleSchema, setUsesLegacyScheduleSchema] = useState(false);
   const [message, setMessage] = useState("");
-  const [templateType, setTemplateType] = useState<TemplateType>("push_pull_squat");
+  const [templateType, setTemplateType] = useState<TemplateType>(getTemplateType(3));
   const [scheduleRule, setScheduleRule] = useState<ScheduleRule>({ mode: "fixed_weekdays", weekdays: [1, 3, 5] });
   const [holidayPolicy, setHolidayPolicy] = useState<HolidayPolicy>("train");
   const [holidayDates, setHolidayDates] = useState<Array<{ date: string; name: string }>>([]);
   const [customTemplateName, setCustomTemplateName] = useState("");
   const [useCustomName, setUseCustomName] = useState(false);
   const [mainLifts, setMainLifts] = useState<ExerciseRow[]>([]);
+  const [accessoryExercises, setAccessoryExercises] = useState<ExerciseRow[]>([]);
   const [planSetup, setPlanSetup] = useState<PlanSetupInput>(defaultPlanSetup);
   const [planSetupErrors, setPlanSetupErrors] = useState<Record<string, string>>({});
   const [showPlanSetup, setShowPlanSetup] = useState(false);
+  const [showProfileContext, setShowProfileContext] = useState(false);
+  const [managementOpen, setManagementOpen] = useState(false);
+  const [scheduleExpansionMode, setScheduleExpansionMode] = useState<"default" | "all" | "collapsed">("default");
   const [regenerationDialog, setRegenerationDialog] = useState(createRegenerationDialogState);
   const [scheduleAdjustmentSupported, setScheduleAdjustmentSupported] = useState(true);
   const [scheduleEvents, setScheduleEvents] = useState<ScheduleEventRow[]>([]);
@@ -220,7 +240,10 @@ export function ProgramManager() {
   const firstScheduleItemRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    loadCurrentProgram();
+    void loadCurrentProgram().catch((error: unknown) => {
+      setStatus("error");
+      setMessage(getPlanLoadErrorMessage(error));
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -241,6 +264,11 @@ export function ProgramManager() {
       return groups;
     }, {});
   }, [workoutExercises]);
+  const planOutline = useMemo(() => program ? groupPlanOutline(workouts, program.start_date) : [], [program, workouts]);
+  const defaultPosition = useMemo(
+    () => getDefaultPlanPosition(planOutline, program?.start_date ?? "", new Date()),
+    [planOutline, program?.start_date]
+  );
 
   const pauseState = useMemo(() => {
     // Schedule events load newest-first, so the first row decides the pause state.
@@ -382,6 +410,9 @@ export function ProgramManager() {
 
     setProgram(programData as ProgramRow);
     setShowPlanSetup(false);
+    setScheduleExpansionMode("default");
+    setTemplateType(normalizeTemplateTypeForGeneration(programData.template_type as TemplateType));
+    setPlanSetup((current) => ({ ...current, weekCount: getProgramWeekCount(programData as Pick<ProgramRow, "start_date" | "end_date">) }));
     const loadedWorkouts = await loadWorkouts(programData.id);
     if (!loadedWorkouts.ok) {
       return false;
@@ -411,13 +442,12 @@ export function ProgramManager() {
     const [profileResult, mainLiftsResult] = await Promise.all([
       supabase
         .from(DB_TABLE.athleteProfiles)
-        .select("experience_level,goal,training_days_per_week,available_weekdays,session_duration_minutes,injury_notes")
+        .select("experience_level,goal,training_days_per_week,available_weekdays,session_duration_minutes,injury_notes,movement_restrictions,current_body_weight_kg,target_weight_change_kg_per_week,weight_change_last_14_days_kg,nutrition_adherence,protein_target_met,recovery_status")
         .eq("user_id", targetUserId)
         .maybeSingle(),
       supabase
         .from(DB_TABLE.exercises)
         .select("id,slug,name,default_increment,is_main_lift")
-        .eq("is_main_lift", true)
         .order("created_at", { ascending: true })
     ]);
 
@@ -426,8 +456,10 @@ export function ProgramManager() {
       return;
     }
 
-    const loadedMainLifts = (mainLiftsResult.data ?? []) as ExerciseRow[];
+    const allExercises = (mainLiftsResult.data ?? []) as ExerciseRow[];
+    const loadedMainLifts = allExercises.filter((exercise) => exercise.is_main_lift);
     setMainLifts(loadedMainLifts);
+    setAccessoryExercises(allExercises.filter((exercise) => !exercise.is_main_lift && isCalibratableAccessory(exercise.slug)));
 
     if (profileResult.error) {
       setMessage("计划参数读取失败，请刷新后重试。");
@@ -447,7 +479,7 @@ export function ProgramManager() {
       .from(DB_TABLE.liftProfiles)
       .select("exercise_id,estimated_1rm")
       .eq("user_id", targetUserId)
-      .in("exercise_id", loadedMainLifts.map((exercise) => exercise.id));
+      .in("exercise_id", allExercises.map((exercise) => exercise.id));
 
     if (liftError) {
       setMessage("主项最近工作组读取失败，请刷新后重试。");
@@ -473,10 +505,28 @@ export function ProgramManager() {
       experienceLevel: profile.experience_level as PlanSetupInput["experienceLevel"],
       goal: normalizePlanGoal(profile.goal),
       injuryNotes: profile.injury_notes ?? "",
+      movementRestrictions: Array.isArray(profile.movement_restrictions) ? profile.movement_restrictions : [],
+      nutritionAdherence: profile.nutrition_adherence === "low" || profile.nutrition_adherence === "high"
+        ? profile.nutrition_adherence
+        : "moderate",
+      proteinTargetMet: Boolean(profile.protein_target_met),
+      recoveryStatus: profile.recovery_status === "low" || profile.recovery_status === "high"
+        ? profile.recovery_status
+        : "normal",
+      currentBodyWeightKg: profile.current_body_weight_kg ? String(profile.current_body_weight_kg) : "",
+      targetBodyWeightKg: profile.current_body_weight_kg && profile.target_weight_change_kg_per_week
+        ? String(Number(profile.current_body_weight_kg) + Number(profile.target_weight_change_kg_per_week) * 4)
+        : "",
+      weightChangeLast14DaysKg: profile.weight_change_last_14_days_kg ? String(profile.weight_change_last_14_days_kg) : "",
       lifts: loadedMainLifts.map((exercise) => {
         const estimatedOneRepMax = estimatedByExerciseId.get(exercise.id) ?? 0;
         const workingWeight = inferFiveRepWorkingWeight(estimatedOneRepMax, Number(exercise.default_increment) || 2.5);
         return { exerciseId: exercise.id, weightKg: workingWeight ? String(workingWeight) : "", reps: "5" };
+      }),
+      accessoryLifts: allExercises.filter((exercise) => !exercise.is_main_lift && isCalibratableAccessory(exercise.slug)).map((exercise) => {
+        const estimatedOneRepMax = estimatedByExerciseId.get(exercise.id) ?? 0;
+        const workingWeight = inferFiveRepWorkingWeight(estimatedOneRepMax, Number(exercise.default_increment) || 2.5);
+        return { exerciseId: exercise.id, weightKg: workingWeight ? String(workingWeight) : "", reps: "10" };
       }),
       weekCount: 4,
       sessionDurationMinutes
@@ -503,6 +553,13 @@ export function ProgramManager() {
         available_weekdays: scheduleRule.mode === "fixed_weekdays" ? scheduleRule.weekdays : [],
         session_duration_minutes: parsed.value.sessionDurationMinutes,
         injury_notes: parsed.value.injuryNotes || null,
+        movement_restrictions: parsed.value.movementRestrictions,
+        current_body_weight_kg: parsed.value.currentBodyWeightKg,
+        target_weight_change_kg_per_week: parsed.value.targetWeightChangeKgPerWeek,
+        weight_change_last_14_days_kg: parsed.value.weightChangeLast14DaysKg,
+        nutrition_adherence: parsed.value.nutritionAdherence,
+        protein_target_met: parsed.value.proteinTargetMet,
+        recovery_status: parsed.value.recoveryStatus,
         unit: "kg",
         updated_at: new Date().toISOString()
       },
@@ -515,8 +572,8 @@ export function ProgramManager() {
       return false;
     }
 
-    const incrementById = new Map(mainLifts.map((exercise) => [exercise.id, Number(exercise.default_increment) || 2.5]));
-    const liftPayload = parsed.value.lifts.map((lift) => {
+    const incrementById = new Map([...mainLifts, ...accessoryExercises].map((exercise) => [exercise.id, Number(exercise.default_increment) || 2.5]));
+    const liftPayload = [...parsed.value.lifts, ...parsed.value.accessoryLifts].map((lift) => {
       const estimatedOneRepMax = estimateOneRepMax(lift.workingWeight, lift.reps);
       return {
         user_id: userId,
@@ -541,6 +598,43 @@ export function ProgramManager() {
 
     clearTrainingDataCaches();
     return true;
+  }
+
+  async function saveProfileContext() {
+    if (!userId) return;
+
+    const parsed = validateProfileContext(planSetup);
+    if (!parsed.ok) {
+      setPlanSetupErrors(parsed.fieldErrors);
+      return;
+    }
+
+    setStatus("generating");
+    setMessage("");
+    const { error } = await createBrowserSupabaseClient()
+      .from(DB_TABLE.athleteProfiles)
+      .update({
+        current_body_weight_kg: parsed.value.currentBodyWeightKg,
+        target_weight_change_kg_per_week: parsed.value.targetWeightChangeKgPerWeek,
+        weight_change_last_14_days_kg: parsed.value.weightChangeLast14DaysKg,
+        nutrition_adherence: parsed.value.nutritionAdherence,
+        protein_target_met: parsed.value.proteinTargetMet,
+        recovery_status: parsed.value.recoveryStatus,
+        updated_at: new Date().toISOString()
+      })
+      .eq("user_id", userId);
+
+    if (error) {
+      setStatus("error");
+      setMessage(error.message);
+      return;
+    }
+
+    clearTrainingDataCaches();
+    setPlanSetupErrors({});
+    setShowProfileContext(false);
+    setMessage("画像数据已保存；下次重建计划时会使用这些体重、饮食与恢复数据。");
+    setStatus("ready");
   }
 
   async function loadRecommendations(targetUserId: string) {
@@ -713,14 +807,27 @@ export function ProgramManager() {
       return;
     }
 
-    const { error: updateExerciseError } = await supabase
+    const { data: futureExercises, error: futureExerciseError } = await supabase
       .from(DB_TABLE.workoutExercises)
-      .update({
-        target_weight: appliedWeight
-      })
+      .select("id,target_weight,exercises(default_increment)")
       .eq("exercise_id", recommendation.exercise_id)
       .in("workout_id", workoutIds);
 
+    if (futureExerciseError) {
+      setStatus("error");
+      setMessage(futureExerciseError.message);
+      return;
+    }
+
+    const updateResults = await Promise.all((futureExercises ?? []).map((exercise) => {
+      const relatedExercise = Array.isArray(exercise.exercises) ? exercise.exercises[0] : exercise.exercises;
+      const increment = Number(relatedExercise?.default_increment) || 2.5;
+      return supabase
+        .from(DB_TABLE.workoutExercises)
+        .update({ target_weight: applyRecommendationWeight({ currentWeight: Number(exercise.target_weight), previousWeight: recommendation.previous_weight, appliedWeight, increment }) })
+        .eq("id", exercise.id);
+    }));
+    const updateExerciseError = updateResults.find((result) => result.error)?.error;
     if (updateExerciseError) {
       setStatus("error");
       setMessage(updateExerciseError.message);
@@ -757,7 +864,7 @@ export function ProgramManager() {
       userId
     });
 
-    setMessage(`${recommendation.exercises?.name ?? "动作"} 的后续计划已更新为 ${appliedWeight}kg。`);
+    setMessage(`${recommendation.exercises?.name ?? "动作"} 的后续计划已按原有强度、容量和减量差异同步调整。`);
     await loadRecommendations(userId);
     await loadWorkouts(program.id);
     setStatus("ready");
@@ -1046,9 +1153,12 @@ export function ProgramManager() {
       return;
     }
 
-    if (scheduleRule.mode === "fixed_weekdays" && scheduleRule.weekdays.length === 0) {
+    const schedule: ScheduleRule = scheduleRule;
+    const trainingDaysPerWeek = getRuleTrainingDaysPerWeek(schedule);
+    const scheduleValidation = validateScheduleAndTemplate({ templateType, trainingDaysPerWeek, schedule });
+    if (!scheduleValidation.ok) {
       setStatus("error");
-      setMessage("固定星期模式至少选择一个训练日。");
+      setMessage(scheduleValidation.message);
       return;
     }
 
@@ -1064,12 +1174,12 @@ export function ProgramManager() {
     try {
       const saved = await persistPlanSetup();
       if (!saved) return;
+      const validatedSetup = validatePlanSetup(planSetup);
+      if (!validatedSetup.ok) return;
 
       const supabase = createBrowserSupabaseClient();
       // Legacy flexible programs stay readable, but regeneration always produces a
       // supported sequence-first rule chosen in the form above.
-      const schedule: ScheduleRule = scheduleRule;
-
       const { data: exercises, error: exercisesError } = await supabase
         .from(DB_TABLE.exercises)
         .select("id,slug,name,default_increment");
@@ -1102,6 +1212,8 @@ export function ProgramManager() {
           return {
             id: exercise.id,
             slug: exercise.slug,
+            estimatedOneRepMax: Number(lift.estimated_1rm),
+            trainingMax: Number(lift.training_max),
             workingWeight: inferFiveRepWorkingWeight(
               Number(lift.estimated_1rm),
               Number(exercise.default_increment) || 2.5
@@ -1116,7 +1228,17 @@ export function ProgramManager() {
         templateType,
         schedule,
         exerciseProfiles: [...exerciseProfiles, ...accessoryProfiles],
-        weekCount: planSetup.weekCount
+        experienceLevel: planSetup.experienceLevel || "novice",
+        goal: planSetup.goal,
+        weekCount: planSetup.weekCount,
+        nutritionAdherence: planSetup.nutritionAdherence,
+        proteinTargetMet: planSetup.proteinTargetMet,
+        recoveryStatus: planSetup.recoveryStatus,
+        currentBodyWeightKg: Number(planSetup.currentBodyWeightKg) || null,
+        targetWeightChangeKgPerWeek: validatedSetup.value.targetWeightChangeKgPerWeek,
+        weightChangeLast14DaysKg: Number(planSetup.weightChangeLast14DaysKg) || null
+        , restrictions: validatedSetup.value.movementRestrictions,
+        sessionDurationMinutes: validatedSetup.value.sessionDurationMinutes
       });
 
       const payload = buildProgramReplacementPayload({
@@ -1232,6 +1354,12 @@ export function ProgramManager() {
 
   const nextPlanWorkoutId =
     workouts.find((workout) => workout.day_type === "training" && workout.status !== "completed")?.id ?? null;
+  const nextPlanWorkout = workouts.find((workout) => workout.id === nextPlanWorkoutId) ?? null;
+  const nextPlanWorkoutMeta = nextPlanWorkout ? getWorkoutMeta(nextPlanWorkout.name) : null;
+  const nextPlanWorkoutState = nextPlanWorkout ? getPlanWorkoutState(nextPlanWorkout, true) : null;
+  const currentCycle = planOutline
+    .find((week) => week.week === defaultPosition.week)
+    ?.cycles.find((cycle) => cycle.index === defaultPosition.cycleIndex);
 
   const todayDate = formatDate(new Date());
   const daysInterrupted = pauseState.event
@@ -1245,26 +1373,56 @@ export function ProgramManager() {
   return (
     <div className="space-y-5">
       {!program || showPlanSetup ? (
-        <PlanBuilder
-          customTemplateName={customTemplateName}
-          holidayPolicy={holidayPolicy}
-          holidays={holidayDates}
-          onHolidayPolicyChange={setHolidayPolicy}
-          onRuleChange={setScheduleRule}
-          rule={scheduleRule}
-          setCustomTemplateName={setCustomTemplateName}
-          setTemplateType={setTemplateType}
-          setUseCustomName={setUseCustomName}
-          templateType={templateType}
-          useCustomName={useCustomName}
-        />
+        <>
+          {program ? (
+            <div className="flex justify-end">
+              <button
+                className="pressable rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink"
+                onClick={() => setShowPlanSetup(false)}
+                type="button"
+              >
+                取消调整
+              </button>
+            </div>
+          ) : null}
+          <PlanBuilder
+            customTemplateName={customTemplateName}
+            holidayPolicy={holidayPolicy}
+            holidays={holidayDates}
+            onHolidayPolicyChange={setHolidayPolicy}
+            onRuleChange={(rule) => {
+              setScheduleRule(rule);
+              setTemplateType(getTemplateType(getRuleTrainingDaysPerWeek(rule)));
+            }}
+            rule={scheduleRule}
+            setCustomTemplateName={setCustomTemplateName}
+            setTemplateType={setTemplateType}
+            setUseCustomName={setUseCustomName}
+            templateType={templateType}
+            useCustomName={useCustomName}
+          />
+        </>
       ) : null}
 
       {(!program || showPlanSetup) ? (
-        <PlanSetupForm
+        <>
+          <PlanSetupForm
+            accessoryExercises={accessoryExercises}
+            errors={planSetupErrors}
+            mainLifts={mainLifts}
+            onChange={setPlanSetup}
+            value={planSetup}
+          />
+          <PlanGenerationRationale schedule={scheduleRule} value={planSetup} />
+        </>
+      ) : null}
+
+      {program && showProfileContext ? (
+        <ProfileContextForm
           errors={planSetupErrors}
-          mainLifts={mainLifts}
+          isSaving={status === "generating"}
           onChange={setPlanSetup}
+          onSave={saveProfileContext}
           value={planSetup}
         />
       ) : null}
@@ -1298,53 +1456,30 @@ export function ProgramManager() {
           </button>
         </section>
       ) : (
-        <section className="action-surface p-4">
-          <div className="mb-4 flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
-              <CheckCircle2 size={20} />
-            </span>
-            <div>
-              <p className="page-kicker">当前周期</p>
-              <h2 className="font-bold">{program.name}</h2>
-              <p className="text-sm text-muted">
-                {program.start_date} 至 {program.end_date}
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Link className="pressable inline-flex rounded-md bg-action px-4 py-2 font-semibold text-white" href="/today">
-              查看今日训练
-            </Link>
-            {!showPlanSetup ? (
-              <button
-                className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink"
-                onClick={() => setShowPlanSetup(true)}
-                type="button"
-              >
-                修改计划
-              </button>
-            ) : (
-              <>
-                <button
-                  className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={status === "generating"}
-                  onClick={openRegenerationDialog}
-                  ref={regenerationTriggerRef}
-                  type="button"
-                >
-                  预览并重新生成计划
-                </button>
-                <button
-                  className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink"
-                  onClick={() => setShowPlanSetup(false)}
-                  type="button"
-                >
-                  取消修改
-                </button>
-              </>
-            )}
-          </div>
-        </section>
+        <CurrentProgramOverview
+          currentCycleLabel={currentCycle ? `循环 ${currentCycle.index}` : null}
+          currentWeek={defaultPosition.week}
+          endDate={program.end_date}
+          isBusy={status === "generating"}
+          managementOpen={managementOpen}
+          name={program.name}
+          nextWorkout={nextPlanWorkout && nextPlanWorkoutMeta && nextPlanWorkoutState ? {
+            date: nextPlanWorkout.scheduled_date,
+            focus: nextPlanWorkoutMeta.focus,
+            intent: nextPlanWorkoutMeta.intent,
+            name: nextPlanWorkout.name,
+            stateLabel: nextPlanWorkoutState.label
+          } : null}
+          onAdjustPlan={() => {
+            setManagementOpen(false);
+            setShowPlanSetup(true);
+          }}
+          onRegenerate={openRegenerationDialog}
+          onToggleManagement={() => setManagementOpen((current) => !current)}
+          onToggleProfile={() => setShowProfileContext((current) => !current)}
+          profileOpen={showProfileContext}
+          startDate={program.start_date}
+        />
       )}
 
       {adjustmentControlsAvailable ? (
@@ -1532,8 +1667,13 @@ export function ProgramManager() {
       ) : null}
 
       {workouts.length > 0 ? (
-        <section className="space-y-3">
-          {workouts.map((workout, index) => {
+        <PlanScheduleOutline
+          defaultCycleIndex={defaultPosition.cycleIndex}
+          defaultWeek={defaultPosition.week}
+          mode={scheduleExpansionMode}
+          onModeChange={setScheduleExpansionMode}
+          outline={planOutline}
+          renderWorkout={(workout, index) => {
             const isRestDay = workout.day_type === "rest";
             const presentation = getScheduleItemPresentation({ dayType: workout.day_type, status: workout.status });
             const workoutMeta = isRestDay ? null : getWorkoutMeta(workout.name);
@@ -1597,24 +1737,37 @@ export function ProgramManager() {
               {!isRestDay ? (
                 <div className="space-y-2">
                   {(workoutExercisesByWorkoutId[workout.id] ?? []).map((exercise) => (
-                    <div className="flex items-center justify-between border-b border-line/70 px-1 py-2 text-sm last:border-b-0" key={exercise.id}>
-                      <span>{exercise.exercises?.name ?? "动作"}</span>
-                      <span className="font-semibold">
-                        {formatPrescription({
-                          slug: exercise.exercises?.slug,
-                          targetSets: exercise.target_sets,
+                    <div className="border-b border-line/70 px-1 py-2 text-sm last:border-b-0" key={exercise.id}>
+                      <div className="flex items-center justify-between gap-3">
+                        <span>{exercise.exercises?.name ?? "动作"}</span>
+                        <span className="font-semibold">
+                          {formatPrescription({
+                            slug: exercise.exercises?.slug,
+                            targetSets: exercise.target_sets,
+                            targetReps: exercise.target_reps,
+                            targetWeight: Number(exercise.target_weight)
+                          })}
+                        </span>
+                      </div>
+                      <details className="mt-1 text-xs text-muted">
+                        <summary className="cursor-pointer">查看处方依据</summary>
+                        <p className="mt-1 leading-5">{getPlanExerciseExplanation({
+                          exerciseSlug: exercise.exercises?.slug,
                           targetReps: exercise.target_reps,
-                          targetWeight: Number(exercise.target_weight)
-                        })}
-                      </span>
+                          targetSets: exercise.target_sets,
+                          targetWeight: Number(exercise.target_weight),
+                          isAccessoryCalibrated: accessoryExercises.some((item) => item.slug === exercise.exercises?.slug && Number(planSetup.accessoryLifts?.find((lift) => lift.exerciseId === item.id)?.weightKg) > 0),
+                          value: planSetup
+                        })}</p>
+                      </details>
                     </div>
                   ))}
                 </div>
               ) : null}
             </article>
             );
-          })}
-        </section>
+          }}
+        />
       ) : null}
       {adjustmentDialog ? (
         <ScheduleAdjustmentDialog
@@ -1665,12 +1818,143 @@ export function ProgramManager() {
   );
 }
 
+export function getProgramWeekCount(program: Pick<ProgramRow, "start_date" | "end_date">) {
+  const start = Date.parse(`${program.start_date}T00:00:00Z`);
+  const end = Date.parse(`${program.end_date}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 4;
+  return Math.min(12, Math.max(1, Math.ceil((end - start + 86_400_000) / 604_800_000)));
+}
+
+export function ProfileContextForm({
+  errors,
+  isSaving,
+  onChange,
+  onSave,
+  value
+}: {
+  errors: Record<string, string>;
+  isSaving: boolean;
+  onChange: (value: PlanSetupInput) => void;
+  onSave: () => void;
+  value: PlanSetupInput;
+}) {
+  function update(patch: Partial<PlanSetupInput>) {
+    onChange({ ...value, ...patch });
+  }
+
+  return (
+    <section className="rounded-lg border border-line bg-white p-4">
+      <div className="mb-4">
+        <p className="page-kicker">训练画像</p>
+        <h2 className="text-xl font-bold">更新体重、饮食与恢复</h2>
+        <p className="mt-1 text-sm leading-6 text-muted">保存不会修改当前周期、已安排的训练或历史记录；这些数据会用于下一次重建计划。</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">当前体重（可选）</span>
+          <input
+            aria-label="当前体重 kg"
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            inputMode="decimal"
+            max="300"
+            min="30"
+            onChange={(event) => update({ currentBodyWeightKg: event.target.value })}
+            placeholder="例如 70"
+            step="0.1"
+            type="number"
+            value={value.currentBodyWeightKg ?? ""}
+          />
+          {errors.currentBodyWeightKg ? <p className="mt-1 text-xs text-red-600">{errors.currentBodyWeightKg}</p> : null}
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">目标体重（可选）</span>
+          <input
+            aria-label="目标体重 kg"
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            inputMode="decimal"
+            max="300"
+            min="30"
+            onChange={(event) => update({ targetBodyWeightKg: event.target.value })}
+            placeholder="例如 65"
+            step="0.1"
+            type="number"
+            value={value.targetBodyWeightKg ?? ""}
+          />
+          <p className="mt-1 text-xs text-muted">按 {value.weekCount} 周换算为每周体重变化。</p>
+          {errors.targetBodyWeightKg ? <p className="mt-1 text-xs text-red-600">{errors.targetBodyWeightKg}</p> : null}
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">近 14 天体重变化（可选）</span>
+          <input
+            aria-label="近14天体重变化 kg"
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            inputMode="decimal"
+            max="3"
+            min="-3"
+            onChange={(event) => update({ weightChangeLast14DaysKg: event.target.value })}
+            placeholder="当前体重 - 14 天前体重"
+            step="0.1"
+            type="number"
+            value={value.weightChangeLast14DaysKg ?? ""}
+          />
+          {errors.weightChangeLast14DaysKg ? <p className="mt-1 text-xs text-red-600">{errors.weightChangeLast14DaysKg}</p> : null}
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">饮食执行度</span>
+          <select
+            aria-label="饮食执行度"
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            onChange={(event) => update({ nutritionAdherence: event.target.value as PlanSetupInput["nutritionAdherence"] })}
+            value={value.nutritionAdherence ?? "moderate"}
+          >
+            <option value="high">高：大部分时间按计划执行</option>
+            <option value="moderate">中：有少量偏离</option>
+            <option value="low">低：近期难以稳定执行</option>
+          </select>
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-sm font-medium">恢复状态</span>
+          <select
+            aria-label="恢复状态"
+            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+            onChange={(event) => update({ recoveryStatus: event.target.value as PlanSetupInput["recoveryStatus"] })}
+            value={value.recoveryStatus ?? "normal"}
+          >
+            <option value="high">良好：睡眠、精力和酸痛都可控</option>
+            <option value="normal">一般：可正常训练</option>
+            <option value="low">偏低：疲劳、睡眠或酸痛影响训练</option>
+          </select>
+        </label>
+      </div>
+      <label className="mt-3 flex items-start gap-2 text-sm">
+        <input
+          checked={value.proteinTargetMet ?? false}
+          className="mt-1 h-4 w-4"
+          onChange={(event) => update({ proteinTargetMet: event.target.checked })}
+          type="checkbox"
+        />
+        <span>近期大多数日子达到自己的蛋白质目标</span>
+      </label>
+      <button
+        className="pressable mt-4 inline-flex h-11 items-center justify-center rounded-md bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={isSaving}
+        onClick={onSave}
+        type="button"
+      >
+        {isSaving ? "保存中…" : "保存画像数据"}
+      </button>
+    </section>
+  );
+}
+
 export function PlanSetupForm({
+  accessoryExercises,
   errors,
   mainLifts,
   onChange,
   value
 }: {
+  accessoryExercises?: ExerciseRow[];
   errors: Record<string, string>;
   mainLifts: ExerciseRow[];
   onChange: (value: PlanSetupInput) => void;
@@ -1680,12 +1964,12 @@ export function PlanSetupForm({
     onChange({ ...value, ...patch });
   }
 
-  function updateLift(exerciseId: string, patch: Partial<{ weightKg: string; reps: string }>) {
-    const existingLift = value.lifts.find((lift) => lift.exerciseId === exerciseId);
-    const lifts = existingLift
-      ? value.lifts.map((lift) => lift.exerciseId === exerciseId ? { ...lift, ...patch } : lift)
-      : [...value.lifts, { exerciseId, weightKg: "", reps: "5", ...patch }];
-    update({ lifts });
+  function updateLift(exerciseId: string, patch: Partial<{ weightKg: string; reps: string }>, kind: "main" | "accessory" = "main") {
+    const source = kind === "main" ? value.lifts : value.accessoryLifts ?? [];
+    const lifts = source.find((lift) => lift.exerciseId === exerciseId)
+      ? source.map((lift) => lift.exerciseId === exerciseId ? { ...lift, ...patch } : lift)
+      : [...source, { exerciseId, weightKg: "", reps: kind === "main" ? "5" : "10", ...patch }];
+    update(kind === "main" ? { lifts } : { accessoryLifts: lifts });
   }
 
   return (
@@ -1738,7 +2022,7 @@ export function PlanSetupForm({
             <option value="hypertrophy_strength">力型兼备（Hypertrophy + Strength）</option>
             <option value="fat_loss">减脂（Fat Loss）</option>
             <option value="body_recomposition">塑形（Body Recomposition）</option>
-            <option value="strength">力量（Strength）</option>
+            <option value="strength">力量举（Powerlifting）</option>
           </select>
         </label>
         <label className="block">
@@ -1759,19 +2043,144 @@ export function PlanSetupForm({
       </div>
 
       <label className="mt-4 block">
-        <span className="mb-1 block text-sm font-medium">伤病或禁忌动作（可选）</span>
+        <span className="mb-1 block text-sm font-medium">伤病或禁忌备注（可选）</span>
         <textarea
           className="min-h-20 w-full rounded-lg border border-line bg-white px-3 py-2 text-sm"
           maxLength={500}
           onChange={(event) => update({ injuryNotes: event.target.value })}
-          placeholder="例如：右肩不适，暂时不做过顶推"
+          placeholder="例如：右肩不适；此处仅作为备注，不会自动推断医疗结论"
           value={value.injuryNotes}
         />
+        <p className="mt-2 text-xs text-muted">备注不会触发医疗判断。需要自动避开的训练动作请在下方选择结构化限制。</p>
       </label>
+
+      <fieldset className="mt-3 rounded-lg border border-line bg-field p-3">
+        <legend className="px-1 text-sm font-medium">动作限制（可选）</legend>
+        <p className="text-xs leading-5 text-muted">仅按你明确选择的动作类别替换模板；无法安全替代时会阻止生成。</p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {[
+            ["avoid_overhead_press", "避免过顶推"],
+            ["avoid_horizontal_push", "避免水平推"],
+            ["avoid_deep_knee_flexion", "避免深屈膝"],
+            ["avoid_deadlift_hip_hinge", "避免硬拉/髋铰链"]
+          ].map(([restriction, label]) => {
+            const checked = value.movementRestrictions?.includes(restriction as NonNullable<PlanSetupInput["movementRestrictions"]>[number]) ?? false;
+            return (
+              <label className="flex items-center gap-2 text-sm" key={restriction}>
+                <input
+                  checked={checked}
+                  onChange={() => update({
+                    movementRestrictions: checked
+                      ? (value.movementRestrictions ?? []).filter((item) => item !== restriction)
+                      : [...(value.movementRestrictions ?? []), restriction as NonNullable<PlanSetupInput["movementRestrictions"]>[number]]
+                  })}
+                  type="checkbox"
+                />
+                {label}
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      <div className="mt-5 rounded-lg border border-line bg-slate-50 p-3">
+        <h3 className="font-semibold">体重、饮食与恢复</h3>
+        <p className="mt-1 text-xs leading-5 text-muted">减脂与塑形会根据体重变化率、饮食执行和恢复状态保护训练量；其他目标也会参考恢复状态。数据只用于训练处方，不构成医疗或营养诊断。</p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">当前体重（可选）</span>
+            <input
+              aria-label="当前体重 kg"
+              className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+              inputMode="decimal"
+              min="30"
+              max="300"
+              onChange={(event) => update({ currentBodyWeightKg: event.target.value })}
+              placeholder="例如 75"
+              step="0.1"
+              type="number"
+              value={value.currentBodyWeightKg ?? ""}
+            />
+            {errors.currentBodyWeightKg ? <p className="mt-1 text-xs text-red-600">{errors.currentBodyWeightKg}</p> : null}
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">目标体重（可选）</span>
+            <input
+              aria-label="目标体重 kg"
+              className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+              inputMode="decimal"
+              min="30"
+              max="300"
+              onChange={(event) => update({ targetBodyWeightKg: event.target.value })}
+              placeholder="例如 65"
+              step="0.1"
+              type="number"
+              value={value.targetBodyWeightKg ?? ""}
+            />
+            <p className="mt-1 text-xs text-muted">系统会按 {value.weekCount} 周自动换算每周体重变化。</p>
+            {errors.targetBodyWeightKg ? <p className="mt-1 text-xs text-red-600">{errors.targetBodyWeightKg}</p> : null}
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">近 14 天体重变化（可选）</span>
+            <input
+              aria-label="近14天体重变化 kg"
+              className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+              inputMode="decimal"
+              min="-3"
+              max="3"
+              onChange={(event) => update({ weightChangeLast14DaysKg: event.target.value })}
+              placeholder="当前体重 - 14 天前体重"
+              step="0.1"
+              type="number"
+              value={value.weightChangeLast14DaysKg ?? ""}
+            />
+            {errors.weightChangeLast14DaysKg ? <p className="mt-1 text-xs text-red-600">{errors.weightChangeLast14DaysKg}</p> : null}
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">饮食执行度</span>
+            <select
+              aria-label="饮食执行度"
+              className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+              onChange={(event) => update({ nutritionAdherence: event.target.value as PlanSetupInput["nutritionAdherence"] })}
+              value={value.nutritionAdherence ?? "moderate"}
+            >
+              <option value="high">高：大部分时间按计划执行</option>
+              <option value="moderate">中：有少量偏离</option>
+              <option value="low">低：近期难以稳定执行</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium">恢复状态</span>
+            <select
+              aria-label="恢复状态"
+              className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
+              onChange={(event) => update({ recoveryStatus: event.target.value as PlanSetupInput["recoveryStatus"] })}
+              value={value.recoveryStatus ?? "normal"}
+            >
+              <option value="high">良好：睡眠、精力和酸痛都可控</option>
+              <option value="normal">一般：可正常训练</option>
+              <option value="low">偏低：疲劳、睡眠或酸痛影响训练</option>
+            </select>
+          </label>
+        </div>
+        <label className="mt-3 flex items-start gap-2 text-sm">
+          <input
+            checked={value.proteinTargetMet ?? false}
+            className="mt-1 h-4 w-4"
+            onChange={(event) => update({ proteinTargetMet: event.target.checked })}
+            type="checkbox"
+          />
+          <span>近期大多数日子达到自己的蛋白质目标</span>
+        </label>
+      </div>
 
       <div className="mt-5">
         <h3 className="font-semibold">主项最近工作组</h3>
-        <p className="mt-1 text-sm text-muted">至少填写一个稳定完成的工作组，例如卧推 80kg × 5。</p>
+        <p className="mt-1 text-sm text-muted">
+          {value.experienceLevel === "beginner"
+            ? "新手可跳过，首次训练后再补充实际工作组。"
+            : "训练满 6 个月需要至少填写一个稳定完成的主项工作组，例如卧推 80kg × 5。"}
+        </p>
         <div className="mt-3 space-y-3">
           {mainLifts.map((exercise) => {
             const lift = value.lifts.find((item) => item.exerciseId === exercise.id) ?? {
@@ -1780,13 +2189,13 @@ export function PlanSetupForm({
               reps: "5"
             };
             return (
-              <div className="grid grid-cols-[minmax(0,1fr)_84px_72px] items-end gap-2" key={exercise.id}>
+              <div className="grid grid-cols-[minmax(0,1fr)_96px_64px] items-end gap-2" key={exercise.id}>
                 <p className="min-w-0 truncate pb-2 font-medium">{exercise.name}</p>
                 <label className="block">
                   <span className="mb-1 block text-[11px] text-muted">重量 kg</span>
                   <input
                     aria-label={`${exercise.name}重量 kg`}
-                    className="h-10 w-full rounded-md border border-line bg-white px-2 text-sm"
+                    className="h-10 w-full rounded-md border border-line bg-white px-2 text-right text-sm tabular-nums"
                     inputMode="decimal"
                     min="0"
                     onChange={(event) => updateLift(exercise.id, { weightKg: event.target.value })}
@@ -1812,6 +2221,58 @@ export function PlanSetupForm({
           })}
         </div>
         {errors.lifts ? <p className="mt-2 text-xs text-red-600">{errors.lifts}</p> : null}
+      </div>
+      {(accessoryExercises ?? []).length > 0 ? (
+        <div className="mt-5">
+          <h3 className="font-semibold">辅助动作最近稳定工作组（可选）</h3>
+          <p className="mt-1 text-sm text-muted">可跳过。录入后会优先按该动作自己的能力锚点处方；未录入则使用保守估算并标记待校准。</p>
+          <div className="mt-3 space-y-3">
+            {accessoryExercises?.map((exercise) => {
+              const lift = value.accessoryLifts?.find((item) => item.exerciseId === exercise.id) ?? { exerciseId: exercise.id, weightKg: "", reps: "10" };
+              return <div className="grid grid-cols-[minmax(0,1fr)_96px_64px] items-end gap-2" key={exercise.id}>
+                <p className="min-w-0 truncate pb-2 font-medium">{exercise.name}</p>
+                <label className="block"><span className="mb-1 block text-[11px] text-muted">重量 kg</span><input aria-label={`${exercise.name}辅助重量 kg`} className="h-10 w-full rounded-md border border-line bg-white px-2 text-right text-sm tabular-nums" inputMode="decimal" min="0" onChange={(event) => updateLift(exercise.id, { weightKg: event.target.value }, "accessory")} step="0.5" type="number" value={lift.weightKg} /></label>
+                <label className="block"><span className="mb-1 block text-[11px] text-muted">次数</span><input aria-label={`${exercise.name}辅助次数`} className="h-10 w-full rounded-md border border-line bg-white px-2 text-sm" inputMode="numeric" min="1" onChange={(event) => updateLift(exercise.id, { reps: event.target.value }, "accessory")} type="number" value={lift.reps} /></label>
+              </div>;
+            })}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+export function PlanGenerationRationale({ schedule, value }: { schedule?: ScheduleRule; value: PlanSetupInput }) {
+  const goalLabel = {
+    strength: "力量举",
+    hypertrophy: "增肌",
+    hypertrophy_strength: "力型兼备",
+    fat_loss: "减脂",
+    body_recomposition: "塑形"
+  }[value.goal];
+  const experienceLabel = value.experienceLevel === "beginner"
+    ? "新手，0-6 个月"
+    : value.experienceLevel === "novice"
+      ? "初级，6-18 个月"
+      : value.experienceLevel === "intermediate"
+        ? "中级，18 个月以上"
+        : "待选择";
+  const recoveryLabel = value.recoveryStatus === "low"
+    ? "偏低"
+    : value.recoveryStatus === "high"
+      ? "良好"
+      : "一般";
+  const liftCount = value.lifts.filter((lift) => Number(lift.weightKg) > 0 && Number(lift.reps) > 0).length;
+
+  return (
+    <section className="rounded-lg border border-line bg-field p-3 text-sm">
+      <h3 className="font-semibold">本计划参考</h3>
+      <div className="mt-2 grid gap-1 text-muted">
+        <p>主要目标：{goalLabel}</p>
+        <p>训练经验：{experienceLabel}</p>
+        <p>训练频率：{schedule ? describeScheduleFrequency(schedule) : "由安排方式决定"}</p>
+        <p>主项工作组：{liftCount > 0 ? `已录入 ${liftCount} 项` : value.experienceLevel === "beginner" ? "未录入，将使用技术起始处方" : "待录入"}</p>
+        <p>恢复状态：{recoveryLabel}</p>
       </div>
     </section>
   );
@@ -1906,7 +2367,8 @@ function getProgramName(templateType: TemplateType) {
   }
   if (templateType === "one_split") return "一分化全身循环";
   if (templateType === "three_split" || templateType === "three_day_full_body") return "三分化训练循环";
-  if (templateType === "five_split" || templateType === "four_day_upper_lower") return "五分化训练循环";
+  if (templateType === "four_day_upper_lower") return "历史上下肢四分化计划";
+  if (templateType === "five_split") return "五分化训练循环";
   return "训练循环";
 }
 
@@ -1917,11 +2379,21 @@ function normalizePlanGoal(goal: string): PlanSetupInput["goal"] {
   return "strength";
 }
 
-function getPlanGenerationErrorMessage(error: unknown) {
+export function getPlanGenerationErrorMessage(error: unknown) {
   if (error instanceof TypeError && /load failed|failed to fetch/i.test(error.message)) {
     return "网络连接失败，请检查网络后重试。已填写的计划参数仍会保留。";
   }
+  if (error instanceof Error && /^当前限制条件下，(?:腿部|当前训练方向)训练没有可安全替代的动作，请调整限制或咨询专业人士后再生成计划。$/.test(error.message)) {
+    return error.message;
+  }
   return "计划预览生成失败，请检查训练设置后重试。";
+}
+
+function getPlanLoadErrorMessage(error: unknown) {
+  if (error instanceof TypeError && /load failed|failed to fetch/i.test(error.message)) {
+    return "网络连接失败，请检查网络后刷新页面重试。已填写的计划参数不会丢失。";
+  }
+  return "计划数据读取失败，请刷新页面重试。";
 }
 
 function getScheduleConfig(schedule: ScheduleConfig) {
@@ -1975,12 +2447,47 @@ function deriveAccessoryProfiles(exercises: ExerciseRow[], mainProfiles: Exercis
     }));
 }
 
+function isCalibratableAccessory(slug: string) {
+  return !["pull_up", "cardio_zone2"].includes(slug);
+}
+
 function inferFiveRepWorkingWeight(estimatedOneRepMax: number, increment: number) {
   if (estimatedOneRepMax <= 0) {
     return 0;
   }
 
   return Math.round((estimatedOneRepMax / (1 + 5 / 30)) / increment) * increment;
+}
+
+export function getPlanExerciseExplanation({
+  exerciseSlug,
+  targetSets,
+  targetReps,
+  targetWeight,
+  isAccessoryCalibrated = false,
+  value
+}: {
+  exerciseSlug?: string;
+  targetSets: number;
+  targetReps: number;
+  targetWeight: number;
+  isAccessoryCalibrated?: boolean;
+  value: PlanSetupInput;
+}) {
+  const isMainLift = ["bench_press", "back_squat", "deadlift", "overhead_press"].includes(exerciseSlug ?? "");
+  const goalLabel = { strength: "目标", hypertrophy: "增肌目标", hypertrophy_strength: "力型兼备目标", fat_loss: "减脂目标", body_recomposition: "塑形目标" }[value.goal];
+  const duration = value.sessionDurationMinutes ?? 60;
+  if (isMainLift && targetWeight <= 0) {
+    return `技术起始：尚未录入稳定主项工作组，本次以动作练习为主；目标 ${targetSets} 组 × ${targetReps} 次。${goalLabel}、${value.experienceLevel === "beginner" ? "新手训练量" : "当前经验"}、恢复状态和 ${duration} 分钟时长已用于安排。`;
+  }
+  if (isMainLift) {
+    return `能力锚点来自你录入的稳定主项工作组，按目标 ${targetSets} 组 × ${targetReps} 次换算处方 ${targetWeight} kg，并按器械增量取整。${goalLabel}、训练经验、恢复状态和 ${duration} 分钟时长会调整组次或训练量。`;
+  }
+  return targetWeight > 0
+    ? isAccessoryCalibrated
+      ? `辅助动作已校准：优先采用该动作自己的稳定工作组作为能力锚点；目标 ${targetSets} 组 × ${targetReps} 次，重量 ${targetWeight} kg 按器械增量取整。`
+      : `辅助动作当前采用保守估算待校准；目标 ${targetSets} 组 × ${targetReps} 次，重量 ${targetWeight} kg 按器械增量取整。录入该动作自己的稳定工作组后，会优先使用它自己的能力锚点。`
+    : `这是自重或技术起始动作；目标 ${targetSets} 组 × ${targetReps} 次，不强制填写重量。`;
 }
 
 function formatRecommendationType(type: RecommendationType) {
@@ -2137,6 +2644,17 @@ function isRuleTrainingDay(rule: ScheduleRule, date: Date, phase: number): boole
   return rule.weekdays.includes(date.getDay());
 }
 
+function getRuleTrainingDaysPerWeek(rule: ScheduleRule) {
+  if (rule.mode === "fixed_weekdays") return Math.max(1, rule.weekdays.length);
+  const cycleLength = Math.max(1, rule.trainDays + rule.restDays);
+  return Math.max(1, Math.min(7, Math.round(rule.trainDays * 7 / cycleLength)));
+}
+
+function describeScheduleFrequency(rule: ScheduleRule) {
+  if (rule.mode === "fixed_weekdays") return `固定每周 ${rule.weekdays.length} 天`;
+  return `练 ${rule.trainDays} 天、休 ${rule.restDays} 天循环`;
+}
+
 function toReflowItem(row: WorkoutRow, scheduledDate: string): ReflowScheduleItem {
   return {
     workoutId: row.id,
@@ -2170,6 +2688,21 @@ function shiftDate(date: string, days: number) {
 
 function parseLocalDate(date: string) {
   return new Date(`${date}T00:00:00`);
+}
+
+function getProgramWeekNumber(startDate: string, now: Date) {
+  const start = new Date(`${startDate}T00:00:00`);
+  return Math.max(1, Math.floor((now.getTime() - start.getTime()) / 86400000 / 7) + 1);
+}
+
+function getDefaultPlanWeek(
+  outline: Array<{ week: number; totalTrainingDays: number; completedTrainingDays: number }> ,
+  startDate: string,
+  now: Date
+) {
+  const currentWeek = getProgramWeekNumber(startDate, now);
+  if (outline.some((item) => item.week === currentWeek)) return currentWeek;
+  return outline.find((item) => item.completedTrainingDays < item.totalTrainingDays)?.week ?? outline.at(-1)?.week ?? 1;
 }
 
 function formatDate(date: Date) {

@@ -122,10 +122,14 @@ export function buildStandaloneWorkoutPayload(date: string, exercises: readonly 
 export function buildStandaloneWorkoutSavePayload(
   date: string,
   exercises: readonly ((SelectableExercise & Partial<Pick<StandaloneDraftExercise, "sets">>) | ExternalStandaloneDraftExercise | ManualStandaloneDraftExercise | ReviewedStandaloneDraftExercise)[],
-  workoutId?: string
+  workoutId?: string,
+  startedAt?: string,
+  durationSeconds?: number
 ) {
   return {
     ...(workoutId ? { workout_id: workoutId } : {}),
+    ...(startedAt ? { started_at: startedAt } : {}),
+    ...(durationSeconds ? { duration_seconds: durationSeconds } : {}),
     scheduled_date: date,
     status: "draft" as const,
     exercises: exercises.map((exercise) => {

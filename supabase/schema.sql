@@ -7,8 +7,15 @@ create table if not exists public.usr_athlete_profiles (
   goal text not null check (goal in ('strength', 'hypertrophy', 'hypertrophy_strength', 'fat_loss', 'body_recomposition')),
   training_days_per_week integer check (training_days_per_week in (3, 4, 7)),
   available_weekdays integer[] not null default '{}',
-  session_duration_minutes integer not null constraint athlete_profiles_session_duration_minutes_check check (session_duration_minutes in (45, 60, 75, 90, 120, 150, 180)),
+  session_duration_minutes integer not null constraint athlete_profiles_session_duration_minutes_check check (session_duration_minutes in (30, 45, 60, 75, 90, 120, 150, 180)),
   injury_notes text,
+  movement_restrictions text[] not null default '{}',
+  current_body_weight_kg numeric(6, 2) check (current_body_weight_kg between 30 and 300),
+  target_weight_change_kg_per_week numeric(4, 2) check (target_weight_change_kg_per_week between -1.5 and 1),
+  weight_change_last_14_days_kg numeric(4, 2) check (weight_change_last_14_days_kg between -3 and 3),
+  nutrition_adherence text not null default 'moderate' check (nutrition_adherence in ('low', 'moderate', 'high')),
+  protein_target_met boolean not null default false,
+  recovery_status text not null default 'normal' check (recovery_status in ('low', 'normal', 'high')),
   unit text not null default 'kg' check (unit = 'kg'),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -1664,7 +1671,7 @@ alter table public.plan_workout_exercises add constraint workout_exercises_refer
   or (exercise_id is null and exercise_provider = 'manual' and external_exercise_id ~ '^manual:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' and char_length(exercise_name_snapshot) between 1 and 160 and jsonb_typeof(exercise_metadata_snapshot) = 'object')
 );
 
-create or replace function public.save_standalone_workout(p_payload jsonb)
+create or replace function public.save_standalone_workout_legacy(p_payload jsonb)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare
   v_user_id uuid := auth.uid(); v_workout_id uuid; v_item jsonb; v_set jsonb;
@@ -1783,6 +1790,118 @@ create index if not exists log_pr_goals_user_status_target_idx
 create index if not exists ops_analytics_events_user_created_idx
   on public.ops_analytics_events (user_id, created_at desc);
 
+-- Keep clean-schema initialization aligned with the duration tracking migration.
+alter table public.plan_workouts add column if not exists started_at timestamptz;
+alter table public.plan_workouts add column if not exists duration_seconds integer;
+alter table public.plan_workouts drop constraint if exists plan_workouts_duration_seconds_check;
+alter table public.plan_workouts add constraint plan_workouts_duration_seconds_check check (duration_seconds is null or duration_seconds between 60 and 43200);
+
+create or replace function public.start_training_workout(p_workout_id uuid)
+returns timestamptz
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_workout public.plan_workouts%rowtype;
+  v_started_at timestamptz;
+begin
+  select * into v_workout
+  from public.plan_workouts
+  where id = p_workout_id
+    and user_id = auth.uid()
+    and day_type = 'training'
+    and status in ('scheduled', 'draft')
+  for update;
+
+  if v_workout.id is null then
+    raise exception 'Training workout was not found' using errcode = 'P0001';
+  end if;
+
+  update public.plan_workouts
+  set started_at = coalesce(started_at, now()), updated_at = now()
+  where id = p_workout_id
+  returning started_at into v_started_at;
+
+  return v_started_at;
+end;
+$$;
+
+revoke all on function public.start_training_workout(uuid) from public, anon;
+grant execute on function public.start_training_workout(uuid) to authenticated;
+
+-- The clean schema names the final validator directly, avoiding historical renames.
+revoke all on function public.save_standalone_workout_legacy(jsonb) from public, anon, authenticated;
+
+create or replace function public.save_standalone_workout(p_payload jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_existing public.plan_workouts%rowtype;
+  v_workout public.plan_workouts%rowtype;
+  v_workout_id uuid;
+  v_requested_start timestamptz;
+  v_duration_seconds integer;
+  v_status text;
+begin
+  if auth.uid() is null then raise exception 'Authentication required' using errcode = 'P0001'; end if;
+  v_status := p_payload ->> 'status';
+  begin v_requested_start := nullif(p_payload ->> 'started_at', '')::timestamptz;
+  exception when others then raise exception 'Workout start time is invalid' using errcode = 'P0001'; end;
+  begin v_duration_seconds := nullif(p_payload ->> 'duration_seconds', '')::integer;
+  exception when others then raise exception 'Workout duration is invalid' using errcode = 'P0001'; end;
+  if v_duration_seconds is not null and v_duration_seconds not between 60 and 43200 then raise exception 'Workout duration is invalid' using errcode = 'P0001'; end if;
+
+  if nullif(p_payload ->> 'workout_id', '') is not null then
+    select * into v_existing from public.plan_workouts where id = (p_payload ->> 'workout_id')::uuid and user_id = auth.uid() and program_id is null for update;
+  end if;
+  if v_status = 'completed' and coalesce(v_existing.started_at, v_requested_start) is null and v_duration_seconds is null then
+    raise exception 'Workout duration is required' using errcode = 'P0001';
+  end if;
+
+  v_workout_id := public.save_standalone_workout_legacy(p_payload - 'started_at' - 'duration_seconds');
+  update public.plan_workouts
+  set started_at = coalesce(started_at, v_requested_start),
+      duration_seconds = case when v_status = 'completed' then coalesce(duration_seconds, v_duration_seconds, greatest(60, least(43200, extract(epoch from (now() - started_at))::integer))) else duration_seconds end,
+      completed_at = case when v_status = 'completed' then coalesce(completed_at, now()) else completed_at end
+  where id = v_workout_id
+  returning * into v_workout;
+  return jsonb_build_object('workout_id', v_workout.id, 'started_at', v_workout.started_at, 'duration_seconds', v_workout.duration_seconds);
+end;
+$$;
+
+revoke all on function public.save_standalone_workout(jsonb) from public, anon;
+grant execute on function public.save_standalone_workout(jsonb) to authenticated;
+
+create or replace function public.get_standalone_workout_draft()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare v_workout public.plan_workouts%rowtype;
+begin
+  if auth.uid() is null then raise exception 'Authentication required' using errcode = 'P0001'; end if;
+  select * into v_workout from public.plan_workouts as workout
+  where workout.user_id = auth.uid() and workout.program_id is null and workout.day_type = 'training' and workout.status = 'draft'
+  order by workout.updated_at desc, workout.created_at desc limit 1;
+  if v_workout.id is null then return null; end if;
+  return jsonb_build_object('workout_id', v_workout.id, 'started_at', v_workout.started_at, 'scheduled_date', v_workout.scheduled_date, 'exercises', coalesce((
+    select jsonb_agg(jsonb_build_object('exercise_id', we.exercise_id, 'exercise_provider', we.exercise_provider,
+      'external_exercise_id', we.external_exercise_id, 'exercise_name_snapshot', we.exercise_name_snapshot,
+      'exercise_metadata_snapshot', we.exercise_metadata_snapshot, 'sets', coalesce((
+        select jsonb_agg(jsonb_build_object('completed', sl.completed, 'reps', coalesce(sl.actual_reps::text, ''), 'rpe', coalesce(sl.rpe::text, ''), 'weight', coalesce(sl.actual_weight::text, '')) order by sl.set_index)
+        from public.log_set_logs sl where sl.workout_exercise_id = we.id), '[]'::jsonb)) order by we.order_index)
+    from public.plan_workout_exercises we where we.workout_id = v_workout.id), '[]'::jsonb));
+end;
+$$;
+
+revoke all on function public.get_standalone_workout_draft() from public, anon;
+grant execute on function public.get_standalone_workout_draft() to authenticated;
+
 comment on function public.set_updated_at() is '统一维护含 updated_at 字段记录的最后更新时间（带时区的完整年月日时分秒）。';
 
 comment on table public.cfg_exercises is '共享动作目录：系统审核的动作定义，不存储个人训练事实。';
@@ -1818,6 +1937,7 @@ comment on column public.usr_athlete_profiles.training_days_per_week is '每周�
 comment on column public.usr_athlete_profiles.available_weekdays is '可训练星期数组，1 至 7。';
 comment on column public.usr_athlete_profiles.session_duration_minutes is '单次训练可用分钟数。';
 comment on column public.usr_athlete_profiles.injury_notes is '用户主动提供的伤病或限制说明。';
+comment on column public.usr_athlete_profiles.movement_restrictions is '用户明确选择的动作限制；不从自由文本推断。';
 comment on column public.usr_athlete_profiles.unit is '重量单位；产品固定为 kg。';
 comment on column public.usr_athlete_profiles.created_at is '画像创建时刻，timestamptz。';
 comment on column public.usr_athlete_profiles.updated_at is '画像最后更新时刻，timestamptz，由触发器维护。';
@@ -1931,3 +2051,263 @@ comment on column public.ops_agent_access_tokens.last_used_at is '令牌最后�
 comment on column public.ops_agent_access_tokens.expires_at is '令牌过期时刻，timestamptz。';
 comment on column public.ops_agent_access_tokens.revoked_at is '令牌撤销时刻，timestamptz；未撤销为空。';
 comment on column public.ops_agent_access_tokens.created_at is '令牌创建时刻，timestamptz。';
+
+-- Atomic history revision dependencies and wrapper for clean initialization.
+create or replace function public.replace_pending_workout_recommendations(p_user_id uuid, p_workout_id uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_result jsonb;
+begin
+  delete from public.log_recommendations
+  where user_id = p_user_id and workout_id = p_workout_id and status = 'pending';
+  with target_attainment as (
+    select we.exercise_id, we.target_weight, ce.default_increment, ce.is_main_lift,
+      count(*) as total_sets,
+      count(*) filter (where sl.completed) as completed_sets,
+      count(*) filter (where sl.completed and sl.actual_weight >= sl.target_weight and sl.actual_reps >= sl.target_reps) as attained_sets,
+      avg(sl.rpe) filter (where sl.completed) as average_rpe
+    from public.plan_workout_exercises we
+    join public.cfg_exercises ce on ce.id = we.exercise_id
+    join public.log_set_logs sl on sl.workout_exercise_id = we.id
+    where we.workout_id = p_workout_id and we.target_weight > 0
+    group by we.exercise_id, we.target_weight, ce.default_increment, ce.is_main_lift
+  ), inserted as (
+    insert into public.log_recommendations (
+      user_id, exercise_id, workout_id, recommendation_type,
+      previous_weight, suggested_weight, reason, status
+    )
+    select p_user_id, exercise_id, p_workout_id,
+      case
+        when completed_sets * 2 < total_sets then 'deload'
+        when is_main_lift and attained_sets < completed_sets then 'decrease'
+        when is_main_lift and average_rpe >= 9 then 'decrease'
+        when is_main_lift and attained_sets = total_sets and average_rpe <= 7 then 'increase'
+        else 'hold'
+      end,
+      target_weight,
+      case
+        when completed_sets * 2 < total_sets then round((target_weight * 0.9) / nullif(default_increment, 0)) * default_increment
+        when is_main_lift and (attained_sets < completed_sets or average_rpe >= 9) then round((target_weight * 0.975) / nullif(default_increment, 0)) * default_increment
+        when is_main_lift and attained_sets = total_sets and average_rpe <= 7 then round((target_weight + default_increment) / nullif(default_increment, 0)) * default_increment
+        else target_weight
+      end,
+      case
+        when completed_sets * 2 < total_sets then '完成不足一半，建议减量恢复。'
+        when is_main_lift and attained_sets < completed_sets then '未达成目标重量或次数，建议小幅降重。'
+        when is_main_lift and average_rpe >= 9 then '平均 RPE 过高，建议小幅降重。'
+        when is_main_lift and attained_sets = total_sets and average_rpe <= 7 then '全部达标且 RPE 可控，建议按增量加重。'
+        else '保持当前处方，继续观察完成质量。'
+      end,
+      'pending'
+    from target_attainment
+    returning exercise_id, recommendation_type, previous_weight, suggested_weight, reason, status
+  )
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'exercise_id', exercise_id,
+    'recommendation_type', recommendation_type,
+    'previous_weight', previous_weight,
+    'suggested_weight', suggested_weight,
+    'reason', reason,
+    'status', status
+  )), '[]'::jsonb) into v_result
+  from inserted;
+  return v_result;
+end;
+$$;
+
+revoke all on function public.replace_pending_workout_recommendations(uuid, uuid)
+  from public, anon, authenticated;
+
+create or replace function public.complete_training_workout(
+  p_workout_id uuid,
+  p_duration_seconds integer default null,
+  p_user_id uuid default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid;
+  v_workout public.plan_workouts%rowtype;
+  v_recommendations jsonb;
+  v_duration_seconds integer;
+begin
+  if auth.role() = 'service_role' then
+    v_user_id := p_user_id;
+  elsif p_user_id is not null then
+    raise exception 'Client identity is derived from the authenticated session' using errcode = 'P0001';
+  else
+    v_user_id := auth.uid();
+  end if;
+  if v_user_id is null then
+    raise exception 'Authentication required' using errcode = 'P0001';
+  end if;
+
+  select * into v_workout
+  from public.plan_workouts
+  where id = p_workout_id and user_id = v_user_id and day_type = 'training'
+  for update;
+  if v_workout.id is null then
+    raise exception 'Training workout was not found' using errcode = 'P0001';
+  end if;
+  if v_workout.status = 'completed' then
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'exercise_id', exercise_id,
+      'recommendation_type', recommendation_type,
+      'previous_weight', previous_weight,
+      'suggested_weight', suggested_weight,
+      'reason', reason,
+      'status', status
+    )), '[]'::jsonb)
+    into v_recommendations
+    from public.log_recommendations
+    where workout_id = p_workout_id;
+    return jsonb_build_object(
+      'workout_id', p_workout_id,
+      'status', 'completed',
+      'duration_seconds', v_workout.duration_seconds,
+      'recommendations', v_recommendations
+    );
+  end if;
+  if p_duration_seconds is not null and p_duration_seconds not between 60 and 43200 then
+    raise exception 'Workout duration is invalid' using errcode = 'P0001';
+  end if;
+  if v_workout.started_at is null and p_duration_seconds is null then
+    raise exception 'Workout duration is required' using errcode = 'P0001';
+  end if;
+  if exists (
+    select 1
+    from public.plan_workout_exercises we
+    left join public.log_set_logs sl on sl.workout_exercise_id = we.id
+    where we.workout_id = p_workout_id
+      and (sl.id is null or not sl.completed)
+  ) then
+    raise exception 'All planned sets require valid completed results before finishing' using errcode = 'P0001';
+  end if;
+
+  v_recommendations := public.replace_pending_workout_recommendations(v_user_id, p_workout_id);
+  update public.plan_workouts
+  set status = 'completed',
+      completed_at = coalesce(completed_at, now()),
+      duration_seconds = coalesce(duration_seconds, p_duration_seconds, greatest(60, least(43200, extract(epoch from (now() - started_at))::integer))),
+      updated_at = now()
+  where id = p_workout_id
+  returning duration_seconds into v_duration_seconds;
+
+  return jsonb_build_object(
+    'recommendations', v_recommendations,
+    'workout_id', p_workout_id,
+    'status', 'completed',
+    'duration_seconds', v_duration_seconds
+  );
+end;
+$$;
+
+revoke all on function public.complete_training_workout(uuid, integer, uuid) from public, anon;
+grant execute on function public.complete_training_workout(uuid, integer, uuid) to authenticated;
+
+create or replace function public.revise_completed_workout_logs(p_workout_id uuid, p_logs jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare v_log jsonb; v_recommendations jsonb; v_logs jsonb;
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required' using errcode = 'P0001';
+  end if;
+  if not exists (
+    select 1 from public.plan_workouts
+    where id = p_workout_id and user_id = auth.uid() and status = 'completed'
+  ) then
+    raise exception 'Completed training workout was not found' using errcode = 'P0001';
+  end if;
+  if jsonb_typeof(p_logs) <> 'array' then
+    raise exception 'Completed set is invalid' using errcode = 'P0001';
+  end if;
+  for v_log in select value from jsonb_array_elements(p_logs) loop
+    update public.log_set_logs sl
+    set actual_weight = (v_log ->> 'actual_weight')::numeric,
+        actual_reps = (v_log ->> 'actual_reps')::integer,
+        rpe = (v_log ->> 'rpe')::numeric,
+        completed = coalesce((v_log ->> 'completed')::boolean, false),
+        updated_at = now()
+    from public.plan_workout_exercises we
+    where sl.workout_exercise_id = we.id
+      and we.workout_id = p_workout_id
+      and sl.workout_exercise_id = (v_log ->> 'workout_exercise_id')::uuid
+      and sl.set_index = (v_log ->> 'set_index')::integer;
+    if not found then
+      raise exception 'Completed set is invalid' using errcode = 'P0001';
+    end if;
+  end loop;
+  v_recommendations := public.replace_pending_workout_recommendations(auth.uid(), p_workout_id);
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'workout_exercise_id', sl.workout_exercise_id,
+    'set_index', sl.set_index,
+    'actual_weight', sl.actual_weight,
+    'actual_reps', sl.actual_reps,
+    'rpe', sl.rpe,
+    'completed', sl.completed
+  )), '[]'::jsonb) into v_logs
+  from public.log_set_logs sl
+  join public.plan_workout_exercises we on we.id = sl.workout_exercise_id
+  where we.workout_id = p_workout_id;
+  return jsonb_build_object(
+    'workout_id', p_workout_id,
+    'recommendations', v_recommendations,
+    'set_logs', v_logs
+  );
+end;
+$$;
+
+revoke all on function public.revise_completed_workout_logs(uuid, jsonb)
+  from public, anon;
+grant execute on function public.revise_completed_workout_logs(uuid, jsonb)
+  to authenticated;
+
+create or replace function public.revise_completed_workout(
+  p_workout_id uuid,
+  p_logs jsonb,
+  p_duration_seconds integer default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_result jsonb;
+  v_duration_seconds integer;
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required' using errcode = 'P0001';
+  end if;
+  if p_duration_seconds is not null
+     and p_duration_seconds not between 60 and 43200 then
+    raise exception 'Workout duration is invalid' using errcode = 'P0001';
+  end if;
+  select duration_seconds into v_duration_seconds
+  from public.plan_workouts
+  where id = p_workout_id
+    and user_id = auth.uid()
+    and status = 'completed'
+    and day_type = 'training'
+  for update;
+  if not found then
+    raise exception 'Completed training workout was not found' using errcode = 'P0001';
+  end if;
+  v_result := public.revise_completed_workout_logs(p_workout_id, p_logs);
+  update public.plan_workouts
+  set duration_seconds = coalesce(p_duration_seconds, duration_seconds),
+      updated_at = now()
+  where id = p_workout_id
+    and user_id = auth.uid()
+  returning duration_seconds into v_duration_seconds;
+  return v_result || jsonb_build_object('duration_seconds', v_duration_seconds,
+    'workout_id', p_workout_id
+  );
+end;
+$$;
+
+revoke all on function public.revise_completed_workout(uuid, jsonb, integer)
+  from public, anon;
+grant execute on function public.revise_completed_workout(uuid, jsonb, integer) to authenticated;

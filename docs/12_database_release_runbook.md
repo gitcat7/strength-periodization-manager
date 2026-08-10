@@ -122,6 +122,33 @@ order by tablename, policyname;
 
 预期：三个表均 `relrowsecurity = true`；`cfg_cn_calendar_dates` 仅有已登录用户的 `select` 策略，`usr_unavailable_dates` 和 `ops_schedule_events` 的读写策略均以 `auth.uid() = user_id` 隔离。
 
+### P1 单次训练时长（30 分钟）迁移
+
+在发布包含 30 分钟训练预算的前端前，先在 SQL Editor 执行
+`supabase/migrations/20260729000000_session_duration_30_minutes.sql`。该迁移只替换时长校验，保留已有的 45、60、75、90 分钟资料；75 分钟资料会在应用中按 60 分钟标准预算兼容处理。执行后验证：
+
+```sql
+select conname, pg_get_constraintdef(oid)
+from pg_constraint
+where conrelid = 'public.usr_athlete_profiles'::regclass
+  and conname = 'usr_athlete_profiles_session_duration_minutes_check';
+```
+
+### 生产分支对账时长约束（20260810010000）
+
+两条生产分支都曾调整单次训练时长约束。发布对账版本前，必须执行唯一新迁移
+`supabase/migrations/20260810010000_reconcile_session_duration_choices.sql`，使 30 分钟处方预算与
+checkpoint 的 45–180 分钟档位同时有效。迁移会兼容删除两种历史约束名，再建立统一约束。
+
+```sql
+select conname, pg_get_constraintdef(oid)
+from pg_constraint
+where conrelid = 'public.usr_athlete_profiles'::regclass
+  and conname = 'athlete_profiles_session_duration_minutes_check';
+```
+
+预期允许 `30, 45, 60, 75, 90, 120, 150, 180`。用户未确认该迁移成功前，禁止部署对账前端。
+
 表前缀迁移后，旧表名保留为仅供读取的兼容视图；新应用代码必须只访问带前缀的物理表。不要向旧名称写入，也不要在验证完成前删除这些兼容视图。
 
 结构与备注验收（不读取用户训练数据）：
@@ -224,6 +251,13 @@ where w.day_type = 'rest';
 - 每周固定备份一次。
 - 每次内测用户批量导入或清理数据前备份。
 - 不在疲劳或赶时间时执行数据库结构变更。
+
+## 7. 结构化动作限制迁移（2026-07-29）
+
+1. 在 Supabase SQL Editor 执行 `supabase/migrations/20260729150000_add_structured_movement_restrictions.sql`。
+2. 迁移只向 `usr_athlete_profiles` 追加 `movement_restrictions text[]`，默认空数组；不会解读或改写既有 `injury_notes`。
+3. 迁移后创建或更新一份训练画像，选择一项动作限制并确认保存成功；自由文本备注仍应只显示为备注。
+4. 再部署前端。若未执行迁移，前端会因缺少列无法安全保存画像，应先完成本迁移而非绕过限制字段。
 # wger 外部动作引用发布顺序（2026-07-16）
 
 1. 在 Supabase SQL Editor 执行 `supabase/migrations/20260716130000_wger_external_exercise_references.sql`；它仅追加字段、约束和 RPC，不会复制第三方动作目录。

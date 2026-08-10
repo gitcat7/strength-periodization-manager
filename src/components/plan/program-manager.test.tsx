@@ -15,7 +15,7 @@ vi.mock("@/lib/supabase/browser", () => ({
   createBrowserSupabaseClient: () => supabaseClient
 }));
 
-import { ProgramManager } from "./program-manager";
+import { getPlanGenerationErrorMessage, getProgramWeekCount, ProgramManager } from "./program-manager";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -33,6 +33,19 @@ afterEach(() => {
 });
 
 describe("ProgramManager cache hydration", () => {
+  it("keeps a safe structured-restriction conflict visible while hiding unknown errors", () => {
+    expect(getPlanGenerationErrorMessage(new Error("当前限制条件下，腿部训练没有可安全替代的动作，请调整限制或咨询专业人士后再生成计划。")))
+      .toBe("当前限制条件下，腿部训练没有可安全替代的动作，请调整限制或咨询专业人士后再生成计划。");
+    expect(getPlanGenerationErrorMessage(new TypeError("Load failed")))
+      .toBe("网络连接失败，请检查网络后重试。已填写的计划参数仍会保留。");
+    expect(getPlanGenerationErrorMessage(new Error("database socket exploded")))
+      .toBe("计划预览生成失败，请检查训练设置后重试。");
+  });
+
+  it("uses an existing program's actual duration when converting target body weight", () => {
+    expect(getProgramWeekCount({ end_date: "2026-10-18", start_date: "2026-07-27" })).toBe(12);
+  });
+
   it("keeps loading and does not render another account's cached plan before authentication resolves", () => {
     writeClientCache("strength-training-cache:plan", {
       program: {
@@ -100,20 +113,43 @@ describe("ProgramManager cache hydration", () => {
     expect(generateButton).not.toHaveProperty("disabled", true);
   });
 
-  it("hides plan generation controls for an active program until the user chooses to modify it", async () => {
-    supabaseClient = createSupabaseClient({
-      program: {
-        id: "active-program",
-        name: "推/拉/蹲 A-B 周期",
-        template_type: "push_pull_squat",
-        schedule_mode: "fixed_weekdays",
-        schedule_config: { weekdays: [1, 3, 5] },
-        custom_template_name: null,
-        status: "active",
-        start_date: "2026-08-01",
-        end_date: "2026-08-28"
-      }
+  it("shows a recoverable message when initial plan data loading fails", async () => {
+    supabaseClient = createSupabaseClient({ profileLoadError: new TypeError("Load failed") });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
     });
+
+    expect(container.textContent).toContain("网络连接失败，请检查网络后刷新页面重试。已填写的计划参数不会丢失。");
+    expect(container.textContent).not.toContain("TypeError: Load failed");
+    expect(container.textContent).toContain("创建第一个计划");
+  });
+
+  it("keeps profile management disclosed for an existing plan", async () => {
+    supabaseClient = createSupabaseClient({ activeProgram: true });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("计划管理");
+    expect(container.textContent).not.toContain("更新体重、饮食与恢复");
+  });
+
+  it("keeps an existing plan in management view until the user explicitly adjusts it", async () => {
+    supabaseClient = createSupabaseClient({ activeProgram: true });
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -126,29 +162,55 @@ describe("ProgramManager cache hydration", () => {
     });
 
     expect(container.textContent).toContain("当前周期");
-    expect(container.textContent).toContain("修改计划");
+    expect(container.textContent).toContain("计划管理");
+    expect(container.textContent).not.toContain("按当前参数重新生成");
+    expect(container.querySelectorAll("a[href='/today']")).toHaveLength(1);
+    expect(container.textContent).not.toContain("生成 4 周训练计划");
     expect(container.textContent).not.toContain("先选训练结构，再选安排方式");
     expect(container.textContent).not.toContain("训练安排与主项最近工作组");
+    expect(container.querySelector("[data-plan-week='1']")?.hasAttribute("open")).toBe(true);
+    expect(container.querySelector("[data-plan-cycle='1']")?.hasAttribute("open")).toBe(true);
 
-    const modifyButton = Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("修改计划"));
-    expect(modifyButton).toBeTruthy();
     await act(async () => {
-      modifyButton?.click();
-      await Promise.resolve();
+      clickButton(container!, "计划管理");
     });
+
+    expect(container.textContent).toContain("调整计划");
+    expect(container.textContent).toContain("按当前参数重新生成");
+    expect(container.textContent).toContain("更新体重、饮食与恢复");
+
+    await act(async () => {
+      clickButton(container!, "全部收起");
+    });
+    expect([...container.querySelectorAll<HTMLDetailsElement>("[data-plan-week], [data-plan-cycle]")].every((item) => !item.open)).toBe(true);
+
+    await act(async () => {
+      clickButton(container!, "调整计划");
+    });
+
     expect(container.textContent).toContain("先选训练结构，再选安排方式");
     expect(container.textContent).toContain("训练安排与主项最近工作组");
+    expect(container.textContent).toContain("取消调整");
+
+    await act(async () => {
+      clickButton(container!, "取消调整");
+    });
+
+    expect(container.textContent).not.toContain("先选训练结构，再选安排方式");
+    expect(container.textContent).not.toContain("训练安排与主项最近工作组");
   });
 });
 
 function createSupabaseClient({
   pendingAuth = false,
+  profileLoadError,
   profileUpsertError,
-  program = null
+  activeProgram = false
 }: {
   pendingAuth?: boolean;
+  profileLoadError?: Error;
   profileUpsertError?: Error;
-  program?: Record<string, unknown> | null;
+  activeProgram?: boolean;
 }) {
   const mainLifts = [
     { default_increment: 2.5, id: "squat", is_main_lift: true, name: "深蹲", slug: "squat" },
@@ -156,8 +218,13 @@ function createSupabaseClient({
     { default_increment: 2.5, id: "deadlift", is_main_lift: true, name: "硬拉", slug: "deadlift" },
     { default_increment: 2.5, id: "press", is_main_lift: true, name: "推举", slug: "overhead_press" }
   ];
+  const planWorkouts = [
+    { day_type: "training", id: "workout-1", name: "推 A", schedule_index: 0, scheduled_date: "2026-07-27", sequence_index: 0, status: "scheduled" },
+    { day_type: "training", id: "workout-2", name: "拉 B", schedule_index: 1, scheduled_date: "2026-07-28", sequence_index: 1, status: "scheduled" },
+    { day_type: "training", id: "workout-3", name: "推 A", schedule_index: 7, scheduled_date: "2026-08-03", sequence_index: 2, status: "scheduled" }
+  ];
   const createQuery = (result: unknown) => {
-    const promise = Promise.resolve(result);
+    const promise = result instanceof Error ? Promise.reject(result) : Promise.resolve(result);
     const query = Object.assign(promise, {
       eq: () => query,
       in: () => query,
@@ -168,7 +235,7 @@ function createSupabaseClient({
     });
     return query;
   };
-  const profileTable = Object.assign(createQuery({ data: null, error: null }), {
+  const profileTable = Object.assign(createQuery(profileLoadError ?? { data: null, error: null }), {
     upsert: () => profileUpsertError ? Promise.reject(profileUpsertError) : Promise.resolve({ error: null })
   });
 
@@ -178,7 +245,24 @@ function createSupabaseClient({
       if (table === "usr_athlete_profiles") return profileTable;
       if (table === "cfg_exercises") return createQuery({ data: mainLifts, error: null });
       if (table === "log_recommendations") return createQuery({ data: [], error: null });
-      if (table === "plan_programs") return createQuery({ data: program, error: null });
+      if (table === "plan_programs") {
+        return createQuery({
+          data: activeProgram ? {
+            custom_template_name: null,
+            end_date: "2026-08-23",
+            id: "program-1",
+            name: "当前训练计划",
+            schedule_config: { weekdays: [1, 3, 5] },
+            schedule_mode: "fixed_weekdays",
+            start_date: "2026-07-27",
+            status: "active",
+            template_type: "push_pull_squat"
+          } : null,
+          error: null
+        });
+      }
+      if (table === "plan_workouts") return createQuery({ data: activeProgram ? planWorkouts : [], error: null });
+      if (table === "plan_workout_exercises") return createQuery({ data: [], error: null });
       if (table === "usr_lift_profiles") return Object.assign(createQuery({ data: [], error: null }), { upsert: () => Promise.resolve({ error: null }) });
       return createQuery({ data: [], error: null });
     }
@@ -195,4 +279,10 @@ function selectValue(select: HTMLSelectElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set;
   setter?.call(select, value);
   select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function clickButton(view: HTMLElement, label: string) {
+  const button = Array.from(view.querySelectorAll("button")).find((item) => item.textContent?.includes(label));
+  if (!button) throw new Error(`button not found: ${label}`);
+  button.click();
 }

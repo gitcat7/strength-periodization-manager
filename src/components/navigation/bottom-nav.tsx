@@ -43,7 +43,7 @@ export function BottomNav() {
   }
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-[0_-6px_18px_rgba(23,33,27,0.08)]">
+    <nav aria-label="主导航" className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-white px-2 pb-[env(safe-area-inset-bottom)] pt-2 shadow-[0_-6px_18px_rgba(23,33,27,0.08)]">
       <div className="mx-auto grid max-w-3xl grid-cols-5 gap-1 text-xs text-muted">
         {navItems.map((item) => {
           const Icon = item.icon;

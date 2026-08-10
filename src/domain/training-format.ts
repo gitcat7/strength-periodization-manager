@@ -95,7 +95,13 @@ export function formatPrescription({
     return `${targetReps} 分钟 Zone 2`;
   }
 
-  return `${targetSets} 组 x ${targetReps} 次${targetWeight > 0 ? ` @ ${targetWeight}kg` : ""}`;
+  if (slug === "pull_up" && targetWeight === 0) {
+    return `${targetSets} 组 x ${targetReps} 次`;
+  }
+
+  return targetWeight > 0
+    ? `${targetSets} 组 x ${targetReps} 次 @ ${targetWeight}kg`
+    : `${targetSets} 组 x ${targetReps} 次 · 从空杆或最轻可控重量开始`;
 }
 
 export function getExerciseNote(slug?: string, index = 0) {
@@ -107,4 +113,3 @@ export function getExerciseNote(slug?: string, index = 0) {
   }
   return "辅助容量，动作干净，不力竭。";
 }
-

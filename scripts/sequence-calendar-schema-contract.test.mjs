@@ -15,6 +15,9 @@ const pgTapPath = fileURLToPath(new URL("../supabase/tests/sequence_calendar_sch
 const reflowFixMigrationPath = fileURLToPath(
   new URL("../supabase/migrations/20260809010000_defer_reflow_schedule_index_constraint.sql", import.meta.url)
 );
+const durationReconciliationMigrationPath = fileURLToPath(
+  new URL("../supabase/migrations/20260810010000_reconcile_session_duration_choices.sql", import.meta.url)
+);
 
 async function readSql() {
   const [migration, schema] = await Promise.all([readFile(migrationPath, "utf8"), readFile(schemaPath, "utf8")]);
@@ -36,9 +39,13 @@ describe("sequence calendar scheduling schema contract", () => {
 
   it("widens session duration choices and relaxes legacy weekly training days", async () => {
     const { migration, schema } = await readSql();
+    const reconciliationMigration = await readFile(durationReconciliationMigrationPath, "utf8");
 
-    expect(schema).toContain("session_duration_minutes in (45, 60, 75, 90, 120, 150, 180)");
+    expect(schema).toContain("session_duration_minutes in (30, 45, 60, 75, 90, 120, 150, 180)");
     expect(migration).toContain("session_duration_minutes in (45, 60, 75, 90, 120, 150, 180)");
+    expect(reconciliationMigration).toContain("session_duration_minutes in (30, 45, 60, 75, 90, 120, 150, 180)");
+    expect(reconciliationMigration).toMatch(/drop constraint if exists usr_athlete_profiles_session_duration_minutes_check/i);
+    expect(reconciliationMigration).toMatch(/drop constraint if exists athlete_profiles_session_duration_minutes_check/i);
     expect(migration).toMatch(/alter column training_days_per_week drop not null/i);
     expect(migration).toMatch(/drop constraint if exists athlete_profiles_session_duration_minutes_check/i);
   });
