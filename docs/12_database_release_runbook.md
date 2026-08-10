@@ -258,6 +258,28 @@ where w.day_type = 'rest';
 2. 迁移只向 `usr_athlete_profiles` 追加 `movement_restrictions text[]`，默认空数组；不会解读或改写既有 `injury_notes`。
 3. 迁移后创建或更新一份训练画像，选择一项动作限制并确认保存成功；自由文本备注仍应只显示为备注。
 4. 再部署前端。若未执行迁移，前端会因缺少列无法安全保存画像，应先完成本迁移而非绕过限制字段。
+## 8. 计划日动作编辑迁移（2026-08-10）
+
+迁移文件：`supabase/migrations/20260810110000_revise_workout_prescription.sql`。
+
+1. 先在非生产环境执行并运行 `pnpm test:db:prescription`（或直接执行 `pnpm dlx supabase@2.34.3 test db supabase/tests/revise_workout_prescription.test.sql --local`），确认 pgTAP 全部通过。
+2. 在 Supabase SQL Editor 一次执行该唯一迁移；它新增 `plan_workouts.prescription_revision`、`ops_workout_revision_events` 及 `revise_workout_prescription(uuid, integer, jsonb)`，不回填或改写既有训练记录。
+3. 迁移成功后用 SQL 验证：
+
+```sql
+select column_name, column_default
+from information_schema.columns
+where table_schema = 'public' and table_name = 'plan_workouts'
+  and column_name = 'prescription_revision';
+
+select has_function_privilege('anon', 'public.revise_workout_prescription(uuid, integer, jsonb)', 'execute') as anon_can_execute,
+       has_function_privilege('authenticated', 'public.revise_workout_prescription(uuid, integer, jsonb)', 'execute') as authenticated_can_execute;
+```
+
+预期 `anon_can_execute=false`、`authenticated_can_execute=true`。浏览器只调用该 RPC；不得直接拼接多次动作表写入。RPC 会锁定当前用户 active program 的 scheduled/draft training day，检查版本、动作方向、本地 cfg_exercises、动作数量/顺序/组次/次数/重量，并在任一校验失败时整事务回滚。
+
+4. 用户确认迁移成功且测试窗口明确“验证通过”前，禁止部署依赖该 RPC 的前端。迁移没有向后兼容的降级写路径；如发布异常，先回滚 Vercel 到不展示编辑入口的固定前端，再保留新增列/审计表和历史数据，禁止直接删除列或表。
+
 # wger 外部动作引用发布顺序（2026-07-16）
 
 1. 在 Supabase SQL Editor 执行 `supabase/migrations/20260716130000_wger_external_exercise_references.sql`；它仅追加字段、约束和 RPC，不会复制第三方动作目录。

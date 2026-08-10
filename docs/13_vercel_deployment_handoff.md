@@ -89,6 +89,13 @@ SUPABASE_SERVICE_ROLE_KEY=
 
 ## 4. Supabase Auth 线上验证码配置
 
+## 4.1 计划日动作编辑发布门禁
+
+部署计划日动作编辑前，必须先在生产 Supabase SQL Editor 执行唯一迁移
+`supabase/migrations/20260810110000_revise_workout_prescription.sql`，并由用户确认成功。
+随后运行 `pnpm test:db:prescription`（或等价的专用 pgTAP 命令）及 `pnpm release:check`；测试窗口明确“验证通过”前不得推送或部署。
+线上回滚仅回退 Vercel 到不包含编辑入口的固定提交，不删除 `prescription_revision`、审计表或 RPC。
+
 拿到 Vercel 默认域名后，到 Supabase Dashboard：
 
 ```text
