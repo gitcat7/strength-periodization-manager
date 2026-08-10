@@ -144,7 +144,7 @@ describe("SingleWorkoutRecorder", () => {
       auth: { getSession: async () => ({ data: { session: { access_token: "test" } } }) },
       rpc: async (name: string) => name === "get_standalone_workout_draft"
         ? { data: null, error: null }
-        : { data: "workout-completed", error: null }
+        : { data: { duration_seconds: 3600, started_at: "2026-07-30T10:00:00.000Z", workout_id: "workout-completed" }, error: null }
     } as never);
     container = document.createElement("div");
     document.body.append(container);
@@ -168,6 +168,34 @@ describe("SingleWorkoutRecorder", () => {
     expect(container.querySelector('a[href="/history"]')).toBeTruthy();
     expect(container.querySelector('a[href="/"]')).toBeTruthy();
     expect(clearTrainingDataCaches).toHaveBeenCalledOnce();
+  });
+
+  it("rejects the retired UUID-string save response instead of treating it as the JSONB RPC contract", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    vi.mocked(clearTrainingDataCaches).mockClear();
+    vi.mocked(createBrowserSupabaseClient).mockReturnValue({
+      auth: { getSession: async () => ({ data: { session: { access_token: "test" } } }) },
+      rpc: async (name: string) => name === "get_standalone_workout_draft"
+        ? { data: null, error: null }
+        : { data: "workout-completed", error: null }
+    } as never);
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => root?.render(<SingleWorkoutRecorder />));
+    const addBench = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("添加"));
+    await act(async () => addBench?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const complete = [...container.querySelectorAll("button")].find((button) => button.textContent === "完成训练");
+    await act(async () => complete?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    const duration = container.querySelector<HTMLInputElement>('input[aria-label="实际训练时长（分钟）"]');
+    await act(async () => setInputValue(duration!, "60"));
+    const confirm = [...container.querySelectorAll("button")].find((button) => button.textContent === "仍然结束训练");
+    await act(async () => confirm?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    expect(container.textContent).toContain("训练已保存，但暂时无法定位该次记录。请前往全部历史查看。");
+    expect(container.textContent).not.toContain("自由训练已完成");
+    expect(clearTrainingDataCaches).not.toHaveBeenCalled();
   });
 
   it("allows an audited cardio exercise to finish without an RPE value", async () => {

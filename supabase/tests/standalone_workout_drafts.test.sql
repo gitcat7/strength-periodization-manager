@@ -16,7 +16,7 @@ values ('00000000-0000-0000-0000-000000003301', '00000000-0000-0000-0000-0000000
 insert into public.workouts (id, program_id, user_id, scheduled_date, sequence_index, schedule_index, day_type, name, status)
 values ('00000000-0000-0000-0000-000000003401', '00000000-0000-0000-0000-000000003301', '00000000-0000-0000-0000-000000003101', '2026-07-01', 0, 0, 'training', 'Active program next', 'scheduled');
 
-select has_function('public', 'save_standalone_workout', array['jsonb'], 'draft save RPC exists');
+select function_returns('public', 'save_standalone_workout', array['jsonb'], 'jsonb', 'draft save RPC returns its JSONB duration payload');
 select has_function('public', 'get_standalone_workout_draft', array[]::text[], 'draft read RPC exists');
 select is(has_function_privilege('anon', 'public.save_standalone_workout(jsonb)', 'execute'), false, 'anon cannot save standalone drafts');
 select is(has_function_privilege('authenticated', 'public.save_standalone_workout(jsonb)', 'execute'), true, 'authenticated can save standalone drafts');
@@ -27,7 +27,7 @@ grant all on table standalone_test_state to authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000003101', true);
 set local role authenticated;
 insert into standalone_test_state
-select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"draft","exercises":[{"exercise_id":"00000000-0000-0000-0000-000000003201","sets":[{"weight":"50","reps":"5","rpe":"8","completed":true}]}]}'::jsonb);
+select (public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"draft","exercises":[{"exercise_id":"00000000-0000-0000-0000-000000003201","sets":[{"weight":"50","reps":"5","rpe":"8","completed":true}]}]}'::jsonb) ->> 'workout_id')::uuid;
 select is((select count(*) from public.workouts where user_id = '00000000-0000-0000-0000-000000003101' and program_id is null and status = 'draft'), 1::bigint, 'first draft save creates one standalone workout');
 select is((select program_id is null from public.workouts where id = (select workout_id from standalone_test_state)), true, 'standalone draft never creates a program');
 select is((select count(*) from public.workouts where program_id = '00000000-0000-0000-0000-000000003301' and status in ('scheduled', 'draft')), 1::bigint, 'standalone draft does not change the active program next session');
@@ -70,23 +70,23 @@ select public.save_standalone_workout(jsonb_build_object(
 select is((select exercise_provider from public.workout_exercises where workout_id = (select workout_id from standalone_test_state)), 'manual', 'manual action is stored only as a workout snapshot');
 select is((select exercise_name_snapshot from public.workout_exercises where workout_id = (select workout_id from standalone_test_state)), '酒店健身房划船', 'manual snapshot preserves a readable user-provided name');
 select throws_ok(
-  $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"completed","exercises":[{"exercise_provider":"manual","external_exercise_id":"manual:00000000-0000-4000-8000-000000000001","exercise_name_snapshot":"徒手划船","exercise_metadata_snapshot":{"equipment":[],"muscles":[],"loadType":"bodyweight"},"sets":[{"weight":"","reps":"","rpe":"7","completed":true}]}]}'::jsonb)$$,
+  $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"completed","duration_seconds":3600,"exercises":[{"exercise_provider":"manual","external_exercise_id":"manual:00000000-0000-4000-8000-000000000001","exercise_name_snapshot":"徒手划船","exercise_metadata_snapshot":{"equipment":[],"muscles":[],"loadType":"bodyweight"},"sets":[{"weight":"","reps":"","rpe":"7","completed":true}]}]}'::jsonb)$$,
   'P0001',
   'Completed standalone set is incomplete',
   'completed standalone set requires repetitions'
 );
 select lives_ok(
-  $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"completed","exercises":[{"exercise_provider":"reviewed","external_exercise_id":"reviewed:treadmill-run","exercise_name_snapshot":"跑步机跑步","exercise_metadata_snapshot":{"equipment":["跑步机"],"muscles":["股四头肌"],"loadType":"bodyweight","movementPattern":"有氧跑步","riskLevel":"standard"},"sets":[{"weight":"","reps":"30","rpe":"","completed":true}]}]}'::jsonb)$$,
+  $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"completed","duration_seconds":3600,"exercises":[{"exercise_provider":"reviewed","external_exercise_id":"reviewed:treadmill-run","exercise_name_snapshot":"跑步机跑步","exercise_metadata_snapshot":{"equipment":["跑步机"],"muscles":["股四头肌"],"loadType":"bodyweight","movementPattern":"有氧跑步","riskLevel":"standard"},"sets":[{"weight":"","reps":"30","rpe":"","completed":true}]}]}'::jsonb)$$,
   'reviewed cardio can omit RPE'
 );
 select throws_ok(
-  $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"completed","exercises":[{"exercise_provider":"reviewed","external_exercise_id":"reviewed:treadmill-run","exercise_name_snapshot":"跑步机跑步","exercise_metadata_snapshot":{"equipment":["跑步机"],"muscles":["股四头肌"],"loadType":"bodyweight","movementPattern":"水平推","riskLevel":"standard"},"sets":[{"weight":"","reps":"30","rpe":"","completed":true}]}]}'::jsonb)$$,
+  $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"completed","duration_seconds":3600,"exercises":[{"exercise_provider":"reviewed","external_exercise_id":"reviewed:treadmill-run","exercise_name_snapshot":"跑步机跑步","exercise_metadata_snapshot":{"equipment":["跑步机"],"muscles":["股四头肌"],"loadType":"bodyweight","movementPattern":"水平推","riskLevel":"standard"},"sets":[{"weight":"","reps":"30","rpe":"","completed":true}]}]}'::jsonb)$$,
   'P0001',
   'Completed standalone set is incomplete',
   'untrusted reviewed metadata cannot omit RPE'
 );
 select throws_ok(
-  $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"completed","exercises":[{"exercise_provider":"reviewed","external_exercise_id":"reviewed:barbell-bench-press","exercise_name_snapshot":"杠铃卧推","exercise_metadata_snapshot":{"equipment":["杠铃"],"muscles":["胸大肌"],"loadType":"bodyweight","movementPattern":"水平推","riskLevel":"technical"},"sets":[{"weight":"","reps":"8","rpe":"7","completed":true}]}]}'::jsonb)$$,
+  $$select public.save_standalone_workout('{"scheduled_date":"2026-07-16","status":"completed","duration_seconds":3600,"exercises":[{"exercise_provider":"reviewed","external_exercise_id":"reviewed:barbell-bench-press","exercise_name_snapshot":"杠铃卧推","exercise_metadata_snapshot":{"equipment":["杠铃"],"muscles":["胸大肌"],"loadType":"bodyweight","movementPattern":"水平推","riskLevel":"technical"},"sets":[{"weight":"","reps":"8","rpe":"7","completed":true}]}]}'::jsonb)$$,
   'P0001',
   'Reviewed exercise load type is invalid',
   'reviewed strength action cannot spoof a bodyweight load type'

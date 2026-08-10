@@ -169,7 +169,7 @@ export function SingleWorkoutRecorder() {
     if (error) { setMessage("保存失败，请检查网络或字段后重试。输入内容已保留。"); return; }
     if (status === "completed") {
       const result = data && typeof data === "object" ? data as { workout_id?: unknown; duration_seconds?: unknown } : null;
-      const workoutId = typeof result?.workout_id === "string" ? result.workout_id : typeof data === "string" ? data : null;
+      const workoutId = typeof result?.workout_id === "string" ? result.workout_id : null;
       if (!workoutId || !summary) { setMessage("训练已保存，但暂时无法定位该次记录。请前往全部历史查看。"); return; }
       clearTrainingDataCaches();
       setDraftWorkoutId(null);
@@ -181,7 +181,7 @@ export function SingleWorkoutRecorder() {
       return;
     }
     const result = data && typeof data === "object" ? data as { workout_id?: unknown; started_at?: unknown } : null;
-    setDraftWorkoutId(typeof result?.workout_id === "string" ? result.workout_id : typeof data === "string" ? data : draftWorkoutId); if (typeof result?.started_at === "string") setStartedAt(result.started_at); setMessage("草稿已保存，可随时继续编辑。");
+    setDraftWorkoutId(typeof result?.workout_id === "string" ? result.workout_id : draftWorkoutId); if (typeof result?.started_at === "string") setStartedAt(result.started_at); setMessage("草稿已保存，可随时继续编辑。");
   }
   function addManual() {
     const name = manualName.trim();
