@@ -19,6 +19,7 @@ export type PrescriptionEditorWorkout = {
   status: string;
   day_type: "training" | "rest";
   prescription_revision?: number | null;
+  completed_set_count?: number;
   name: string;
 };
 
@@ -68,7 +69,7 @@ function toDraft(workout: PrescriptionEditorWorkout, exercises: PrescriptionEdit
     dayType: workout.day_type,
     direction,
     prescriptionRevision: workout.prescription_revision ?? 1,
-    completedSetCount: 0,
+    completedSetCount: workout.completed_set_count ?? 0,
     exercises: exercises.slice().sort((a, b) => a.order_index - b.order_index).map((exercise, index) => ({
       exerciseId: exercise.exercise_id ?? "",
       slug: exercise.exercises?.slug ?? "",
@@ -100,7 +101,7 @@ export function WorkoutPrescriptionEditor({ workout, exercises, catalog, onSaved
 
   const before = useMemo(() => toDraft(workout, exercises)?.exercises ?? [], [workout, exercises]);
   const available = draft ? catalog.filter((item) => item.training_direction === draft.direction && !draft.exercises.some((exercise) => exercise.exerciseId === item.id)) : [];
-  const editable = workout.day_type === "training" && ["scheduled", "draft"].includes(workout.status) && Boolean(draft);
+  const editable = workout.day_type === "training" && ["scheduled", "draft"].includes(workout.status) && (workout.completed_set_count ?? 0) === 0 && Boolean(draft);
   if (!editable) return null;
 
   function updateExercise(index: number, patch: Partial<WorkoutPrescriptionExerciseDraft>) {

@@ -99,6 +99,7 @@ type WorkoutRow = {
   status: string;
   program_id?: string | null;
   prescription_revision?: number | null;
+  completed_set_count?: number;
 };
 
 type ScheduleEventRow = {
@@ -726,8 +727,26 @@ export function ProgramManager() {
     }
 
     const workoutExerciseRows = (exerciseData ?? []) as unknown as WorkoutExerciseRow[];
+    const completedSetCounts = new Map<string, number>();
+    if (workoutExerciseRows.length > 0) {
+      const { data: completedLogs } = await supabase
+        .from(DB_TABLE.setLogs)
+        .select("workout_exercise_id")
+        .in("workout_exercise_id", workoutExerciseRows.map((exercise) => exercise.id))
+        .eq("completed", true);
+      const exerciseToWorkout = new Map(workoutExerciseRows.map((exercise) => [exercise.id, exercise.workout_id]));
+      (completedLogs ?? []).forEach((log) => {
+        const workoutId = exerciseToWorkout.get(log.workout_exercise_id as string);
+        if (workoutId) completedSetCounts.set(workoutId, (completedSetCounts.get(workoutId) ?? 0) + 1);
+      });
+    }
+    const workoutsWithCompletedCounts = workoutRows.map((workout) => ({
+      ...workout,
+      completed_set_count: completedSetCounts.get(workout.id) ?? 0
+    }));
+    setWorkouts(workoutsWithCompletedCounts);
     setWorkoutExercises(workoutExerciseRows);
-    return { ok: true, value: { workoutExercises: workoutExerciseRows, workouts: workoutRows } };
+    return { ok: true, value: { workoutExercises: workoutExerciseRows, workouts: workoutsWithCompletedCounts } };
   }
 
   async function loadScheduleAdjustmentData(programId: string) {
@@ -1796,6 +1815,7 @@ export function ProgramManager() {
                     name: workout.name,
                     program_id: program?.id,
                     prescription_revision: workout.prescription_revision,
+                    completed_set_count: workout.completed_set_count,
                     status: workout.status
                   }}
                 />

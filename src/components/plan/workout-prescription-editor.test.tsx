@@ -54,5 +54,8 @@ describe("WorkoutPrescriptionEditor", () => {
     root = createRoot(container);
     act(() => root?.render(<WorkoutPrescriptionEditor catalog={catalog} exercises={exercises} onSaved={vi.fn()} workout={{ ...workout, status: "completed" }} />));
     expect(container.textContent).not.toContain("编辑本日动作");
+
+    act(() => root?.render(<WorkoutPrescriptionEditor catalog={catalog} exercises={exercises} onSaved={vi.fn()} workout={{ ...workout, completed_set_count: 1 }} />));
+    expect(container.textContent).not.toContain("编辑本日动作");
   });
 });

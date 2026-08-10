@@ -7,6 +7,7 @@ export type PlanOutlineWorkout = {
   scheduled_date: string;
   status: string;
   prescription_revision?: number | null;
+  completed_set_count?: number;
 };
 
 export type PlanOutline = ReturnType<typeof groupPlanOutline>;
