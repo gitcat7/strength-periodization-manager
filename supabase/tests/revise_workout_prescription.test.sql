@@ -1,6 +1,6 @@
 begin;
 
-select plan(27);
+select plan(28);
 
 select has_column('public', 'plan_workouts', 'prescription_revision', 'workout prescription revision exists');
 select has_table('public', 'ops_workout_revision_events', 'workout revision audit table exists');
@@ -65,6 +65,7 @@ select throws_ok($$select public.revise_workout_prescription('00000000-0000-0000
 select throws_ok($$select public.revise_workout_prescription('00000000-0000-0000-0000-000000003401', 1, '{"exercises":[{"exercise_id":"00000000-0000-0000-0000-000000003201","order_index":1,"target_sets":3,"target_reps":5,"target_weight":100},{"exercise_id":"00000000-0000-0000-0000-000000003201","order_index":2,"target_sets":3,"target_reps":5,"target_weight":100}]}'::jsonb)$$, 'P0001', 'Workout prescription has duplicate exercises', 'duplicate exercises are rejected');
 select throws_ok($$select public.revise_workout_prescription('00000000-0000-0000-0000-000000003401', 1, '{"exercises":[{"exercise_id":"00000000-0000-0000-0000-000000003201","order_index":2,"target_sets":3,"target_reps":5,"target_weight":100}]}'::jsonb)$$, 'P0001', 'Workout prescription order indexes must be contiguous', 'noncontiguous order is rejected');
 select throws_ok($$select public.revise_workout_prescription('00000000-0000-0000-0000-000000003401', 1, '{"exercises":[{"exercise_id":"00000000-0000-0000-0000-000000003201","order_index":1,"target_sets":0,"target_reps":5,"target_weight":100}]}'::jsonb)$$, 'P0001', 'Workout prescription values are invalid', 'invalid values are rejected');
+select throws_ok($$select public.revise_workout_prescription('00000000-0000-0000-0000-000000003401', 1, '{"exercises":[{"exercise_id":"00000000-0000-0000-0000-000000003201","order_index":1,"target_sets":3,"target_reps":5}]}'::jsonb)$$, 'P0001', 'Workout prescription values are invalid', 'missing weight is rejected');
 select throws_ok($$select public.revise_workout_prescription('00000000-0000-0000-0000-000000003401', 1, '{"exercises":[{"exercise_id":"00000000-0000-0000-0000-000000003203","order_index":1,"target_sets":3,"target_reps":5,"target_weight":100}]}'::jsonb)$$, 'P0001', 'Workout exercise direction is incompatible', 'direction mismatch is rejected');
 select throws_ok($$select public.revise_workout_prescription('00000000-0000-0000-0000-000000003401', 1, '{"exercises":[{"exercise_id":"00000000-0000-0000-0000-000000003201","order_index":1,"target_sets":3,"target_reps":5,"target_weight":100,"exercise_provider":"external"}]}'::jsonb)$$, 'P0001', 'Only local cfg_exercises can be used', 'external exercise is rejected');
 

@@ -2372,10 +2372,10 @@ begin
   for v_item in select value from jsonb_array_elements(p_payload -> 'exercises') loop
     if jsonb_typeof(v_item) <> 'object' or (v_item ? 'exercise_provider') or (v_item ? 'external_exercise_id') or (v_item ? 'exercise_name_snapshot') or (v_item ? 'exercise_metadata_snapshot') then raise exception 'Only local cfg_exercises can be used' using errcode = 'P0001'; end if;
     begin v_exercise_id := (v_item ->> 'exercise_id')::uuid; v_order := (v_item ->> 'order_index')::integer; v_sets := (v_item ->> 'target_sets')::integer; v_reps := (v_item ->> 'target_reps')::integer; v_weight := (v_item ->> 'target_weight')::numeric; exception when others then raise exception 'Workout prescription values are invalid' using errcode = 'P0001'; end;
-    if v_order <> (coalesce(array_length(v_seen_ids, 1), 0) + 1) or v_order < 1 or v_order > v_count then raise exception 'Workout prescription order indexes must be contiguous' using errcode = 'P0001'; end if;
+    if v_order is null or v_order <> (coalesce(array_length(v_seen_ids, 1), 0) + 1) or v_order < 1 or v_order > v_count then raise exception 'Workout prescription order indexes must be contiguous' using errcode = 'P0001'; end if;
     if v_exercise_id = any(v_seen_ids) then raise exception 'Workout prescription has duplicate exercises' using errcode = 'P0001'; end if;
     v_seen_ids := array_append(v_seen_ids, v_exercise_id);
-    if v_sets < 1 or v_sets > 20 or v_reps < 1 or v_reps > 1000 or v_weight < 0 or v_weight > 10000 or v_weight::text in ('NaN', 'Infinity', '-Infinity') then raise exception 'Workout prescription values are invalid' using errcode = 'P0001'; end if;
+    if v_sets is null or v_reps is null or v_weight is null or v_sets < 1 or v_sets > 20 or v_reps < 1 or v_reps > 1000 or v_weight < 0 or v_weight > 10000 or v_weight::text in ('NaN', 'Infinity', '-Infinity') then raise exception 'Workout prescription values are invalid' using errcode = 'P0001'; end if;
     select ce.training_direction into v_item_direction from public.cfg_exercises ce where ce.id = v_exercise_id;
     if not found then raise exception 'Only local cfg_exercises can be used' using errcode = 'P0001'; end if;
     if v_item_direction is distinct from v_direction then raise exception 'Workout exercise direction is incompatible' using errcode = 'P0001'; end if;
