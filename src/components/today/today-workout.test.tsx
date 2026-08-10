@@ -291,9 +291,17 @@ describe("TodayWorkout cache hydration", () => {
     const primary = [...view.querySelectorAll("button")].filter((button) => button.className.includes("bg-action") && button.textContent?.includes("保存并完成训练"));
     expect(primary).toHaveLength(1);
   });
+
+  it("uses an edited plan-day target weight and set count when Today hydrates", async () => {
+    writeCachedWorkout({ slug: "barbell_bench_press", targetWeight: 77.5, targetSets: 2 });
+    ({ container, root } = renderTodayWorkout());
+    await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('input[aria-label="重量"]')?.getAttribute("value") ?? container.querySelector<HTMLInputElement>('input[aria-label="重量"]')?.value).toBe("77.5");
+    expect(container.querySelectorAll('input[aria-label="第 1 组完成"], input[aria-label="第 2 组完成"]')).toHaveLength(2);
+  });
 });
 
-function writeCachedWorkout({ slug, targetWeight = 100, twoExercises = false }: { slug: string; targetWeight?: number; twoExercises?: boolean }) {
+function writeCachedWorkout({ slug, targetWeight = 100, targetSets = 1, twoExercises = false }: { slug: string; targetWeight?: number; targetSets?: number; twoExercises?: boolean }) {
   writeClientCache("strength-training-cache:today", {
     coachRecommendations: [],
     exercises: [
@@ -310,7 +318,7 @@ function writeCachedWorkout({ slug, targetWeight = 100, twoExercises = false }: 
         id: "workout-exercise-1",
         order_index: 0,
         target_reps: 5,
-        target_sets: 1,
+        target_sets: targetSets,
         target_weight: targetWeight
       },
       ...(twoExercises ? [{
@@ -341,18 +349,16 @@ function writeCachedWorkout({ slug, targetWeight = 100, twoExercises = false }: 
     },
     restItem: null,
     setLogs: {
-      "workout-exercise-1": [
-        {
+      "workout-exercise-1": Array.from({ length: targetSets }, (_, index) => ({
           actual_reps: null,
           actual_weight: null,
           completed: false,
           rpe: null,
-          set_index: 1,
+          set_index: index + 1,
           target_reps: 5,
           target_weight: targetWeight,
           workout_exercise_id: "workout-exercise-1"
-        }
-      ],
+        })),
       ...(twoExercises ? {
         "workout-exercise-2": [{
           actual_reps: null,

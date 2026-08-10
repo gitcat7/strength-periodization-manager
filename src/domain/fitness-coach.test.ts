@@ -144,4 +144,14 @@ describe("next-cycle main-lift recommendation", () => {
     expect(buildNextCycleMainLiftRecommendation({ exerciseName: "杠铃推举", increment: 2.5, logs: [], targetWeight: 60, consecutiveMissedSessions: 0 }))
       .toMatchObject({ type: "hold", suggestedWeight: 60, reason: "杠铃推举数据不足，保持当前处方。" });
   });
+
+  it("uses the edited main-lift target weight and reps when coaching the next cycle", () => {
+    expect(buildNextCycleMainLiftRecommendation({
+      exerciseName: "新增主项",
+      increment: 2.5,
+      logs: [{ actualReps: 8, actualWeight: 80, completed: true, rpe: 7, targetReps: 8, targetWeight: 80 }],
+      targetWeight: 80,
+      consecutiveMissedSessions: 0
+    })).toMatchObject({ type: "increase", suggestedWeight: 82.5 });
+  });
 });
