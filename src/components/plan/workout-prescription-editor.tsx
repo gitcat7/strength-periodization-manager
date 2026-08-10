@@ -70,7 +70,7 @@ function toDraft(workout: PrescriptionEditorWorkout, exercises: PrescriptionEdit
     prescriptionRevision: workout.prescription_revision ?? 1,
     completedSetCount: 0,
     exercises: exercises.slice().sort((a, b) => a.order_index - b.order_index).map((exercise, index) => ({
-      exerciseId: exercise.exercise_id,
+      exerciseId: exercise.exercise_id ?? "",
       slug: exercise.exercises?.slug ?? "",
       name: exercise.exercises?.name ?? "动作",
       direction: exercise.exercises?.training_direction ?? direction,
