@@ -16,4 +16,3 @@
 ## Task 2: Verify and release
 - [ ] Run `pnpm release:check`.
 - [ ] Push `codex/p0-remediation`, deploy production, and run online smoke checks.
-

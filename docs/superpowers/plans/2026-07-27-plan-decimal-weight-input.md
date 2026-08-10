@@ -93,4 +93,3 @@ $env:BASE_URL='https://strength-periodization-manager.vercel.app'; $env:SMOKE_TR
 ```
 
 Expected: deployment is READY and the production smoke script reports every route as `ok`.
-

@@ -6,15 +6,15 @@
 - 恢复来源：`a7561dbbecc5edda58e75bed9e6162c1231057ef`（`origin/codex/p0-remediation`）
 - 集成分支：`codex/production-reconciliation`
 
-本矩阵只覆盖批次 A。合并结果已经完成定向测试、全量 Vitest、类型检查、构建与 14 路由 smoke；数据库 pgTAP 因本地 Supabase 未运行而明确记为“未执行”。
+本矩阵只覆盖批次 A。合并结果已经完成定向测试、全量 Vitest、类型检查、构建、14 路由 smoke 与两组可用 pgTAP。
 
 ## 必须保留的能力
 
 | 能力 | checkpoint 证据 | p0-remediation 证据 | 合并后测试 / 数据库契约 | 状态 |
 | --- | --- | --- | --- | --- |
 | 邮箱 8 位 OTP | `src/components/auth/email-login-form.tsx`；`src/components/auth/email-login-form.test.tsx`；`scripts/email-otp-login-contract.test.mjs`；`/login` | 旧认证实现，仅作冲突来源 | OTP focused、登录内容 contract、14 路由 smoke | 通过 |
-| 顺序优先排程 | `src/domain/sequence-calendar.ts`；`src/domain/schedule-rule.ts`；`supabase/migrations/20260730100000_sequence_calendar_scheduling.sql`；`supabase/tests/sequence_calendar_scheduling.test.sql` | 不包含该能力 | sequence/calendar domain、schema contract 通过；sequence pgTAP 未执行 | 代码通过 / pgTAP 未执行 |
-| 暂停 / 恢复与不可训练日期 | `src/domain/schedule-adjustment.ts`；计划页排程组件；sequence migration/schema | 不包含该能力 | schedule adjustment、reflow payload、计划组件通过；sequence pgTAP 未执行 | 代码通过 / pgTAP 未执行 |
+| 顺序优先排程 | `src/domain/sequence-calendar.ts`；`src/domain/schedule-rule.ts`；`supabase/migrations/20260730100000_sequence_calendar_scheduling.sql`；`supabase/tests/sequence_calendar_scheduling.test.sql` | 不包含该能力 | sequence/calendar domain、schema contract 通过；sequence pgTAP 20/20 | 通过 |
+| 暂停 / 恢复与不可训练日期 | `src/domain/schedule-adjustment.ts`；计划页排程组件；sequence migration/schema | 不包含该能力 | schedule adjustment、reflow payload、计划组件通过；sequence pgTAP 20/20 | 通过 |
 | 未来训练不提前执行 | `src/domain/next-workout.ts`；`src/components/today/today-workout.tsx`；首页 CTA tests | 较早的 Today/Home 行为 | next-workout、Today、Home focused | 通过 |
 | 严格画像处方 | 较早生成器，不完整 | `src/domain/training-prescription.ts`、`program.ts`、`plan-setup.ts`；`20260726200000_profile_driven_goal_prescriptions.sql` | prescription/program/plan-setup tests；profile SQL contract | 通过 |
 | 训练时长追踪 | 不完整 | `src/domain/workout-duration.ts`；时长 UI；`20260729233000_workout_duration_tracking.sql` | duration domain/UI tests；duration SQL contract | 通过 |
@@ -58,9 +58,9 @@ checkpoint 独有的 sequence scheduling 和延迟唯一约束迁移已保留。
 
 - SQL contract focused：5 个文件、20 个测试通过。
 - Domain focused：5 个文件、70 个测试通过。
-- UI focused：32 个文件、147 个测试通过；OTP contract 2 个测试通过。
+- UI focused：33 个文件、149 个测试通过（包含 OTP contract 2 项）。
 - Full Vitest：100 个测试文件、437 个测试通过；2 个依赖本地环境的 smoke 测试跳过。测试输出保留既有 React `act(...)` 警告。
-- `pnpm release:check`：typecheck、Next.js 生产构建、14 路由本地 smoke 通过。首次构建受共享 `.next` 并发写入影响出现 ENOENT；确认无并发进程后无代码变更重跑通过，重跑输出有 webpack 缓存恢复警告但完成了完整重建与 smoke。
-- pgTAP：未执行。`pnpm test:db` 因 `127.0.0.1:54322` 无本地 Postgres 被拒绝连接；`pnpm test:db:sequence` 因容器内主机名 `db` 不可解析，0 个子测试运行。禁止把这两项写成通过。
-- `git diff --check`：通过；worktree clean。
+- `pnpm release:check`：typecheck、Next.js 生产构建、14 路由本地 smoke 通过。首次运行因独立 worktree 未带被忽略的 `.env.local`，`/api/health` 按设计返回 500；仅复制既有本地环境文件（未读取、未提交）后重跑通过。
+- pgTAP：Docker 与既有 `strength-periodization-manager` 本地 Supabase 栈启动后，从原项目根目录运行相同测试文件以使用正确的 Docker project network；`pnpm test:db` 为 20/20 PASS，`pnpm test:db:sequence` 为 20/20 PASS。新 worktree 目录名会让 Supabase CLI 寻找不存在的 `production-reconciliation` 网络，因此不把该次 0 子测试的网络失败计为测试结果。
+- `git diff --check`：通过。
 - 独立测试窗口：交接固定提交后通知；验证通过前禁止部署。
