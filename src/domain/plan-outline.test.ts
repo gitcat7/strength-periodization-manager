@@ -92,3 +92,80 @@ it("selects the first unfinished plan-progress week even when the calendar has s
   expect(getDefaultPlanPosition(outline, "2026-07-01", new Date("2026-08-20T08:00:00")))
     .toEqual({ week: 1, cycleIndex: 1 });
 });
+
+it("keeps a 63-session cadence plan inside its configured 12 progress weeks after a pause delay", () => {
+  const workouts = Array.from({ length: 63 }, (_, sequenceIndex) => ({
+    id: `training-${sequenceIndex}`,
+    day_type: "training" as const,
+    name: `不解析名称 ${sequenceIndex}`,
+    schedule_index: sequenceIndex,
+    sequence_index: sequenceIndex,
+    cycle_index: Math.floor(sequenceIndex / 5),
+    cycle_position: sequenceIndex % 5,
+    scheduled_date: shiftDate("2026-07-01", sequenceIndex + (sequenceIndex >= 3 ? 42 : 0)),
+    status: sequenceIndex < 60 ? "completed" : "scheduled"
+  }));
+
+  const outline = groupPlanOutline(workouts, "2026-07-01", {
+    scheduleRule: { mode: "cadence", trainDays: 3, restDays: 1 },
+    totalWeeks: 12
+  });
+
+  expect(outline.map((week) => week.week)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  expect(Math.max(...outline.map((week) => week.week))).toBe(12);
+  expect(outline.flatMap((week) => week.cycles.flatMap((cycle) => cycle.workouts))).toHaveLength(63);
+  expect(outline.at(-1)).toMatchObject({ calendarWeekLabel: "第 15 周", deferredTrainingDays: 0 });
+  expect(getDefaultPlanPosition(outline, "2026-07-01", new Date("2026-10-10T08:00:00")))
+    .toEqual({ week: 12, cycleIndex: 13 });
+});
+
+it("keeps legacy overflow visible in the final configured week and labels it as deferred", () => {
+  const workouts = Array.from({ length: 63 }, (_, sequenceIndex) => ({
+    id: `legacy-${sequenceIndex}`,
+    day_type: "training" as const,
+    name: "五分化训练",
+    schedule_index: sequenceIndex,
+    sequence_index: sequenceIndex,
+    cycle_index: Math.floor(sequenceIndex / 5),
+    cycle_position: sequenceIndex % 5,
+    scheduled_date: shiftDate("2026-07-01", sequenceIndex),
+    status: "scheduled"
+  }));
+
+  const outline = groupPlanOutline(workouts, "2026-07-01", {
+    scheduleRule: { mode: "fixed_weekdays", weekdays: [1, 2, 3, 4, 5] },
+    totalWeeks: 12
+  });
+
+  expect(outline).toHaveLength(12);
+  expect(outline.at(-1)?.deferredTrainingDays).toBe(3);
+  expect(outline.flatMap((week) => week.cycles.flatMap((cycle) => cycle.workouts))).toHaveLength(63);
+});
+
+it("uses the same configured-week rule for other templates without changing empty plans", () => {
+  const twoDayPlan = Array.from({ length: 8 }, (_, sequenceIndex) => ({
+    id: `full-body-${sequenceIndex}`,
+    day_type: "training" as const,
+    name: "全身训练",
+    schedule_index: sequenceIndex,
+    sequence_index: sequenceIndex,
+    cycle_index: sequenceIndex,
+    cycle_position: 0,
+    scheduled_date: shiftDate("2026-07-01", sequenceIndex * 3),
+    status: "scheduled"
+  }));
+
+  expect(groupPlanOutline(twoDayPlan, "2026-07-01", {
+    totalWeeks: 4
+  }).map((week) => week.week)).toEqual([1, 2, 3, 4]);
+  expect(groupPlanOutline([], "2026-07-01", {
+    scheduleRule: { mode: "fixed_weekdays", weekdays: [1, 4] },
+    totalWeeks: 4
+  })).toEqual([]);
+});
+
+function shiftDate(startDate: string, days: number) {
+  const date = new Date(`${startDate}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}

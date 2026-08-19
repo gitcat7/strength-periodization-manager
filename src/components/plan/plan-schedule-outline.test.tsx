@@ -26,10 +26,11 @@ afterEach(() => {
   }
 });
 
-function renderOutline({ defaultWeek = 2, defaultCycleIndex = 1, mode = "default" }: {
+function renderOutline({ defaultWeek = 2, defaultCycleIndex = 1, mode = "default", outlineData = outline }: {
   defaultWeek?: number;
   defaultCycleIndex?: number | null;
   mode?: "all" | "collapsed" | "default";
+  outlineData?: typeof outline;
 } = {}) {
   const container = document.createElement("div");
   document.body.append(container);
@@ -40,7 +41,7 @@ function renderOutline({ defaultWeek = 2, defaultCycleIndex = 1, mode = "default
       defaultWeek={defaultWeek}
       mode={mode}
       onModeChange={vi.fn()}
-      outline={outline}
+      outline={outlineData}
       renderWorkout={(workout) => <article key={workout.id}>{workout.name}</article>}
     />
   ));
@@ -64,4 +65,23 @@ it("supports all and collapsed without changing the selected defaults", () => {
   expect([...all.querySelectorAll<HTMLDetailsElement>("details")].every((node) => node.open)).toBe(true);
   const collapsed = renderOutline({ mode: "collapsed" });
   expect([...collapsed.querySelectorAll<HTMLDetailsElement>("details")].every((node) => !node.open)).toBe(true);
+});
+
+it("labels deferred tail sessions without creating an extra plan week", () => {
+  const outlineData = [{
+    week: 12,
+    calendarWeekLabel: "第 15 周",
+    completedTrainingDays: 0,
+    totalTrainingDays: 3,
+    deferredTrainingDays: 3,
+    startDate: "2026-10-07",
+    endDate: "2026-10-09",
+    cycles: []
+  }];
+  const view = renderOutline({ defaultWeek: 12, outlineData });
+
+  expect(view.textContent).toContain("计划第 12 周");
+  expect(view.textContent).toContain("日历执行第 15 周");
+  expect(view.textContent).toContain("含 3 节延期/追加训练");
+  expect(view.textContent).not.toContain("计划第 13 周");
 });

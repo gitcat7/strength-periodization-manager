@@ -36,6 +36,7 @@ export function PlanScheduleOutline({
           >
             <summary className="cursor-pointer px-4 py-3 font-semibold">
               计划第 {week.week} 周 · 日历执行{week.calendarWeekLabel} · 已完成 {week.completedTrainingDays}/{week.totalTrainingDays}
+              {week.deferredTrainingDays > 0 ? ` · 含 ${week.deferredTrainingDays} 节延期/追加训练` : ""}
             </summary>
             <div className="space-y-2 border-t border-line p-3">
               {week.cycles.map((cycle) => (

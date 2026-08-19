@@ -258,10 +258,16 @@ export function ProgramManager() {
       return groups;
     }, {});
   }, [workoutExercises]);
-  const trainingDaysPerWeek = program ? getRuleTrainingDaysPerWeek(getRuleFromProgram(program) ?? scheduleRule) : undefined;
+  const activeScheduleRule = useMemo(() => program ? getRuleFromProgram(program) : null, [program]);
+  const trainingDaysPerWeek = activeScheduleRule ? getRuleTrainingDaysPerWeek(activeScheduleRule) : undefined;
+  const totalPlanWeeks = program ? getProgramWeekCount(program) : planSetup.weekCount;
   const planOutline = useMemo(
-    () => program ? groupPlanOutline(workouts, program.start_date, trainingDaysPerWeek) : [],
-    [program, trainingDaysPerWeek, workouts]
+    () => program ? groupPlanOutline(workouts, program.start_date, {
+      scheduleRule: activeScheduleRule,
+      totalWeeks: totalPlanWeeks,
+      trainingDaysPerWeek
+    }) : [],
+    [activeScheduleRule, program, totalPlanWeeks, trainingDaysPerWeek, workouts]
   );
   const defaultPosition = useMemo(
     () => getDefaultPlanPosition(planOutline, program?.start_date ?? "", new Date()),
@@ -1509,7 +1515,7 @@ export function ProgramManager() {
           onPausedAction={() => openAdjustmentDialog("resume")}
           paused={pauseState.paused}
           startDate={program.start_date}
-          totalWeeks={getProgramWeekCount(program)}
+          totalWeeks={totalPlanWeeks}
         />
       )}
 

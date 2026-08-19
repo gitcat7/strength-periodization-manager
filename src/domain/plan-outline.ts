@@ -1,3 +1,6 @@
+import { getTargetTrainingCount } from "@/domain/sequence-calendar";
+import type { ScheduleRule } from "@/domain/schedule-rule";
+
 export type PlanOutlineWorkout = {
   day_type: "training" | "rest";
   id: string;
@@ -23,20 +26,34 @@ type PositionedWorkout = {
   workout: PlanOutlineWorkout;
   week: number;
   cycleIndex: number | null;
+  deferred: boolean;
+};
+
+export type PlanProgressConfig = {
+  scheduleRule?: ScheduleRule | null;
+  totalWeeks: number;
+  trainingDaysPerWeek?: number;
 };
 
 export function groupPlanOutline(
   workouts: PlanOutlineWorkout[],
   startDate: string,
-  trainingDaysPerWeek?: number
+  progress?: number | PlanProgressConfig
 ) {
   const sorted = [...workouts].sort((a, b) => a.schedule_index - b.schedule_index);
-  if (!trainingDaysPerWeek || trainingDaysPerWeek < 1) {
+  if (sorted.length === 0) return [];
+  if (!progress || (typeof progress === "number" && progress < 1)) {
     return groupLegacyCalendarOutline(sorted, startDate);
   }
 
-  const positioned = positionByTrainingProgress(sorted, trainingDaysPerWeek);
+  const configured = typeof progress === "number" ? null : normalizeProgressConfig(progress);
+  const positioned = configured
+    ? positionByConfiguredProgress(sorted, startDate, configured)
+    : positionByTrainingProgress(sorted, progress as number);
   const weeks = new Map<number, PositionedWorkout[]>();
+  if (configured) {
+    for (let week = 1; week <= configured.totalWeeks; week += 1) weeks.set(week, []);
+  }
   for (const item of positioned) {
     weeks.set(item.week, [...(weeks.get(item.week) ?? []), item]);
   }
@@ -51,6 +68,7 @@ export function groupPlanOutline(
         startDate: weekWorkouts[0]?.scheduled_date ?? startDate,
         endDate: weekWorkouts.at(-1)?.scheduled_date ?? startDate,
         ...getTrainingDaySummary(weekWorkouts),
+        deferredTrainingDays: items.filter((item) => item.deferred && item.workout.day_type === "training").length,
         cycles: groupMetadataCycles(items)
       };
     });
@@ -75,6 +93,41 @@ export function getDefaultPlanPosition(
 }
 
 function positionByTrainingProgress(workouts: PlanOutlineWorkout[], trainingDaysPerWeek: number): PositionedWorkout[] {
+  return positionWithResolver(workouts, (sequenceIndex) => ({
+    deferred: false,
+    week: Math.floor(sequenceIndex / trainingDaysPerWeek) + 1
+  }));
+}
+
+function positionByConfiguredProgress(
+  workouts: PlanOutlineWorkout[],
+  startDate: string,
+  config: Required<Pick<PlanProgressConfig, "totalWeeks">> & Omit<PlanProgressConfig, "totalWeeks">
+): PositionedWorkout[] {
+  const observedTrainingCount = workouts.reduce((count, workout) => (
+    workout.day_type === "training" && typeof workout.sequence_index === "number"
+      ? Math.max(count, workout.sequence_index + 1)
+      : count
+  ), 0);
+  const cumulativeTrainingCounts = Array.from({ length: config.totalWeeks }, (_, index) => (
+    config.scheduleRule
+      ? getTargetTrainingCount({ startDate, trainingWeeks: index + 1, rule: config.scheduleRule })
+      : config.trainingDaysPerWeek
+        ? (index + 1) * config.trainingDaysPerWeek
+        : Math.ceil(observedTrainingCount * (index + 1) / config.totalWeeks)
+  ));
+  const configuredTrainingCount = cumulativeTrainingCounts.at(-1) ?? 0;
+
+  return positionWithResolver(workouts, (sequenceIndex) => ({
+    deferred: sequenceIndex >= configuredTrainingCount,
+    week: cumulativeTrainingCounts.findIndex((count) => sequenceIndex < count) + 1 || config.totalWeeks
+  }));
+}
+
+function positionWithResolver(
+  workouts: PlanOutlineWorkout[],
+  resolve: (sequenceIndex: number) => { deferred: boolean; week: number }
+): PositionedWorkout[] {
   const nextTrainingByIndex = new Map<number, PlanOutlineWorkout>();
   let nextTraining: PlanOutlineWorkout | null = null;
   for (let index = workouts.length - 1; index >= 0; index -= 1) {
@@ -88,12 +141,21 @@ function positionByTrainingProgress(workouts: PlanOutlineWorkout[], trainingDays
     const anchor = workout.day_type === "training" ? workout : lastTraining ?? nextTrainingByIndex.get(index) ?? null;
     const sequenceIndex = anchor?.sequence_index ?? 0;
     const cycleIndex = typeof anchor?.cycle_index === "number" ? anchor.cycle_index + 1 : null;
+    const position = resolve(sequenceIndex);
     return {
       workout,
-      week: Math.floor(sequenceIndex / trainingDaysPerWeek) + 1,
-      cycleIndex
+      week: position.week,
+      cycleIndex,
+      deferred: position.deferred
     };
   });
+}
+
+function normalizeProgressConfig(config: PlanProgressConfig) {
+  return {
+    ...config,
+    totalWeeks: Math.max(1, Math.floor(config.totalWeeks))
+  };
 }
 
 function groupMetadataCycles(items: PositionedWorkout[]) {
@@ -122,6 +184,7 @@ function groupLegacyCalendarOutline(workouts: PlanOutlineWorkout[], startDate: s
     startDate: items[0]?.scheduled_date ?? startDate,
     endDate: items.at(-1)?.scheduled_date ?? startDate,
     ...getTrainingDaySummary(items),
+    deferredTrainingDays: 0,
     cycles: groupLegacyCycles(items)
   }));
 }
@@ -155,6 +218,7 @@ function buildCycle(index: number, workouts: PlanOutlineWorkout[]) {
 }
 
 function getCalendarWeekLabel(workouts: PlanOutlineWorkout[], startDate: string) {
+  if (workouts.length === 0) return "尚未安排";
   const start = parseDate(startDate).getTime();
   const calendarWeeks = workouts.map((workout) => (
     Math.max(1, Math.floor((parseDate(workout.scheduled_date).getTime() - start) / 86400000 / 7) + 1)
