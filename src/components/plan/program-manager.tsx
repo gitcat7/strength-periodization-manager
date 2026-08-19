@@ -4,10 +4,9 @@ import { DB_TABLE } from "../../lib/supabase/table-names";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Brain, CheckCircle2, Dumbbell, Loader2, Moon, Pause, Play, PlusCircle, XCircle } from "lucide-react";
-import type { RecommendationType } from "@/domain/fitness-coach";
+import { Dumbbell, Loader2, Moon, Pause, Play, PlusCircle } from "lucide-react";
 import { getDefaultPlanPosition, groupPlanOutline } from "@/domain/plan-outline";
-import { getNextWorkoutState } from "@/domain/next-workout";
+import { getNextWorkoutActionLabel, getNextWorkoutState } from "@/domain/next-workout";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
 import {
   sessionDurationOptions,
@@ -54,6 +53,7 @@ import {
   type ResumeRoute
 } from "@/domain/schedule-adjustment";
 import { buildScheduleReflowPayload, type ReflowScheduleItem } from "@/domain/schedule-reflow-payload";
+import { buildReflowScheduleItems } from "@/domain/schedule-reflow";
 import { ScheduleRuleFields } from "./schedule-rule-fields";
 import { ScheduleAdjustmentDialog } from "./schedule-adjustment-dialog";
 import { UnavailableDateManager, type UnavailableDateItem } from "./unavailable-date-manager";
@@ -66,6 +66,8 @@ import { ProgramRegenerationDialog } from "./program-regeneration-dialog";
 import { CurrentProgramOverview } from "./current-program-overview";
 import { PlanScheduleOutline } from "./plan-schedule-outline";
 import { WorkoutPrescriptionEditor } from "./workout-prescription-editor";
+import { CoachRecommendationInbox, type CoachRecommendation } from "./coach-recommendation-inbox";
+import { PlanManagementPanel } from "./plan-management-panel";
 import { resolveProgramRegenerationOutcome } from "./program-regeneration-outcome";
 import {
   buildConfirmationPayload,
@@ -135,24 +137,11 @@ type WorkoutExerciseRow = {
   } | null;
 };
 
-type RecommendationRow = {
+type RecommendationRow = CoachRecommendation & {
   id: string;
   exercise_id: string;
   workout_id: string | null;
-  recommendation_type: RecommendationType;
-  previous_weight: number;
-  suggested_weight: number;
-  reason: string;
   status: string;
-  exercises: {
-    name: string;
-    slug: string;
-  } | null;
-  workouts: {
-    scheduled_date: string;
-    sequence_index: number;
-    name: string;
-  } | null;
 };
 
 type ExerciseRow = {
@@ -273,7 +262,11 @@ export function ProgramManager() {
       return groups;
     }, {});
   }, [workoutExercises]);
-  const planOutline = useMemo(() => program ? groupPlanOutline(workouts, program.start_date) : [], [program, workouts]);
+  const trainingDaysPerWeek = program ? getRuleTrainingDaysPerWeek(getRuleFromProgram(program) ?? scheduleRule) : undefined;
+  const planOutline = useMemo(
+    () => program ? groupPlanOutline(workouts, program.start_date, trainingDaysPerWeek) : [],
+    [program, trainingDaysPerWeek, workouts]
+  );
   const defaultPosition = useMemo(
     () => getDefaultPlanPosition(planOutline, program?.start_date ?? "", new Date()),
     [planOutline, program?.start_date]
@@ -794,7 +787,7 @@ export function ProgramManager() {
     setStatus("ready");
   }
 
-  async function acceptRecommendation(recommendation: RecommendationRow) {
+  async function acceptRecommendation(recommendation: CoachRecommendation) {
     if (!program || !userId) return;
 
     const appliedWeight = Number(recommendationWeights[recommendation.id] ?? recommendation.suggested_weight);
@@ -1388,6 +1381,8 @@ export function ProgramManager() {
   const currentCycle = planOutline
     .find((week) => week.week === defaultPosition.week)
     ?.cycles.find((cycle) => cycle.index === defaultPosition.cycleIndex);
+  const currentPlanWeek = planOutline.find((week) => week.week === defaultPosition.week);
+  const nextWorkoutTiming = nextPlanWorkout ? getNextWorkoutState(nextPlanWorkout.scheduled_date) : null;
 
   const todayDate = formatDate(new Date());
   const daysInterrupted = pauseState.event
@@ -1398,8 +1393,37 @@ export function ProgramManager() {
     Boolean(program) && scheduleAdjustmentSupported && !usesLegacyScheduleSchema;
   const hasPendingScheduleRows = getPendingScheduleRows(workouts).length > 0;
 
+  function getRecommendationImpact(recommendation: CoachRecommendation) {
+    const sourceSequence = recommendation.workouts?.sequence_index;
+    const matchingWorkoutIds = new Set(
+      workoutExercises
+        .filter((exercise) => exercise.exercise_id === recommendation.exercise_id)
+        .map((exercise) => exercise.workout_id)
+    );
+    const impacted = workouts.filter((workout) => (
+      workout.day_type === "training" &&
+      workout.status !== "completed" &&
+      matchingWorkoutIds.has(workout.id) &&
+      (typeof sourceSequence === "number"
+        ? (workout.sequence_index ?? -1) > sourceSequence
+        : workout.scheduled_date >= todayDate)
+    ));
+    return { count: impacted.length, dates: impacted.map((workout) => workout.scheduled_date) };
+  }
+
   return (
     <div className="space-y-5">
+      <header>
+        <p className="page-kicker">训练计划</p>
+        <h1 className="mt-1 text-2xl font-semibold">
+          {program && !showPlanSetup ? "我的训练计划" : program ? "调整并重新生成计划" : "生成训练计划"}
+        </h1>
+        <p className="mt-2 text-sm leading-6 text-muted">
+          {program && !showPlanSetup
+            ? "查看当前周期、下一次训练和执行进度；需要调整时再展开计划管理。"
+            : "填写训练安排与稳定工作组，生成符合目标、经验和恢复状态的周期计划。"}
+        </p>
+      </header>
       {!program || showPlanSetup ? (
         <>
           {program ? (
@@ -1445,16 +1469,6 @@ export function ProgramManager() {
         </>
       ) : null}
 
-      {program && showProfileContext ? (
-        <ProfileContextForm
-          errors={planSetupErrors}
-          isSaving={status === "generating"}
-          onChange={setPlanSetup}
-          onSave={saveProfileContext}
-          value={planSetup}
-        />
-      ) : null}
-
       {message ? (
         <p className={`rounded-lg border px-3 py-2 text-sm ${status === "error" ? "border-red-200 text-red-600" : "border-line text-muted"}`}>
           {message}
@@ -1485,11 +1499,10 @@ export function ProgramManager() {
         </section>
       ) : (
         <CurrentProgramOverview
+          calendarWeekLabel={currentPlanWeek?.calendarWeekLabel ?? "第 1 周"}
           currentCycleLabel={currentCycle ? `循环 ${currentCycle.index}` : null}
           currentWeek={defaultPosition.week}
           endDate={program.end_date}
-          isBusy={status === "generating"}
-          managementOpen={managementOpen}
           name={program.name}
           nextWorkout={nextPlanWorkout && nextPlanWorkoutMeta && nextPlanWorkoutState ? {
             date: nextPlanWorkout.scheduled_date,
@@ -1498,201 +1511,13 @@ export function ProgramManager() {
             name: nextPlanWorkout.name,
             stateLabel: nextPlanWorkoutState.label
           } : null}
-          onAdjustPlan={() => {
-            setManagementOpen(false);
-            setShowPlanSetup(true);
-          }}
-          onRegenerate={openRegenerationDialog}
-          onToggleManagement={() => setManagementOpen((current) => !current)}
-          onToggleProfile={() => setShowProfileContext((current) => !current)}
-          profileOpen={showProfileContext}
+          nextWorkoutActionLabel={nextWorkoutTiming ? getNextWorkoutActionLabel(nextWorkoutTiming) : "查看训练计划"}
+          onPausedAction={() => openAdjustmentDialog("resume")}
+          paused={pauseState.paused}
           startDate={program.start_date}
+          totalWeeks={getProgramWeekCount(program)}
         />
       )}
-
-      {adjustmentControlsAvailable ? (
-        <section className="rounded-xl border border-line bg-white p-4">
-          <div className="mb-3 flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
-              {pauseState.paused ? <Play size={20} /> : <Pause size={20} />}
-            </span>
-            <div>
-              <h2 className="font-semibold">日程调整</h2>
-              <p className="text-sm text-muted">暂停、恢复或多休一天，训练顺序会自动保持。</p>
-            </div>
-          </div>
-
-          {pauseState.paused ? (
-            <div className="rounded-lg border border-[#c75c1a]/30 bg-[#c75c1a]/5 p-3">
-              <p className="font-semibold text-[#c75c1a]">计划已暂停</p>
-              <p className="mt-1 text-sm text-muted">
-                {pauseState.resumeDate ? `预计 ${pauseState.resumeDate} 恢复。` : "尚未设置恢复日期。"}
-                {recoveryAdvice ? ` ${recoveryAdvice.message}` : ""}
-              </p>
-              <button
-                className="pressable mt-3 inline-flex items-center gap-2 rounded-md bg-action px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={scheduleActionBusy || !hasPendingScheduleRows}
-                onClick={() => openAdjustmentDialog("resume")}
-                type="button"
-              >
-                <Play size={16} />
-                恢复训练
-              </button>
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-3">
-              <button
-                className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={scheduleActionBusy || !hasPendingScheduleRows}
-                onClick={() => openAdjustmentDialog("extra_rest")}
-                type="button"
-              >
-                今天多休一天
-              </button>
-              <button
-                className="pressable inline-flex rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink"
-                onClick={() => setShowPauseForm((current) => !current)}
-                type="button"
-              >
-                {showPauseForm ? "收起暂停设置" : "暂停计划"}
-              </button>
-            </div>
-          )}
-
-          {showPauseForm && !pauseState.paused ? (
-            <div className="mt-3 grid gap-3 rounded-lg bg-field p-3 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-1 block text-sm font-medium">暂停原因</span>
-                <select
-                  aria-label="暂停原因"
-                  className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
-                  onChange={(event) => setPauseReason(event.target.value as PauseReason)}
-                  value={pauseReason}
-                >
-                  <option value="fatigue">疲劳累积，需要休整</option>
-                  <option value="time_conflict">工作/学习时间冲突</option>
-                  <option value="minor_discomfort">轻微不适</option>
-                  <option value="injury">受伤</option>
-                  <option value="personal">个人事务</option>
-                  <option value="other">其他</option>
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-sm font-medium">预计恢复日期（可选）</span>
-                <input
-                  aria-label="预计恢复日期（可选）"
-                  className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
-                  onChange={(event) => setPauseResumeDate(event.target.value)}
-                  type="date"
-                  value={pauseResumeDate}
-                />
-              </label>
-              <div className="flex gap-3 sm:col-span-2">
-                <button
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-action px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={scheduleActionBusy}
-                  onClick={confirmPause}
-                  type="button"
-                >
-                  {scheduleActionBusy ? <Loader2 className="animate-spin" size={16} /> : null}
-                  确认暂停
-                </button>
-                <button
-                  className="inline-flex h-10 items-center justify-center rounded-lg border border-line bg-white px-4 text-sm font-semibold text-ink"
-                  onClick={() => setShowPauseForm(false)}
-                  type="button"
-                >
-                  取消
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      {adjustmentControlsAvailable ? (
-        <UnavailableDateManager
-          busy={scheduleActionBusy}
-          dates={unavailableDates}
-          onAdd={addUnavailableDate}
-          onRemove={removeUnavailableDate}
-        />
-      ) : null}
-
-      {recommendations.length > 0 ? (
-        <section className="rounded-xl border border-line bg-white p-4">
-          <div className="mb-4 flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
-              <Brain size={20} />
-            </span>
-            <div>
-              <h2 className="font-semibold">Fitness Coach 建议</h2>
-              <p className="text-sm text-muted">训练完成后生成，可一键应用到当前周期后续训练日。</p>
-            </div>
-          </div>
-          <div className="space-y-3">
-            {recommendations.map((recommendation) => (
-              <article className="rounded-lg bg-field p-3" key={recommendation.id}>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="font-semibold">{recommendation.exercises?.name ?? "动作"}</h3>
-                      <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-action">
-                        {formatRecommendationType(recommendation.recommendation_type)}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-sm text-muted">
-                      {recommendation.previous_weight}kg → {recommendation.suggested_weight}kg
-                    </p>
-                    <p className="mt-2 text-sm leading-6 text-muted">{recommendation.reason}</p>
-                    <label className="mt-3 block max-w-40">
-                      <span className="mb-1 block text-xs text-muted">应用重量 kg</span>
-                      <input
-                        className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none ring-action/20 transition focus:border-action focus:ring-4"
-                        min="0"
-                        onChange={(event) =>
-                          setRecommendationWeights((current) => ({
-                            ...current,
-                            [recommendation.id]: event.target.value
-                          }))
-                        }
-                        step="0.5"
-                        type="number"
-                        value={recommendationWeights[recommendation.id] ?? String(recommendation.suggested_weight)}
-                      />
-                    </label>
-                    {recommendation.workouts ? (
-                      <p className="mt-2 text-xs text-muted">
-                        来源：{recommendation.workouts.scheduled_date} · {recommendation.workouts.name}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 sm:w-48">
-                    <button
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-action px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={status === "generating"}
-                      onClick={() => acceptRecommendation(recommendation)}
-                      type="button"
-                    >
-                      <CheckCircle2 size={16} />
-                      应用
-                    </button>
-                    <button
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
-                      disabled={status === "generating"}
-                      onClick={() => rejectRecommendation(recommendation.id)}
-                      type="button"
-                    >
-                      <XCircle size={16} />
-                      忽略
-                    </button>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : null}
 
       {workouts.length > 0 ? (
         <PlanScheduleOutline
@@ -1824,6 +1649,66 @@ export function ProgramManager() {
             );
           }}
         />
+      ) : null}
+      <CoachRecommendationInbox
+        busy={status === "generating"}
+        getImpact={getRecommendationImpact}
+        onAccept={acceptRecommendation}
+        onReject={rejectRecommendation}
+        onWeightChange={(recommendationId, weight) => setRecommendationWeights((current) => ({ ...current, [recommendationId]: weight }))}
+        recommendations={recommendations}
+        weights={recommendationWeights}
+      />
+      {program ? (
+        <PlanManagementPanel
+          busy={status === "generating"}
+          onAdjust={() => setShowPlanSetup(true)}
+          onRegenerate={openRegenerationDialog}
+          onToggle={() => setManagementOpen((current) => !current)}
+          onToggleProfile={() => setShowProfileContext((current) => !current)}
+          open={managementOpen}
+          profileOpen={showProfileContext}
+        >
+          <p className="text-sm leading-6 text-muted">日程调整、不可训练日和画像更新仅在需要时展开，避免干扰日常执行。</p>
+          {showProfileContext ? (
+            <ProfileContextForm errors={planSetupErrors} isSaving={status === "generating"} onChange={setPlanSetup} onSave={saveProfileContext} value={planSetup} />
+          ) : null}
+          {adjustmentControlsAvailable ? (
+            <>
+              <section className="rounded-xl border border-line bg-white p-4">
+                <div className="mb-3 flex items-center gap-3">
+                  <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
+                    {pauseState.paused ? <Play size={20} /> : <Pause size={20} />}
+                  </span>
+                  <div><h2 className="font-semibold">日程调整</h2><p className="text-sm text-muted">暂停、恢复或多休一天，训练顺序会自动保持。</p></div>
+                </div>
+                {pauseState.paused ? (
+                  <div className="rounded-lg border border-[#c75c1a]/30 bg-[#c75c1a]/5 p-3">
+                    <p className="font-semibold text-[#c75c1a]">计划已暂停</p>
+                    <p className="mt-1 text-sm text-muted">{pauseState.resumeDate ? `预计 ${pauseState.resumeDate} 恢复。` : "尚未设置恢复日期。"}{recoveryAdvice ? ` ${recoveryAdvice.message}` : ""}</p>
+                    <button className="pressable mt-3 inline-flex h-11 items-center gap-2 rounded-md bg-action px-4 font-semibold text-white disabled:opacity-60" disabled={scheduleActionBusy || !hasPendingScheduleRows} onClick={() => openAdjustmentDialog("resume")} type="button"><Play size={16} />恢复训练</button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-3">
+                    <button className="pressable inline-flex h-11 items-center rounded-md border border-line bg-white px-4 font-semibold disabled:opacity-60" disabled={scheduleActionBusy || !hasPendingScheduleRows} onClick={() => openAdjustmentDialog("extra_rest")} type="button">今天多休一天</button>
+                    <button className="pressable inline-flex h-11 items-center rounded-md border border-line bg-white px-4 font-semibold" onClick={() => setShowPauseForm((current) => !current)} type="button">{showPauseForm ? "收起暂停设置" : "暂停计划"}</button>
+                  </div>
+                )}
+                {showPauseForm && !pauseState.paused ? (
+                  <div className="mt-3 grid gap-3 rounded-lg bg-field p-3 sm:grid-cols-2">
+                    <label className="block"><span className="mb-1 block text-sm font-medium">暂停原因</span><select aria-label="暂停原因" className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm" onChange={(event) => setPauseReason(event.target.value as PauseReason)} value={pauseReason}><option value="fatigue">疲劳累积，需要休整</option><option value="time_conflict">工作/学习时间冲突</option><option value="minor_discomfort">轻微不适</option><option value="injury">受伤</option><option value="personal">个人事务</option><option value="other">其他</option></select></label>
+                    <label className="block"><span className="mb-1 block text-sm font-medium">预计恢复日期（可选）</span><input aria-label="预计恢复日期（可选）" className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm" onChange={(event) => setPauseResumeDate(event.target.value)} type="date" value={pauseResumeDate} /></label>
+                    <div className="flex gap-3 sm:col-span-2">
+                      <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-action px-4 text-sm font-semibold text-white disabled:opacity-60" disabled={scheduleActionBusy} onClick={confirmPause} type="button">{scheduleActionBusy ? <Loader2 className="animate-spin" size={16} /> : null}确认暂停</button>
+                      <button className="inline-flex h-11 items-center justify-center rounded-lg border border-line bg-white px-4 text-sm font-semibold" onClick={() => setShowPauseForm(false)} type="button">取消</button>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+              <UnavailableDateManager busy={scheduleActionBusy} dates={unavailableDates} onAdd={addUnavailableDate} onRemove={removeUnavailableDate} />
+            </>
+          ) : null}
+        </PlanManagementPanel>
       ) : null}
       {adjustmentDialog ? (
         <ScheduleAdjustmentDialog
@@ -2546,13 +2431,6 @@ export function getPlanExerciseExplanation({
     : `这是自重或技术起始动作；目标 ${targetSets} 组 × ${targetReps} 次，不强制填写重量。`;
 }
 
-function formatRecommendationType(type: RecommendationType) {
-  if (type === "increase") return "加重";
-  if (type === "decrease") return "降重";
-  if (type === "deload") return "减量恢复";
-  return "保持";
-}
-
 function getPlanWorkoutState(workout: WorkoutRow, isNextWorkout: boolean) {
   if (workout.day_type === "rest") {
     return {
@@ -2619,87 +2497,6 @@ function buildBlockedDateMap(
   return blocked;
 }
 
-// Re-dates pending rows day by day, keeping row count and schedule_index untouched
-// so the atomic RPC can apply the result without inserting or deleting rows.
-function buildReflowScheduleItems(input: {
-  rows: WorkoutRow[];
-  rule: ScheduleRule | null;
-  programStartDate: string;
-  blockedDates: ReadonlyMap<string, string>;
-  fromDate: string;
-}): ReflowScheduleItem[] {
-  const { rows, rule, blockedDates, fromDate } = input;
-  if (rows.length === 0) return [];
-
-  if (!rule) {
-    // Legacy schedules without a stored rule keep their relative spacing.
-    const delta = Math.max(0, daysBetweenDates(rows[0].scheduled_date, fromDate));
-    return rows.map((row) => toReflowItem(row, shiftDate(row.scheduled_date, delta)));
-  }
-
-  const trainingQueue = rows.filter((row) => row.day_type === "training");
-  const restQueue = rows.filter((row) => row.day_type === "rest");
-  const assignments: ReflowScheduleItem[] = [];
-
-  let phase = getCadencePhaseOffset(rule, input.programStartDate, fromDate, blockedDates);
-  const cursor = parseLocalDate(fromDate);
-  let guard = 0;
-
-  while ((trainingQueue.length > 0 || restQueue.length > 0) && guard < 3660) {
-    guard += 1;
-    const dateStr = formatDate(cursor);
-
-    if (blockedDates.has(dateStr)) {
-      const restRow = restQueue.shift();
-      // Blocked days host a rest row when one remains and never consume a phase.
-      if (restRow) assignments.push(toReflowItem(restRow, dateStr));
-    } else {
-      const isTrainingDay = isRuleTrainingDay(rule, cursor, phase);
-      const row = isTrainingDay
-        ? trainingQueue.shift() ?? restQueue.shift()
-        : restQueue.shift() ?? trainingQueue.shift();
-      if (row) assignments.push(toReflowItem(row, dateStr));
-      phase += 1;
-    }
-
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  for (const leftover of [...trainingQueue, ...restQueue]) {
-    assignments.push(toReflowItem(leftover, leftover.scheduled_date));
-  }
-
-  return assignments.sort((a, b) => a.scheduleIndex - b.scheduleIndex);
-}
-
-function getCadencePhaseOffset(
-  rule: ScheduleRule,
-  startDate: string,
-  targetDate: string,
-  blockedDates: ReadonlyMap<string, string>
-): number {
-  if (rule.mode !== "cadence") return 0;
-
-  let count = 0;
-  const cursor = parseLocalDate(startDate);
-  const target = parseLocalDate(targetDate);
-  let guard = 0;
-  while (cursor.getTime() < target.getTime() && guard < 3660) {
-    guard += 1;
-    if (!blockedDates.has(formatDate(cursor))) count += 1;
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return count;
-}
-
-function isRuleTrainingDay(rule: ScheduleRule, date: Date, phase: number): boolean {
-  if (rule.mode === "cadence") {
-    const cycleLength = rule.trainDays + rule.restDays;
-    return phase % cycleLength < rule.trainDays;
-  }
-  return rule.weekdays.includes(date.getDay());
-}
-
 function getRuleTrainingDaysPerWeek(rule: ScheduleRule) {
   if (rule.mode === "fixed_weekdays") return Math.max(1, rule.weekdays.length);
   const cycleLength = Math.max(1, rule.trainDays + rule.restDays);
@@ -2709,17 +2506,6 @@ function getRuleTrainingDaysPerWeek(rule: ScheduleRule) {
 function describeScheduleFrequency(rule: ScheduleRule) {
   if (rule.mode === "fixed_weekdays") return `固定每周 ${rule.weekdays.length} 天`;
   return `练 ${rule.trainDays} 天、休 ${rule.restDays} 天循环`;
-}
-
-function toReflowItem(row: WorkoutRow, scheduledDate: string): ReflowScheduleItem {
-  return {
-    workoutId: row.id,
-    scheduledDate,
-    scheduleIndex: row.schedule_index,
-    sequenceIndex: row.sequence_index,
-    dayType: row.day_type,
-    status: "scheduled"
-  };
 }
 
 function getTemplateCycleLength(templateType: ProgramTemplateType | null) {

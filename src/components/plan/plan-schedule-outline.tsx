@@ -20,7 +20,7 @@ export function PlanScheduleOutline({
   renderWorkout
 }: PlanScheduleOutlineProps) {
   return (
-    <section className="space-y-3">
+    <section aria-label="训练计划日程" className="space-y-3">
       <div className="flex flex-wrap gap-2">
         <button className="h-11 rounded-md border border-line bg-white px-3 text-sm font-medium" onClick={() => onModeChange("default")} type="button">当前进度</button>
         <button className="h-11 rounded-md border border-line bg-white px-3 text-sm font-medium" onClick={() => onModeChange("all")} type="button">全部展开</button>
@@ -34,7 +34,9 @@ export function PlanScheduleOutline({
             key={week.week}
             open={mode === "all" || (mode === "default" && week.week === defaultWeek)}
           >
-            <summary className="cursor-pointer px-4 py-3 font-semibold">第 {week.week} 周 · 已完成 {week.completedTrainingDays}/{week.totalTrainingDays}</summary>
+            <summary className="cursor-pointer px-4 py-3 font-semibold">
+              计划第 {week.week} 周 · 日历执行{week.calendarWeekLabel} · 已完成 {week.completedTrainingDays}/{week.totalTrainingDays}
+            </summary>
             <div className="space-y-2 border-t border-line p-3">
               {week.cycles.map((cycle) => (
                 <details

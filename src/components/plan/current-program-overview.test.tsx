@@ -17,27 +17,23 @@ afterEach(() => {
   }
 });
 
-function renderOverview() {
+function renderOverview({ actionLabel = "继续今日计划", paused = false }: { actionLabel?: string; paused?: boolean } = {}) {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  let managementOpen = false;
-
   const render = () => act(() => root.render(
     <CurrentProgramOverview
+      calendarWeekLabel="第 1–2 周"
       currentCycleLabel="循环 2"
       currentWeek={1}
       endDate="2026-08-23"
-      isBusy={false}
-      managementOpen={managementOpen}
       name="推/拉/蹲 A-B 周期"
       nextWorkout={{ date: "2026-07-30", focus: "胸部、肩部", intent: "强度", name: "推 A", stateLabel: "下一节训练" }}
-      onAdjustPlan={vi.fn()}
-      onRegenerate={vi.fn()}
-      onToggleManagement={() => { managementOpen = !managementOpen; render(); }}
-      onToggleProfile={vi.fn()}
-      profileOpen={false}
+      nextWorkoutActionLabel={actionLabel}
+      onPausedAction={vi.fn()}
+      paused={paused}
       startDate="2026-07-27"
+      totalWeeks={12}
     />
   ));
   render();
@@ -49,24 +45,28 @@ function buttonOrLink(view: HTMLElement, label: string) {
   return Array.from(view.querySelectorAll<HTMLElement>("button, a")).find((node) => node.textContent === label)!;
 }
 
-it("shows one primary training action and keeps management controls disclosed", () => {
+it("shows one state-aware primary training action without mixing in management controls", () => {
   const view = renderOverview();
 
   expect(view.querySelectorAll("a[href='/today']")).toHaveLength(1);
-  expect(view.textContent).toContain("第 1 周");
+  expect(view.textContent).toContain("计划第 1/12 周");
+  expect(view.textContent).toContain("日历执行第 1–2 周");
   expect(view.textContent).toContain("循环 2");
-  expect(view.textContent).not.toContain("按当前参数重新生成");
-
-  act(() => buttonOrLink(view, "计划管理").click());
-
-  expect(view.textContent).toContain("调整计划");
-  expect(view.textContent).toContain("按当前参数重新生成");
-  expect(view.textContent).toContain("更新体重、饮食与恢复");
+  expect(view.textContent).toContain("继续今日计划");
+  expect(view.textContent).not.toContain("计划管理");
 });
 
-it("uses a 44px minimum height for primary and management triggers", () => {
+it("uses future and paused CTA labels without implying early execution", () => {
+  const future = renderOverview({ actionLabel: "查看下一节训练" });
+  expect(buttonOrLink(future, "查看下一节训练").className).toContain("h-11");
+
+  const paused = renderOverview({ paused: true });
+  expect(paused.querySelectorAll("a[href='/today']")).toHaveLength(0);
+  expect(buttonOrLink(paused, "恢复计划").className).toContain("h-11");
+});
+
+it("uses a 44px minimum height for the primary trigger", () => {
   const view = renderOverview();
 
-  expect(buttonOrLink(view, "继续训练").className).toContain("h-11");
-  expect(buttonOrLink(view, "计划管理").className).toContain("h-11");
+  expect(buttonOrLink(view, "继续今日计划").className).toContain("h-11");
 });

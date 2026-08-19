@@ -17,7 +17,7 @@ const checks = [
   },
   { path: "/diagnostics", type: "html", mustInclude: ["项目诊断"] },
   { path: "/onboarding", type: "redirect", location: "/plan" },
-  { path: "/plan", type: "html", mustInclude: ["生成训练计划"] },
+  { path: "/plan", type: "html", mustInclude: ["训练计划"] },
   { path: "/today", type: "html", mustInclude: ["今日训练"] },
   { path: "/history", type: "html", mustInclude: ["训练历史"] },
   { path: "/progress", type: "html", mustInclude: ["进展分析"] },

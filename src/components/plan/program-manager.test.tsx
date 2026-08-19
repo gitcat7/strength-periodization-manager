@@ -161,8 +161,10 @@ describe("ProgramManager cache hydration", () => {
       await Promise.resolve();
     });
 
+    expect(container.querySelector("h1")?.textContent).toBe("我的训练计划");
     expect(container.textContent).toContain("当前周期");
     expect(container.textContent).toContain("计划管理");
+    expect(container.textContent).not.toContain("日程调整");
     expect(container.textContent).not.toContain("按当前参数重新生成");
     expect(container.querySelectorAll("a[href='/today']")).toHaveLength(1);
     expect(container.textContent).not.toContain("生成 4 周训练计划");
@@ -175,6 +177,7 @@ describe("ProgramManager cache hydration", () => {
       clickButton(container!, "计划管理");
     });
 
+    expect(container.textContent).toContain("日程调整");
     expect(container.textContent).toContain("调整计划");
     expect(container.textContent).toContain("按当前参数重新生成");
     expect(container.textContent).toContain("更新体重、饮食与恢复");
@@ -199,18 +202,61 @@ describe("ProgramManager cache hydration", () => {
     expect(container.textContent).not.toContain("先选训练结构，再选安排方式");
     expect(container.textContent).not.toContain("训练安排与主项最近工作组");
   });
+
+  it("shows plan before a prioritized three-item Coach summary and the folded management panel", async () => {
+    const recommendations = [
+      recommendation("increase", "increase", "加重动作"),
+      recommendation("hold", "hold", "保持动作"),
+      recommendation("decrease", "decrease", "降重动作"),
+      recommendation("deload", "deload", "减量动作")
+    ];
+    supabaseClient = createSupabaseClient({ activeProgram: true, recommendations });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const plan = container.querySelector('[aria-label="训练计划日程"]');
+    const coach = container.querySelector('[aria-label="Fitness Coach 建议"]');
+    const management = container.querySelector('[aria-label="计划管理"]');
+    expect(plan).not.toBeNull();
+    expect(coach).not.toBeNull();
+    expect(management).not.toBeNull();
+    expect(plan!.compareDocumentPosition(coach!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(coach!.compareDocumentPosition(management!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(coach!.textContent).toContain("减量动作");
+    expect(coach!.textContent).toContain("降重动作");
+    expect(coach!.textContent).toContain("保持动作");
+    expect(coach!.textContent).not.toContain("加重动作");
+    expect(coach!.textContent).toContain("还有 1 条建议");
+    expect(coach!.textContent).toContain("预览应用");
+
+    await act(async () => {
+      clickButton(coach as HTMLElement, "预览应用");
+    });
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain("将影响");
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain("后续训练日");
+  });
 });
 
 function createSupabaseClient({
   pendingAuth = false,
   profileLoadError,
   profileUpsertError,
-  activeProgram = false
+  activeProgram = false,
+  recommendations = []
 }: {
   pendingAuth?: boolean;
   profileLoadError?: Error;
   profileUpsertError?: Error;
   activeProgram?: boolean;
+  recommendations?: Array<Record<string, unknown>>;
 }) {
   const mainLifts = [
     { default_increment: 2.5, id: "squat", is_main_lift: true, name: "深蹲", slug: "squat" },
@@ -244,7 +290,7 @@ function createSupabaseClient({
     from: (table: string) => {
       if (table === "usr_athlete_profiles") return profileTable;
       if (table === "cfg_exercises") return createQuery({ data: mainLifts, error: null });
-      if (table === "log_recommendations") return createQuery({ data: [], error: null });
+      if (table === "log_recommendations") return createQuery({ data: recommendations, error: null });
       if (table === "plan_programs") {
         return createQuery({
           data: activeProgram ? {
@@ -266,6 +312,21 @@ function createSupabaseClient({
       if (table === "usr_lift_profiles") return Object.assign(createQuery({ data: [], error: null }), { upsert: () => Promise.resolve({ error: null }) });
       return createQuery({ data: [], error: null });
     }
+  };
+}
+
+function recommendation(id: string, type: "increase" | "hold" | "decrease" | "deload", name: string) {
+  return {
+    id,
+    exercise_id: `exercise-${id}`,
+    workout_id: `source-${id}`,
+    recommendation_type: type,
+    previous_weight: 60,
+    suggested_weight: type === "increase" ? 62.5 : type === "deload" ? 55 : 60,
+    reason: `${name}原因`,
+    status: "pending",
+    exercises: { name, slug: `slug-${id}` },
+    workouts: { scheduled_date: "2026-07-27", sequence_index: -1, name: "来源训练" }
   };
 }
 

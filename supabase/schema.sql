@@ -816,6 +816,105 @@ deferrable initially deferred
 for each row execute function public.ensure_continuous_workout_schedule_index();
 revoke all on function public.ensure_continuous_workout_schedule_index() from public;
 
+create or replace function public.repair_active_program_schedule_indexes()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_affected_program_ids uuid[] := '{}';
+  v_repaired_count integer := 0;
+begin
+  with ordered as (
+    select
+      w.id,
+      w.program_id,
+      w.schedule_index,
+      row_number() over (
+        partition by w.program_id
+        order by w.scheduled_date, w.schedule_index, w.id
+      ) - 1 as correct_schedule_index
+    from public.plan_workouts w
+    join public.plan_programs p on p.id = w.program_id
+    where p.status = 'active'
+  )
+  select coalesce(array_agg(distinct program_id), '{}')
+  into v_affected_program_ids
+  from ordered
+  where schedule_index <> correct_schedule_index;
+
+  with ordered as (
+    select
+      w.id,
+      row_number() over (
+        partition by w.program_id
+        order by w.scheduled_date, w.schedule_index, w.id
+      ) - 1 as correct_schedule_index
+    from public.plan_workouts w
+    join public.plan_programs p on p.id = w.program_id
+    where p.status = 'active'
+  )
+  update public.plan_workouts w
+  set schedule_index = ordered.correct_schedule_index
+  from ordered
+  where w.id = ordered.id
+    and w.schedule_index <> ordered.correct_schedule_index;
+
+  get diagnostics v_repaired_count = row_count;
+
+  update public.plan_programs p
+  set schedule_revision = p.schedule_revision + 1,
+      updated_at = now()
+  where p.id = any(v_affected_program_ids);
+
+  return v_repaired_count;
+end;
+$$;
+
+revoke all on function public.repair_active_program_schedule_indexes() from public, anon, authenticated;
+
+create or replace function public.ensure_schedule_dates_follow_index()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_program_id uuid;
+begin
+  for v_program_id in
+    select distinct candidate_program_id
+    from unnest(array[
+      case when tg_op = 'UPDATE' then old.program_id end,
+      case when tg_op in ('INSERT', 'UPDATE') then new.program_id end
+    ]) as candidate_programs(candidate_program_id)
+    where candidate_program_id is not null
+  loop
+    if exists (
+      select 1
+      from (
+        select scheduled_date, lag(scheduled_date) over (order by schedule_index) as previous_scheduled_date
+        from public.plan_workouts
+        where program_id = v_program_id
+      ) ordered
+      where ordered.previous_scheduled_date is not null
+        and ordered.scheduled_date < ordered.previous_scheduled_date
+    ) then
+      raise exception 'Workout scheduled dates must follow schedule_index' using errcode = '23514';
+    end if;
+  end loop;
+  return null;
+end;
+$$;
+
+drop trigger if exists workouts_require_schedule_date_order on public.plan_workouts;
+create constraint trigger workouts_require_schedule_date_order
+after insert or update of program_id, schedule_index, scheduled_date on public.plan_workouts
+deferrable initially deferred
+for each row execute function public.ensure_schedule_dates_follow_index();
+revoke all on function public.ensure_schedule_dates_follow_index() from public, anon, authenticated;
+
 create or replace function public.replace_active_program(p_payload jsonb)
 returns table (
   program_id uuid,
@@ -1097,6 +1196,19 @@ begin
     end if;
     v_updated_count := v_updated_count + 1;
   end loop;
+
+  if exists (
+    select 1
+    from (
+      select scheduled_date, lag(scheduled_date) over (order by schedule_index) as previous_scheduled_date
+      from public.plan_workouts
+      where program_id = v_program_id
+    ) ordered
+    where ordered.previous_scheduled_date is not null
+      and ordered.scheduled_date < ordered.previous_scheduled_date
+  ) then
+    raise exception 'Workout scheduled dates must follow schedule_index' using errcode = '23514';
+  end if;
 
   v_event_type := case v_action
     when 'extra_rest' then 'extra_rest'
@@ -1786,6 +1898,9 @@ create unique index if not exists plan_workout_exercises_workout_order_key
   on public.plan_workout_exercises (workout_id, order_index);
 create index if not exists log_recommendations_user_status_created_idx
   on public.log_recommendations (user_id, status, created_at desc);
+create unique index if not exists log_recommendations_one_pending_per_workout_exercise_idx
+  on public.log_recommendations (user_id, workout_id, exercise_id)
+  where status = 'pending' and workout_id is not null;
 create index if not exists log_pr_goals_user_status_target_idx
   on public.log_pr_goals (user_id, status, target_date);
 create index if not exists ops_analytics_events_user_created_idx
@@ -2054,14 +2169,64 @@ comment on column public.ops_agent_access_tokens.revoked_at is '令牌撤销时�
 comment on column public.ops_agent_access_tokens.created_at is '令牌创建时刻，timestamptz。';
 
 -- Atomic history revision dependencies and wrapper for clean initialization.
-create or replace function public.replace_pending_workout_recommendations(p_user_id uuid, p_workout_id uuid)
-returns jsonb language plpgsql security definer set search_path = public as $$
-declare v_result jsonb;
+create or replace function public.deduplicate_pending_workout_recommendations()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_deleted_count integer := 0;
 begin
+  with ranked as (
+    select
+      id,
+      row_number() over (
+        partition by user_id, workout_id, exercise_id
+        order by updated_at desc, created_at desc, id desc
+      ) as duplicate_rank
+    from public.log_recommendations
+    where status = 'pending'
+      and workout_id is not null
+  )
+  delete from public.log_recommendations recommendation
+  using ranked
+  where recommendation.id = ranked.id
+    and ranked.duplicate_rank > 1;
+
+  get diagnostics v_deleted_count = row_count;
+  return v_deleted_count;
+end;
+$$;
+
+revoke all on function public.deduplicate_pending_workout_recommendations() from public, anon, authenticated;
+
+create or replace function public.replace_pending_workout_recommendations(p_user_id uuid, p_workout_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_result jsonb;
+begin
+  perform 1
+  from public.plan_workouts
+  where id = p_workout_id and user_id = p_user_id
+  for update;
+  if not found then
+    raise exception 'Training workout was not found' using errcode = 'P0001';
+  end if;
+
   delete from public.log_recommendations
   where user_id = p_user_id and workout_id = p_workout_id and status = 'pending';
+
   with target_attainment as (
-    select we.exercise_id, we.target_weight, ce.default_increment, ce.is_main_lift,
+    select
+      we.exercise_id,
+      max(we.target_weight) as target_weight,
+      ce.default_increment,
+      ce.is_main_lift,
       count(*) as total_sets,
       count(*) filter (where sl.completed) as completed_sets,
       count(*) filter (where sl.completed and sl.actual_weight >= sl.target_weight and sl.actual_reps >= sl.target_reps) as attained_sets,
@@ -2070,7 +2235,7 @@ begin
     join public.cfg_exercises ce on ce.id = we.exercise_id
     join public.log_set_logs sl on sl.workout_exercise_id = we.id
     where we.workout_id = p_workout_id and we.target_weight > 0
-    group by we.exercise_id, we.target_weight, ce.default_increment, ce.is_main_lift
+    group by we.exercise_id, ce.default_increment, ce.is_main_lift
   ), inserted as (
     insert into public.log_recommendations (
       user_id, exercise_id, workout_id, recommendation_type,
@@ -2100,6 +2265,14 @@ begin
       end,
       'pending'
     from target_attainment
+    on conflict (user_id, workout_id, exercise_id)
+      where status = 'pending' and workout_id is not null
+    do update set
+      recommendation_type = excluded.recommendation_type,
+      previous_weight = excluded.previous_weight,
+      suggested_weight = excluded.suggested_weight,
+      reason = excluded.reason,
+      updated_at = now()
     returning exercise_id, recommendation_type, previous_weight, suggested_weight, reason, status
   )
   select coalesce(jsonb_agg(jsonb_build_object(

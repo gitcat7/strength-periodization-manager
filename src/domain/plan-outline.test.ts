@@ -60,3 +60,35 @@ it("uses the final cycle when all training days are complete", () => {
   expect(getDefaultPlanPosition(outline, "2026-07-01", new Date("2026-08-20T08:00:00")))
     .toEqual({ week: 1, cycleIndex: 1 });
 });
+
+it("uses sequence and cycle metadata for plan progress instead of workout names or delayed calendar weeks", () => {
+  const outline = groupPlanOutline([
+    { id: "a", day_type: "training", name: "第 1 周 · 推 A", schedule_index: 0, sequence_index: 0, cycle_index: 0, cycle_position: 0, scheduled_date: "2026-07-01", status: "completed" },
+    { id: "b", day_type: "rest", name: "恢复日", schedule_index: 1, sequence_index: null, cycle_index: null, cycle_position: null, scheduled_date: "2026-07-20", status: "scheduled" },
+    { id: "c", day_type: "training", name: "名称不可信", schedule_index: 2, sequence_index: 1, cycle_index: 0, cycle_position: 1, scheduled_date: "2026-07-21", status: "scheduled" },
+    { id: "d", day_type: "training", name: "仍然不是周标签", schedule_index: 3, sequence_index: 2, cycle_index: 1, cycle_position: 0, scheduled_date: "2026-07-22", status: "scheduled" }
+  ], "2026-07-01", 2);
+
+  expect(outline).toMatchObject([
+    {
+      week: 1,
+      calendarWeekLabel: "第 1–3 周",
+      cycles: [{ index: 1, workouts: [{ id: "a" }, { id: "b" }, { id: "c" }] }]
+    },
+    {
+      week: 2,
+      calendarWeekLabel: "第 4 周",
+      cycles: [{ index: 2, workouts: [{ id: "d" }] }]
+    }
+  ]);
+});
+
+it("selects the first unfinished plan-progress week even when the calendar has slipped", () => {
+  const outline = groupPlanOutline([
+    { id: "a", day_type: "training", name: "任意名称", schedule_index: 0, sequence_index: 0, cycle_index: 0, cycle_position: 0, scheduled_date: "2026-07-01", status: "completed" },
+    { id: "b", day_type: "training", name: "任意名称", schedule_index: 1, sequence_index: 1, cycle_index: 0, cycle_position: 1, scheduled_date: "2026-08-20", status: "scheduled" }
+  ], "2026-07-01", 2);
+
+  expect(getDefaultPlanPosition(outline, "2026-07-01", new Date("2026-08-20T08:00:00")))
+    .toEqual({ week: 1, cycleIndex: 1 });
+});
