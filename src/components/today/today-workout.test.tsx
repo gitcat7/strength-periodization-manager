@@ -265,6 +265,9 @@ describe("TodayWorkout cache hydration", () => {
     const press = getExercise(container, "站姿推举");
     expect(bench.getAttribute("data-expanded")).toBe("true");
     expect(press.getAttribute("data-expanded")).toBe("false");
+    const activeExerciseIndicator = [...bench.querySelectorAll("button")].find((button) => button.textContent === "当前动作");
+    expect(activeExerciseIndicator?.disabled).toBe(true);
+    expect(bench.querySelector('input[aria-label="重量"]')).not.toBeNull();
 
     const rpe = bench.querySelector<HTMLInputElement>('input[aria-label="RPE"]');
     act(() => setInputValue(rpe!, "8"));
@@ -272,6 +275,7 @@ describe("TodayWorkout cache hydration", () => {
 
     expect(bench.getAttribute("data-expanded")).toBe("false");
     expect(press.getAttribute("data-expanded")).toBe("true");
+    expect([...press.querySelectorAll("button")].find((button) => button.textContent === "当前动作")?.disabled).toBe(true);
     act(() => [...bench.querySelectorAll("button")].find((button) => button.textContent === "展开")?.click());
     expect(bench.getAttribute("data-expanded")).toBe("true");
   });

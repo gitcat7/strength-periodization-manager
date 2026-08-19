@@ -30,6 +30,14 @@ describe("today exercise disclosure", () => {
     expect(toggleExerciseExpansion({}, "bench", false)).toEqual({ bench: true });
   });
 
+  it("keeps the active incomplete exercise open when a stale collapse override exists", () => {
+    expect(isExerciseExpanded({
+      activeExerciseId: "press",
+      exerciseId: "press",
+      overrides: { press: false }
+    })).toBe(true);
+  });
+
   it("collapses a just-completed exercise", () => {
     expect(reconcileExerciseExpansion({
       before: [

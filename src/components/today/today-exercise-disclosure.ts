@@ -21,7 +21,11 @@ export function isExerciseExpanded({
   exerciseId: string;
   overrides: ExerciseExpansionOverrides;
 }) {
-  return overrides[exerciseId] ?? exerciseId === activeExerciseId;
+  if (exerciseId === activeExerciseId) {
+    return true;
+  }
+
+  return overrides[exerciseId] ?? false;
 }
 
 export function toggleExerciseExpansion(

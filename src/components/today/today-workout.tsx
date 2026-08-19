@@ -1467,6 +1467,7 @@ export function TodayWorkout() {
         {exercises.map((exercise, index) => {
           const exerciseLogs = setLogs[exercise.id] ?? [];
           const completedExerciseSets = exerciseLogs.filter((log) => log.completed).length;
+          const isActiveExercise = exercise.id === activeExerciseId;
           const expanded = isExerciseExpanded({ activeExerciseId, exerciseId: exercise.id, overrides: exerciseExpansion });
 
           return (
@@ -1498,8 +1499,14 @@ export function TodayWorkout() {
                           targetWeight: Number(exercise.target_weight)
                         })}
                       </p>
-                      <button aria-expanded={expanded} className="pressable h-11 rounded-md border border-line px-3 text-sm font-semibold text-ink" onClick={() => setExerciseExpansion((current) => toggleExerciseExpansion(current, exercise.id, expanded))} type="button">
-                        {expanded ? "收起" : "展开"}
+                      <button
+                        aria-expanded={expanded}
+                        className="pressable h-11 rounded-md border border-line px-3 text-sm font-semibold text-ink disabled:cursor-default disabled:opacity-70"
+                        disabled={isActiveExercise}
+                        onClick={() => setExerciseExpansion((current) => toggleExerciseExpansion(current, exercise.id, expanded))}
+                        type="button"
+                      >
+                        {isActiveExercise ? "当前动作" : expanded ? "收起" : "展开"}
                       </button>
                       {expanded ? (
                       <button
