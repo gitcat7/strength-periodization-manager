@@ -35,6 +35,45 @@ export type WorkoutPrescriptionValidationResult =
 const MIN_EXERCISES = 1;
 const MAX_EXERCISES = 12;
 
+export type PrescriptionExerciseRemoval = {
+  exercise: WorkoutPrescriptionExerciseDraft;
+  index: number;
+};
+
+export function reindexPrescriptionExercises(exercises: WorkoutPrescriptionExerciseDraft[]) {
+  return exercises.map((exercise, index) => ({ ...exercise, orderIndex: index + 1 }));
+}
+
+export function insertPrescriptionExerciseAfter(
+  exercises: WorkoutPrescriptionExerciseDraft[],
+  anchorIndex: number,
+  exercise: WorkoutPrescriptionExerciseDraft
+) {
+  if (exercises.length >= MAX_EXERCISES || anchorIndex < 0 || anchorIndex >= exercises.length) return exercises;
+  const next = [...exercises];
+  next.splice(anchorIndex + 1, 0, exercise);
+  return reindexPrescriptionExercises(next);
+}
+
+export function removePrescriptionExerciseAt(exercises: WorkoutPrescriptionExerciseDraft[], index: number) {
+  if (exercises.length <= MIN_EXERCISES || index < 0 || index >= exercises.length) return null;
+  const removal = { exercise: { ...exercises[index] }, index };
+  return {
+    exercises: reindexPrescriptionExercises(exercises.filter((_, currentIndex) => currentIndex !== index)),
+    removal
+  };
+}
+
+export function restorePrescriptionExercise(
+  exercises: WorkoutPrescriptionExerciseDraft[],
+  removal: PrescriptionExerciseRemoval
+) {
+  if (exercises.length >= MAX_EXERCISES) return exercises;
+  const next = [...exercises];
+  next.splice(Math.min(removal.index, next.length), 0, removal.exercise);
+  return reindexPrescriptionExercises(next);
+}
+
 export function validateWorkoutPrescriptionDraft(
   draft: WorkoutPrescriptionDraft
 ): WorkoutPrescriptionValidationResult {
