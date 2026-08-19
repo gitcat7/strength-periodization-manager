@@ -1,39 +1,44 @@
-import type { ReactNode } from "react";
+"use client";
 
-type PlanManagementPanelProps = {
+import { useState } from "react";
+import { ProfileContextForm, type ProfileContextFormProps } from "./profile-context-form";
+import { PlanScheduleManagement, type PlanScheduleManagementProps } from "./plan-schedule-management";
+
+export type PlanManagementPanelProps = {
   busy: boolean;
-  children: ReactNode;
   onAdjust: () => void;
   onRegenerate: () => void;
-  onToggle: () => void;
-  onToggleProfile: () => void;
-  open: boolean;
-  profileOpen: boolean;
+  profile: ProfileContextFormProps;
+  schedule: PlanScheduleManagementProps;
 };
 
 export function PlanManagementPanel(props: PlanManagementPanelProps) {
+  const [open, setOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+
   return (
     <section aria-label="计划管理" className="rounded-xl border border-line bg-white p-4">
       <button
-        aria-expanded={props.open}
+        aria-expanded={open}
         className="flex h-11 w-full items-center justify-between rounded-md px-1 text-left font-semibold"
         disabled={props.busy}
-        onClick={props.onToggle}
+        onClick={() => setOpen((current) => !current)}
         type="button"
       >
         <span>计划管理</span>
-        <span aria-hidden="true" className="text-muted">{props.open ? "−" : "+"}</span>
+        <span aria-hidden="true" className="text-muted">{open ? "−" : "+"}</span>
       </button>
-      {props.open ? (
+      {open ? (
         <div className="mt-3 space-y-4 border-t border-line pt-4">
           <div className="grid gap-2 sm:grid-cols-3">
             <button className="h-11 rounded-md border border-line bg-white px-3 text-sm font-medium" disabled={props.busy} onClick={props.onAdjust} type="button">调整计划</button>
             <button className="h-11 rounded-md border border-line bg-white px-3 text-sm font-medium" disabled={props.busy} onClick={props.onRegenerate} type="button">按当前参数重新生成</button>
-            <button className="h-11 rounded-md border border-line bg-white px-3 text-sm font-medium" disabled={props.busy} onClick={props.onToggleProfile} type="button">
-              {props.profileOpen ? "收起画像更新" : "更新体重、饮食与恢复"}
+            <button className="h-11 rounded-md border border-line bg-white px-3 text-sm font-medium" disabled={props.busy} onClick={() => setProfileOpen((current) => !current)} type="button">
+              {profileOpen ? "收起画像更新" : "更新体重、饮食与恢复"}
             </button>
           </div>
-          {props.children}
+          {profileOpen ? <ProfileContextForm {...props.profile} /> : null}
+          <PlanScheduleManagement {...props.schedule} />
         </div>
       ) : null}
     </section>

@@ -4,7 +4,7 @@ import { DB_TABLE } from "../../lib/supabase/table-names";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Dumbbell, Loader2, Moon, Pause, Play, PlusCircle } from "lucide-react";
+import { Dumbbell, Loader2, Moon, PlusCircle } from "lucide-react";
 import { getDefaultPlanPosition, groupPlanOutline } from "@/domain/plan-outline";
 import { getNextWorkoutActionLabel, getNextWorkoutState } from "@/domain/next-workout";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
@@ -56,7 +56,7 @@ import { buildScheduleReflowPayload, type ReflowScheduleItem } from "@/domain/sc
 import { buildReflowScheduleItems } from "@/domain/schedule-reflow";
 import { ScheduleRuleFields } from "./schedule-rule-fields";
 import { ScheduleAdjustmentDialog } from "./schedule-adjustment-dialog";
-import { UnavailableDateManager, type UnavailableDateItem } from "./unavailable-date-manager";
+import type { UnavailableDateItem } from "./unavailable-date-manager";
 import {
   buildProgramReplacementPayload,
   buildRegenerationPreview,
@@ -68,6 +68,7 @@ import { PlanScheduleOutline } from "./plan-schedule-outline";
 import { WorkoutPrescriptionEditor } from "./workout-prescription-editor";
 import { CoachRecommendationInbox, type CoachRecommendation } from "./coach-recommendation-inbox";
 import { PlanManagementPanel } from "./plan-management-panel";
+export { ProfileContextForm } from "./profile-context-form";
 import { resolveProgramRegenerationOutcome } from "./program-regeneration-outcome";
 import {
   buildConfirmationPayload,
@@ -220,17 +221,12 @@ export function ProgramManager() {
   const [planSetup, setPlanSetup] = useState<PlanSetupInput>(defaultPlanSetup);
   const [planSetupErrors, setPlanSetupErrors] = useState<Record<string, string>>({});
   const [showPlanSetup, setShowPlanSetup] = useState(false);
-  const [showProfileContext, setShowProfileContext] = useState(false);
-  const [managementOpen, setManagementOpen] = useState(false);
   const [scheduleExpansionMode, setScheduleExpansionMode] = useState<"default" | "all" | "collapsed">("default");
   const [regenerationDialog, setRegenerationDialog] = useState(createRegenerationDialogState);
   const [scheduleAdjustmentSupported, setScheduleAdjustmentSupported] = useState(true);
   const [scheduleEvents, setScheduleEvents] = useState<ScheduleEventRow[]>([]);
   const [unavailableDates, setUnavailableDates] = useState<UnavailableDateItem[]>([]);
   const [adjustmentDialog, setAdjustmentDialog] = useState<AdjustmentDialogState | null>(null);
-  const [showPauseForm, setShowPauseForm] = useState(false);
-  const [pauseReason, setPauseReason] = useState<PauseReason>("fatigue");
-  const [pauseResumeDate, setPauseResumeDate] = useState("");
   const [scheduleActionBusy, setScheduleActionBusy] = useState(false);
   const confirmationInFlight = useRef(false);
   const pendingReplacementPayload = useRef<ProgramReplacementPayload | null>(null);
@@ -635,7 +631,6 @@ export function ProgramManager() {
 
     clearTrainingDataCaches();
     setPlanSetupErrors({});
-    setShowProfileContext(false);
     setMessage("画像数据已保存；下次重建计划时会使用这些体重、饮食与恢复数据。");
     setStatus("ready");
   }
@@ -1040,14 +1035,14 @@ export function ProgramManager() {
     setMessage(action === "resume" ? "已恢复训练，日程已更新。" : "已为你多安排一天休息，后续日程已顺延。");
   }
 
-  async function confirmPause() {
-    if (!program || !userId) return;
+  async function confirmPause(reason: PauseReason, resumeDate: string): Promise<boolean> {
+    if (!program || !userId) return false;
 
     const revision = program.schedule_revision;
     if (typeof revision !== "number") {
       setStatus("error");
       setMessage("数据库升级尚未完成，暂不能暂停计划。");
-      return;
+      return false;
     }
 
     setScheduleActionBusy(true);
@@ -1057,7 +1052,7 @@ export function ProgramManager() {
       program_id: program.id,
       event_type: "pause_started",
       effective_date: formatDate(new Date()),
-      metadata: { reason: pauseReason, resume_date: pauseResumeDate || null },
+      metadata: { reason, resume_date: resumeDate || null },
       schedule_revision: revision
     });
     setScheduleActionBusy(false);
@@ -1065,14 +1060,13 @@ export function ProgramManager() {
     if (error) {
       setStatus("error");
       setMessage(error.message);
-      return;
+      return false;
     }
 
-    setShowPauseForm(false);
-    setPauseResumeDate("");
     clearTrainingDataCaches();
     await loadCurrentProgram({ showLoading: false });
     setMessage("计划已暂停。恢复时可以选择继续当前循环或从下个循环开始。");
+    return true;
   }
 
   async function addUnavailableDate(date: string, note: string) {
@@ -1664,51 +1658,22 @@ export function ProgramManager() {
           busy={status === "generating"}
           onAdjust={() => setShowPlanSetup(true)}
           onRegenerate={openRegenerationDialog}
-          onToggle={() => setManagementOpen((current) => !current)}
-          onToggleProfile={() => setShowProfileContext((current) => !current)}
-          open={managementOpen}
-          profileOpen={showProfileContext}
-        >
-          <p className="text-sm leading-6 text-muted">日程调整、不可训练日和画像更新仅在需要时展开，避免干扰日常执行。</p>
-          {showProfileContext ? (
-            <ProfileContextForm errors={planSetupErrors} isSaving={status === "generating"} onChange={setPlanSetup} onSave={saveProfileContext} value={planSetup} />
-          ) : null}
-          {adjustmentControlsAvailable ? (
-            <>
-              <section className="rounded-xl border border-line bg-white p-4">
-                <div className="mb-3 flex items-center gap-3">
-                  <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
-                    {pauseState.paused ? <Play size={20} /> : <Pause size={20} />}
-                  </span>
-                  <div><h2 className="font-semibold">日程调整</h2><p className="text-sm text-muted">暂停、恢复或多休一天，训练顺序会自动保持。</p></div>
-                </div>
-                {pauseState.paused ? (
-                  <div className="rounded-lg border border-[#c75c1a]/30 bg-[#c75c1a]/5 p-3">
-                    <p className="font-semibold text-[#c75c1a]">计划已暂停</p>
-                    <p className="mt-1 text-sm text-muted">{pauseState.resumeDate ? `预计 ${pauseState.resumeDate} 恢复。` : "尚未设置恢复日期。"}{recoveryAdvice ? ` ${recoveryAdvice.message}` : ""}</p>
-                    <button className="pressable mt-3 inline-flex h-11 items-center gap-2 rounded-md bg-action px-4 font-semibold text-white disabled:opacity-60" disabled={scheduleActionBusy || !hasPendingScheduleRows} onClick={() => openAdjustmentDialog("resume")} type="button"><Play size={16} />恢复训练</button>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap gap-3">
-                    <button className="pressable inline-flex h-11 items-center rounded-md border border-line bg-white px-4 font-semibold disabled:opacity-60" disabled={scheduleActionBusy || !hasPendingScheduleRows} onClick={() => openAdjustmentDialog("extra_rest")} type="button">今天多休一天</button>
-                    <button className="pressable inline-flex h-11 items-center rounded-md border border-line bg-white px-4 font-semibold" onClick={() => setShowPauseForm((current) => !current)} type="button">{showPauseForm ? "收起暂停设置" : "暂停计划"}</button>
-                  </div>
-                )}
-                {showPauseForm && !pauseState.paused ? (
-                  <div className="mt-3 grid gap-3 rounded-lg bg-field p-3 sm:grid-cols-2">
-                    <label className="block"><span className="mb-1 block text-sm font-medium">暂停原因</span><select aria-label="暂停原因" className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm" onChange={(event) => setPauseReason(event.target.value as PauseReason)} value={pauseReason}><option value="fatigue">疲劳累积，需要休整</option><option value="time_conflict">工作/学习时间冲突</option><option value="minor_discomfort">轻微不适</option><option value="injury">受伤</option><option value="personal">个人事务</option><option value="other">其他</option></select></label>
-                    <label className="block"><span className="mb-1 block text-sm font-medium">预计恢复日期（可选）</span><input aria-label="预计恢复日期（可选）" className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm" onChange={(event) => setPauseResumeDate(event.target.value)} type="date" value={pauseResumeDate} /></label>
-                    <div className="flex gap-3 sm:col-span-2">
-                      <button className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-action px-4 text-sm font-semibold text-white disabled:opacity-60" disabled={scheduleActionBusy} onClick={confirmPause} type="button">{scheduleActionBusy ? <Loader2 className="animate-spin" size={16} /> : null}确认暂停</button>
-                      <button className="inline-flex h-11 items-center justify-center rounded-lg border border-line bg-white px-4 text-sm font-semibold" onClick={() => setShowPauseForm(false)} type="button">取消</button>
-                    </div>
-                  </div>
-                ) : null}
-              </section>
-              <UnavailableDateManager busy={scheduleActionBusy} dates={unavailableDates} onAdd={addUnavailableDate} onRemove={removeUnavailableDate} />
-            </>
-          ) : null}
-        </PlanManagementPanel>
+          profile={{ errors: planSetupErrors, isSaving: status === "generating", onChange: setPlanSetup, onSave: saveProfileContext, value: planSetup }}
+          schedule={{
+            available: adjustmentControlsAvailable,
+            busy: scheduleActionBusy,
+            hasPendingScheduleRows,
+            onAddUnavailableDate: addUnavailableDate,
+            onExtraRest: () => openAdjustmentDialog("extra_rest"),
+            onPause: confirmPause,
+            onRemoveUnavailableDate: removeUnavailableDate,
+            onResume: () => openAdjustmentDialog("resume"),
+            paused: pauseState.paused,
+            recoveryMessage: recoveryAdvice?.message ?? null,
+            resumeDate: pauseState.resumeDate,
+            unavailableDates
+          }}
+        />
       ) : null}
       {adjustmentDialog ? (
         <ScheduleAdjustmentDialog
@@ -1764,128 +1729,6 @@ export function getProgramWeekCount(program: Pick<ProgramRow, "start_date" | "en
   const end = Date.parse(`${program.end_date}T00:00:00Z`);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 4;
   return Math.min(12, Math.max(1, Math.ceil((end - start + 86_400_000) / 604_800_000)));
-}
-
-export function ProfileContextForm({
-  errors,
-  isSaving,
-  onChange,
-  onSave,
-  value
-}: {
-  errors: Record<string, string>;
-  isSaving: boolean;
-  onChange: (value: PlanSetupInput) => void;
-  onSave: () => void;
-  value: PlanSetupInput;
-}) {
-  function update(patch: Partial<PlanSetupInput>) {
-    onChange({ ...value, ...patch });
-  }
-
-  return (
-    <section className="rounded-lg border border-line bg-white p-4">
-      <div className="mb-4">
-        <p className="page-kicker">训练画像</p>
-        <h2 className="text-xl font-bold">更新体重、饮食与恢复</h2>
-        <p className="mt-1 text-sm leading-6 text-muted">保存不会修改当前周期、已安排的训练或历史记录；这些数据会用于下一次重建计划。</p>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">当前体重（可选）</span>
-          <input
-            aria-label="当前体重 kg"
-            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
-            inputMode="decimal"
-            max="300"
-            min="30"
-            onChange={(event) => update({ currentBodyWeightKg: event.target.value })}
-            placeholder="例如 70"
-            step="0.1"
-            type="number"
-            value={value.currentBodyWeightKg ?? ""}
-          />
-          {errors.currentBodyWeightKg ? <p className="mt-1 text-xs text-red-600">{errors.currentBodyWeightKg}</p> : null}
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">目标体重（可选）</span>
-          <input
-            aria-label="目标体重 kg"
-            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
-            inputMode="decimal"
-            max="300"
-            min="30"
-            onChange={(event) => update({ targetBodyWeightKg: event.target.value })}
-            placeholder="例如 65"
-            step="0.1"
-            type="number"
-            value={value.targetBodyWeightKg ?? ""}
-          />
-          <p className="mt-1 text-xs text-muted">按 {value.weekCount} 周换算为每周体重变化。</p>
-          {errors.targetBodyWeightKg ? <p className="mt-1 text-xs text-red-600">{errors.targetBodyWeightKg}</p> : null}
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">近 14 天体重变化（可选）</span>
-          <input
-            aria-label="近14天体重变化 kg"
-            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
-            inputMode="decimal"
-            max="3"
-            min="-3"
-            onChange={(event) => update({ weightChangeLast14DaysKg: event.target.value })}
-            placeholder="当前体重 - 14 天前体重"
-            step="0.1"
-            type="number"
-            value={value.weightChangeLast14DaysKg ?? ""}
-          />
-          {errors.weightChangeLast14DaysKg ? <p className="mt-1 text-xs text-red-600">{errors.weightChangeLast14DaysKg}</p> : null}
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">饮食执行度</span>
-          <select
-            aria-label="饮食执行度"
-            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
-            onChange={(event) => update({ nutritionAdherence: event.target.value as PlanSetupInput["nutritionAdherence"] })}
-            value={value.nutritionAdherence ?? "moderate"}
-          >
-            <option value="high">高：大部分时间按计划执行</option>
-            <option value="moderate">中：有少量偏离</option>
-            <option value="low">低：近期难以稳定执行</option>
-          </select>
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium">恢复状态</span>
-          <select
-            aria-label="恢复状态"
-            className="h-11 w-full rounded-lg border border-line bg-white px-3 text-sm"
-            onChange={(event) => update({ recoveryStatus: event.target.value as PlanSetupInput["recoveryStatus"] })}
-            value={value.recoveryStatus ?? "normal"}
-          >
-            <option value="high">良好：睡眠、精力和酸痛都可控</option>
-            <option value="normal">一般：可正常训练</option>
-            <option value="low">偏低：疲劳、睡眠或酸痛影响训练</option>
-          </select>
-        </label>
-      </div>
-      <label className="mt-3 flex items-start gap-2 text-sm">
-        <input
-          checked={value.proteinTargetMet ?? false}
-          className="mt-1 h-4 w-4"
-          onChange={(event) => update({ proteinTargetMet: event.target.checked })}
-          type="checkbox"
-        />
-        <span>近期大多数日子达到自己的蛋白质目标</span>
-      </label>
-      <button
-        className="pressable mt-4 inline-flex h-11 items-center justify-center rounded-md bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={isSaving}
-        onClick={onSave}
-        type="button"
-      >
-        {isSaving ? "保存中…" : "保存画像数据"}
-      </button>
-    </section>
-  );
 }
 
 export function PlanSetupForm({

@@ -47,7 +47,7 @@ export function UnavailableDateManager({ dates, onAdd, onRemove, busy = false }:
               </span>
               <button
                 aria-label={`删除 ${item.date}`}
-                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-11 items-center gap-1 rounded-md px-3 text-sm font-semibold text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
                 disabled={busy}
                 onClick={() => onRemove(item.id)}
                 type="button"
@@ -65,7 +65,7 @@ export function UnavailableDateManager({ dates, onAdd, onRemove, busy = false }:
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
         <input
           aria-label="不可训练日期"
-          className="h-10 rounded-lg border border-line bg-white px-3 text-sm"
+          className="h-11 rounded-lg border border-line bg-white px-3 text-sm"
           disabled={busy}
           onChange={(event) => setDate(event.target.value)}
           type="date"
@@ -73,7 +73,7 @@ export function UnavailableDateManager({ dates, onAdd, onRemove, busy = false }:
         />
         <input
           aria-label="备注（可选）"
-          className="h-10 rounded-lg border border-line bg-white px-3 text-sm"
+          className="h-11 rounded-lg border border-line bg-white px-3 text-sm"
           disabled={busy}
           maxLength={40}
           onChange={(event) => setNote(event.target.value)}
@@ -82,7 +82,7 @@ export function UnavailableDateManager({ dates, onAdd, onRemove, busy = false }:
           value={note}
         />
         <button
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-action px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-action px-4 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
           disabled={busy || !date}
           onClick={() => {
             if (!date) return;

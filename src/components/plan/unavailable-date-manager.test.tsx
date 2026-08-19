@@ -102,4 +102,12 @@ describe("UnavailableDateManager", () => {
     expect(findButton("添加")?.disabled).toBe(true);
     expect(findButton("删除 2026-09-01")?.disabled).toBe(true);
   });
+
+  it("keeps every action at least 44px tall, including disabled actions", () => {
+    renderManager({ busy: true });
+
+    for (const action of container?.querySelectorAll("button") ?? []) {
+      expect(action.className, action.textContent ?? action.getAttribute("aria-label") ?? "button").toContain("h-11");
+    }
+  });
 });
