@@ -4,11 +4,12 @@ import { DB_TABLE } from "../../lib/supabase/table-names";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Brain, CalendarDays, CheckCircle2, Dumbbell, Loader2, Moon, Save, TrendingUp } from "lucide-react";
+import { Brain, CheckCircle2, ChevronLeft, ChevronRight, Loader2, Moon, Save, TrendingUp } from "lucide-react";
+import { buildHistoryCalendarDays, selectHistoryDetailWorkouts, type CalendarDay, type CalendarWorkout } from "@/domain/history-calendar";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
 import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
 import { requiresRpeForWorkoutExercise, resolveCompletedSetValues, resolveSetLoadType, validateRecordedSet } from "@/domain/workout-recording";
-import { clearTrainingDataCaches, readClientCache, writeClientCache } from "@/lib/client-cache";
+import { clearTrainingDataCaches } from "@/lib/client-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/browser";
 import { loadWorkoutsWithDayTypeFallback } from "@/lib/workout-day-type-compat";
 import { resolveWorkoutExerciseName } from "@/lib/workout-exercise-presentation";
@@ -21,6 +22,7 @@ type WorkoutRow = {
   scheduled_date: string;
   name: string;
   completed_at: string | null;
+  status: "scheduled" | "draft" | "completed" | "skipped";
 };
 
 type WorkoutExerciseRow = {
@@ -67,13 +69,6 @@ type RecommendationRow = {
   } | null;
 };
 
-type HistoryCache = {
-  recommendations: RecommendationRow[];
-  setLogs: SetLogRow[];
-  workoutExercises: WorkoutExerciseRow[];
-  workouts: WorkoutRow[];
-};
-
 type WorkoutReview = {
   averageRpe: number | null;
   completedSets: number;
@@ -84,8 +79,6 @@ type WorkoutReview = {
   volume: number;
 };
 
-const historyCacheKey = "strength-training-cache:history";
-
 export function TrainingHistory() {
   const [workouts, setWorkouts] = useState<WorkoutRow[]>([]);
   const [workoutExercises, setWorkoutExercises] = useState<WorkoutExerciseRow[]>([]);
@@ -95,18 +88,70 @@ export function TrainingHistory() {
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [message, setMessage] = useState("");
   const [historySearch, setHistorySearch] = useState("");
+  const [visibleMonth, setVisibleMonth] = useState(() => normalizeHistoryMonth(new Date()));
+  const [loadedMonth, setLoadedMonth] = useState(() => normalizeHistoryMonth(new Date()));
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [isMonthLoading, setIsMonthLoading] = useState(false);
+  const [monthLoadError, setMonthLoadError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const focusedWorkoutRef = useRef<HTMLElement | null>(null);
+  const hasLoadedMonthRef = useRef(false);
 
   useEffect(() => {
     setHistorySearch(window.location.search);
   }, []);
 
+  const requestedWorkoutId = new URLSearchParams(historySearch).get("workout")?.trim() ?? "";
+
   useEffect(() => {
+    if (!requestedWorkoutId) return;
+    let cancelled = false;
+
+    async function loadFocusedWorkoutMonth() {
+      try {
+        const supabase = createBrowserSupabaseClient();
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        const user = sessionData.session?.user;
+        if (sessionError || !user) return;
+        const { data, error } = await supabase
+          .from(DB_TABLE.workouts)
+          .select("id,scheduled_date")
+          .eq("user_id", user.id)
+          .eq("id", requestedWorkoutId)
+          .maybeSingle();
+        if (cancelled || error || !data?.scheduled_date) return;
+        setVisibleMonth(normalizeHistoryMonth(new Date(`${data.scheduled_date}T00:00:00`)));
+      } catch {
+        // Invalid or inaccessible workout links must leave the current month unchanged.
+      }
+    }
+
+    void loadFocusedWorkoutMonth();
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedWorkoutId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
     async function loadHistory() {
-      if (!readClientCache<HistoryCache>(historyCacheKey)) {
+      const { monthStart, nextMonthStart } = getHistoryMonthBounds(visibleMonth);
+      const keepLoadedContent = hasLoadedMonthRef.current;
+      const handleMonthLoadError = (errorMessage: string) => {
+        setMonthLoadError(true);
+        setMessage(errorMessage);
+        setIsMonthLoading(false);
+        setStatus(keepLoadedContent ? "ready" : "error");
+      };
+
+      if (!keepLoadedContent) {
         setStatus("loading");
+      } else {
+        setIsMonthLoading(true);
       }
       setMessage("");
+      setMonthLoadError(false);
 
       try {
         const supabase = createBrowserSupabaseClient();
@@ -123,33 +168,31 @@ export function TrainingHistory() {
 
         const { data: workoutData, error: workoutError } = await withTimeout(
           loadWorkoutsWithDayTypeFallback(
-            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at,day_type").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12),
-            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at").eq("user_id", user.id).eq("status", "completed").order("scheduled_date", { ascending: false }).limit(12)
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at,day_type,status").eq("user_id", user.id).gte("scheduled_date", monthStart).lt("scheduled_date", nextMonthStart).order("scheduled_date", { ascending: true }),
+            () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,name,completed_at,status").eq("user_id", user.id).gte("scheduled_date", monthStart).lt("scheduled_date", nextMonthStart).order("scheduled_date", { ascending: true })
           ),
           "训练历史读取超时，请刷新页面后重试。"
         );
 
         if (workoutError) {
-          setStatus("error");
-          setMessage(workoutError.message);
+          handleMonthLoadError(workoutError.message);
           return;
         }
 
-        const completedWorkouts = (workoutData ?? []) as WorkoutRow[];
-        setWorkouts(completedWorkouts);
+        const monthWorkouts = (workoutData ?? []) as WorkoutRow[];
+        if (cancelled) return;
+        setWorkouts(monthWorkouts);
 
-        const workoutIds = completedWorkouts.map((workout) => workout.id);
+        const workoutIds = monthWorkouts.map((workout) => workout.id);
         if (workoutIds.length === 0) {
           setWorkoutExercises([]);
           setSetLogs([]);
           setRecommendations([]);
-          writeClientCache<HistoryCache>(historyCacheKey, {
-            recommendations: [],
-            setLogs: [],
-            workoutExercises: [],
-            workouts: completedWorkouts
-          });
+          setLoadedMonth(visibleMonth);
+          setSelectedDate(null);
+          hasLoadedMonthRef.current = true;
           setStatus("ready");
+          setIsMonthLoading(false);
           return;
         }
 
@@ -176,12 +219,12 @@ export function TrainingHistory() {
         const { data: exerciseData, error: exerciseError } = exerciseResult;
 
         if (exerciseError) {
-          setStatus("error");
-          setMessage(exerciseError.message);
+          handleMonthLoadError(exerciseError.message);
           return;
         }
 
         const exerciseRows = (exerciseData ?? []) as unknown as WorkoutExerciseRow[];
+        if (cancelled) return;
         setWorkoutExercises(exerciseRows);
 
         const workoutExerciseIds = exerciseRows.map((exercise) => exercise.id);
@@ -197,48 +240,39 @@ export function TrainingHistory() {
           );
 
           if (logsError) {
-            setStatus("error");
-            setMessage(logsError.message);
+            handleMonthLoadError(logsError.message);
             return;
           }
 
           logRows = (logsData ?? []) as SetLogRow[];
-          setSetLogs(logRows);
+          if (cancelled) return;
         }
+        setSetLogs(logRows);
 
         const { data: recommendationData, error: recommendationError } = recommendationResult;
 
         if (recommendationError) {
-          setStatus("error");
-          setMessage(recommendationError.message);
+          handleMonthLoadError(recommendationError.message);
           return;
         }
 
+        if (cancelled) return;
         setRecommendations((recommendationData ?? []) as unknown as RecommendationRow[]);
-        writeClientCache<HistoryCache>(historyCacheKey, {
-          recommendations: (recommendationData ?? []) as unknown as RecommendationRow[],
-          setLogs: logRows,
-          workoutExercises: exerciseRows,
-          workouts: completedWorkouts
-        });
+        setLoadedMonth(visibleMonth);
+        hasLoadedMonthRef.current = true;
         setStatus("ready");
+        setIsMonthLoading(false);
       } catch (error) {
-        setStatus("error");
-        setMessage(error instanceof Error ? error.message : "训练历史读取失败，请刷新页面后重试。");
+        if (cancelled) return;
+        handleMonthLoadError(error instanceof Error ? error.message : "训练历史读取失败，请刷新页面后重试。");
       }
     }
 
-    const cached = readClientCache<HistoryCache>(historyCacheKey);
-    if (cached) {
-      setWorkouts(cached.workouts);
-      setWorkoutExercises(cached.workoutExercises);
-      setSetLogs(cached.setLogs);
-      setRecommendations(cached.recommendations);
-      setStatus("ready");
-    }
-
-    loadHistory();
-  }, []);
+    void loadHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAttempt, visibleMonth]);
 
   const exercisesByWorkoutId = useMemo(() => {
     return workoutExercises.reduce<Record<string, WorkoutExerciseRow[]>>((groups, exercise) => {
@@ -267,6 +301,11 @@ export function TrainingHistory() {
   }, [recommendations]);
 
   const focusedWorkoutId = useMemo(() => getHistoryWorkoutFocusId(historySearch, workouts), [historySearch, workouts]);
+
+  useEffect(() => {
+    const focusedWorkout = workouts.find((workout) => workout.id === focusedWorkoutId);
+    if (focusedWorkout) setSelectedDate(focusedWorkout.scheduled_date);
+  }, [focusedWorkoutId, workouts]);
 
   useEffect(() => {
     if (!focusedWorkoutId || status !== "ready" || !focusedWorkoutRef.current) return;
@@ -374,7 +413,9 @@ export function TrainingHistory() {
 
   const summary = useMemo(() => {
     const trainingWorkoutIds = new Set(
-      filterTrainingMetricWorkouts(workouts.map((workout) => ({ ...workout, dayType: workout.day_type }))).map((workout) => workout.id)
+      filterTrainingMetricWorkouts(workouts.map((workout) => ({ ...workout, dayType: workout.day_type })))
+        .filter((workout) => workout.status === "completed")
+        .map((workout) => workout.id)
     );
     const trainingExerciseIds = new Set(workoutExercises.filter((exercise) => trainingWorkoutIds.has(exercise.workout_id)).map((exercise) => exercise.id));
     const completedLogs = setLogs.filter((log) => log.completed && trainingExerciseIds.has(log.workout_exercise_id));
@@ -395,6 +436,46 @@ export function TrainingHistory() {
     };
   }, [setLogs, workoutExercises, workouts]);
 
+  const calendarDays = useMemo(() => {
+    const calendarWorkouts: CalendarWorkout[] = workouts.map((workout) => {
+      const exercises = exercisesByWorkoutId[workout.id] ?? [];
+      const logs = exercises.flatMap((exercise) => setLogsByExerciseId[exercise.id] ?? []);
+      const review = buildWorkoutReview(logs);
+
+      return {
+        completedVolume: workout.status === "completed" && workout.day_type === "training" ? review.volume : 0,
+        dayType: workout.day_type,
+        id: workout.id,
+        scheduledDate: workout.scheduled_date,
+        status: workout.status
+      };
+    });
+    return buildHistoryCalendarDays(loadedMonth, calendarWorkouts);
+  }, [exercisesByWorkoutId, loadedMonth, setLogsByExerciseId, workouts]);
+
+  const selectedDay = useMemo(
+    () => (selectedDate ? calendarDays.find((day) => day.date === selectedDate) ?? null : null),
+    [calendarDays, selectedDate]
+  );
+  const detailWorkouts = useMemo(
+    () => selectHistoryDetailWorkouts(selectedDate, calendarDays, workouts),
+    [calendarDays, selectedDate, workouts]
+  );
+  const workoutById = useMemo(() => new Map(workouts.map((workout) => [workout.id, workout])), [workouts]);
+  const currentMonth = normalizeHistoryMonth(new Date());
+  const canMoveToNextMonth = loadedMonth.getTime() < currentMonth.getTime();
+
+  function moveVisibleMonth(offset: number) {
+    const nextMonth = new Date(loadedMonth.getFullYear(), loadedMonth.getMonth() + offset, 1);
+    if (nextMonth.getTime() > currentMonth.getTime()) return;
+    setSelectedDate(null);
+    if (nextMonth.getTime() === visibleMonth.getTime()) {
+      setLoadAttempt((attempt) => attempt + 1);
+    } else {
+      setVisibleMonth(nextMonth);
+    }
+  }
+
   if (status === "loading") {
     return (
       <div className="flex items-center gap-3 rounded-xl border border-line p-4 text-muted">
@@ -408,27 +489,89 @@ export function TrainingHistory() {
     return <p className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-600">{message}</p>;
   }
 
-  if (workouts.length === 0) {
-    return (
-      <section className="rounded-xl border border-line p-4">
-        <div className="mb-4 flex items-center gap-3">
-          <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
-            <CalendarDays size={20} />
-          </span>
-          <div>
-            <h2 className="font-semibold">还没有完成训练</h2>
-            <p className="text-sm text-muted">完成一次今日训练后，这里会显示每组记录和 Coach 调整。</p>
-          </div>
-        </div>
-        <Link className="inline-flex rounded-lg bg-action px-4 py-2 font-semibold text-white" href="/today">
-          去训练
-        </Link>
-      </section>
-    );
-  }
-
   return (
     <div className="space-y-4">
+      <section aria-label="按月查看训练历史" className="rounded-lg border border-line bg-white p-3 sm:p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <button
+            aria-label="上个月"
+            className="pressable grid h-11 w-11 place-items-center rounded-md border border-line text-ink disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isMonthLoading}
+            onClick={() => moveVisibleMonth(-1)}
+            type="button"
+          >
+            <ChevronLeft size={18} />
+          </button>
+          <div className="text-center">
+            <p className="text-sm text-muted">训练历史</p>
+            <h2 className="font-semibold">{loadedMonth.getFullYear()} 年 {loadedMonth.getMonth() + 1} 月</h2>
+          </div>
+          <button
+            aria-label="下个月"
+            className="pressable grid h-11 w-11 place-items-center rounded-md border border-line text-ink disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={isMonthLoading || !canMoveToNextMonth}
+            onClick={() => moveVisibleMonth(1)}
+            type="button"
+          >
+            {isMonthLoading ? <Loader2 className="animate-spin" size={18} /> : <ChevronRight size={18} />}
+          </button>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-medium text-muted">
+          {["一", "二", "三", "四", "五", "六", "日"].map((label) => <span key={label}>{label}</span>)}
+        </div>
+        <div aria-label={`${loadedMonth.getFullYear()} 年 ${loadedMonth.getMonth() + 1} 月训练日历`} className="mt-1 grid grid-cols-7 gap-1" role="grid">
+          {calendarDays.map((day) => (
+            <CalendarDateCell day={day} key={day.date} onSelect={() => setSelectedDate(day.date)} selected={selectedDate === day.date} workoutById={workoutById} />
+          ))}
+        </div>
+      </section>
+
+      {monthLoadError ? (
+        <section className="rounded-lg border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700">
+          <p>{message}</p>
+          <button className="pressable mt-2 h-11 rounded-md border border-red-200 bg-white px-3 font-semibold text-ink" onClick={() => setLoadAttempt((attempt) => attempt + 1)} type="button">重新加载本月</button>
+        </section>
+      ) : null}
+
+      {!selectedDate ? (
+        <section className="rounded-lg border border-line bg-field p-4 text-sm text-muted">
+          请选择一个有训练安排或记录的日期，查看当天计划或已完成训练。
+        </section>
+      ) : null}
+
+      {selectedDay && selectedDay.workouts.length > 0 ? (
+        <section className="rounded-lg border border-line bg-white p-4">
+          <h2 className="font-semibold">{selectedDay.date} 训练摘要</h2>
+          <div className="mt-3 space-y-2">
+            {selectedDay.workouts.map((calendarWorkout) => {
+              const workout = workoutById.get(calendarWorkout.id);
+              if (!workout) return null;
+              const exercises = exercisesByWorkoutId[workout.id] ?? [];
+              const workoutLogs = exercises.flatMap((exercise) => setLogsByExerciseId[exercise.id] ?? []);
+              const review = buildWorkoutReview(workoutLogs);
+              return (
+                <div className="rounded-lg border border-line bg-field px-3 py-3" key={workout.id}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="font-semibold">{workout.name}</h3>
+                      <p className="mt-1 text-sm text-muted">
+                        {workout.status === "completed"
+                          ? `${review.completedSets} 组 · ${Math.round(review.volume).toLocaleString()} kg`
+                          : workout.day_type === "rest" ? "恢复安排" : "计划训练"}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-muted">
+                      {workout.status === "completed" ? "已完成" : workout.status === "skipped" ? "已跳过" : "已计划"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      {selectedDate ? <>
       <section className="grid gap-3 sm:grid-cols-3">
         <Metric label="已完成" value={`${summary.workouts} 次`} />
         <Metric label="总训练量" value={`${Math.round(summary.volume).toLocaleString()} kg`} />
@@ -442,7 +585,7 @@ export function TrainingHistory() {
           </p>
         ) : null}
 
-        {workouts.map((workout) => {
+        {detailWorkouts.map((workout) => {
           const exercises = exercisesByWorkoutId[workout.id] ?? [];
           const workoutRecommendations = recommendationsByWorkoutId[workout.id] ?? [];
           const workoutLogs = exercises.flatMap((exercise) => setLogsByExerciseId[exercise.id] ?? []);
@@ -610,8 +753,79 @@ export function TrainingHistory() {
           );
         })}
       </section>
+      </> : null}
     </div>
   );
+}
+
+function CalendarDateCell({
+  day,
+  onSelect,
+  selected,
+  workoutById
+}: {
+  day: CalendarDay;
+  onSelect: () => void;
+  selected: boolean;
+  workoutById: Map<string, WorkoutRow>;
+}) {
+  const workouts = day.workouts
+    .map((workout) => workoutById.get(workout.id))
+    .filter((workout): workout is WorkoutRow => Boolean(workout));
+  const hasRecords = workouts.length > 0;
+  const completedTraining = workouts.filter((workout) => workout.status === "completed" && workout.day_type === "training");
+  const plannedTraining = workouts.find((workout) => workout.status !== "completed" && workout.day_type === "training");
+  const hasRest = workouts.some((workout) => workout.day_type === "rest");
+  const dayNumber = Number(day.date.slice(-2));
+  const labels = completedTraining.length > 1
+    ? [`${completedTraining.length} 次完成`, `${Math.round(day.completedVolume).toLocaleString()} kg`]
+    : completedTraining.length === 1
+      ? [completedTraining[0].name, `${Math.round(day.completedVolume).toLocaleString()} kg`]
+      : hasRest
+        ? ["恢复"]
+        : plannedTraining
+          ? [plannedTraining.name]
+          : [];
+  const statusClassName = day.status === "completed"
+    ? "border-action/35 bg-action/5 text-ink"
+    : day.status === "rest"
+      ? "border-slate-300 bg-slate-50 text-slate-700"
+      : day.status === "planned"
+        ? "border-line bg-field text-muted"
+        : "border-transparent text-muted";
+  const description = labels.length > 0 ? labels.join("，") : "无训练记录";
+
+  return (
+    <button
+      aria-label={`${day.date}，${description}`}
+      className={`min-h-16 rounded-md border p-1 text-left text-[10px] leading-4 ${statusClassName} ${selected ? "ring-2 ring-action/45" : ""} ${!day.inMonth ? "opacity-35" : ""} disabled:cursor-default`}
+      disabled={!day.inMonth || !hasRecords}
+      onClick={onSelect}
+      type="button"
+    >
+      <span className="block font-semibold">{dayNumber}</span>
+      {labels.slice(0, 2).map((label) => <span className="block truncate" key={label}>{label}</span>)}
+    </button>
+  );
+}
+
+export function normalizeHistoryMonth(date: Date, currentDate = new Date()) {
+  const normalized = new Date(date.getFullYear(), date.getMonth(), 1);
+  const currentMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+  return normalized.getTime() > currentMonth.getTime() ? currentMonth : normalized;
+}
+
+export function getHistoryMonthBounds(month: Date) {
+  const normalized = normalizeHistoryMonth(month);
+  const nextMonth = new Date(normalized.getFullYear(), normalized.getMonth() + 1, 1);
+  return { monthStart: formatDate(normalized), nextMonthStart: formatDate(nextMonth) };
+}
+
+function formatDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
