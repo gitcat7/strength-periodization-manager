@@ -50,4 +50,11 @@ describe("history calendar month boundaries", () => {
     expect(component).toContain("setSelectedDate(null)");
     expect(component).toContain("{selectedDay && selectedDay.workouts.length > 0 ? (");
   });
+
+  it("clears the selected date before loading every navigated month", async () => {
+    const component = await readFile(componentPath, "utf8");
+    const moveMonthSource = component.match(/function moveVisibleMonth\(offset: number\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+
+    expect(moveMonthSource).toContain("setSelectedDate(null)");
+  });
 });

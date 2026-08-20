@@ -415,6 +415,7 @@ export function TrainingHistory() {
   function moveVisibleMonth(offset: number) {
     const nextMonth = new Date(loadedMonth.getFullYear(), loadedMonth.getMonth() + offset, 1);
     if (nextMonth.getTime() > currentMonth.getTime()) return;
+    setSelectedDate(null);
     if (nextMonth.getTime() === visibleMonth.getTime()) {
       setLoadAttempt((attempt) => attempt + 1);
     } else {
