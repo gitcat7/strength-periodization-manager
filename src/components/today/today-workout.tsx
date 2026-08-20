@@ -278,6 +278,7 @@ export function TodayWorkout() {
   const [workout, setWorkout] = useState<WorkoutRow | null>(null);
   const [exercises, setExercises] = useState<WorkoutExerciseRow[]>([]);
   const [setLogs, setSetLogs] = useState<Record<string, SetLogRow[]>>({});
+  const persistedSetIndexesRef = useRef<Record<string, number[]>>({});
   const [lastCompletedWorkout, setLastCompletedWorkout] = useState<LastCompletedWorkoutRow | null>(null);
   const [coachRecommendations, setCoachRecommendations] = useState<
     Array<ExerciseCoachRecommendation & { exerciseName: string }>
@@ -631,6 +632,9 @@ export function TodayWorkout() {
         } else {
           setWorkout(cached.workout);
           setExercises(cached.exercises);
+          persistedSetIndexesRef.current = Object.fromEntries(
+            Object.entries(cached.setLogs).map(([exerciseId, logs]) => [exerciseId, logs.map((log) => log.set_index)])
+          );
           setSetLogs(cached.setLogs);
           setLastCompletedWorkout(cached.lastCompletedWorkout);
           setCoachRecommendations(cached.coachRecommendations);
@@ -663,6 +667,7 @@ export function TodayWorkout() {
 
   async function ensureSetLogs(exerciseRows: WorkoutExerciseRow[], workoutId: string) {
     if (exerciseRows.length === 0) {
+      persistedSetIndexesRef.current = {};
       setSetLogs({});
       return {};
     }
@@ -730,6 +735,9 @@ export function TodayWorkout() {
     }
 
     const groupedLogs = groupSetLogs((refreshedLogs ?? []) as SetLogRow[]);
+    persistedSetIndexesRef.current = Object.fromEntries(
+      Object.entries(groupedLogs).map(([exerciseId, logs]) => [exerciseId, logs.map((log) => log.set_index)])
+    );
     const draftLogs = readDraftLogs(workoutId);
     if (draftLogs) {
       const mergedLogs = mergeDraftLogs(groupedLogs, draftLogs);
@@ -754,6 +762,64 @@ export function TodayWorkout() {
         )
       };
       writeDraftLogs(workout?.id, nextLogs);
+      return nextLogs;
+    });
+  }
+
+  function addSet(exercise: WorkoutExerciseRow) {
+    if (!workout || workout.status === "completed" || workoutSummary) return;
+
+    const currentLogs = setLogs[exercise.id] ?? [];
+    if (currentLogs.length >= 12) {
+      setMessage("单个动作最多保留 12 组。");
+      return;
+    }
+
+    setSaveStatus("idle");
+    setValidationIssues([]);
+    setMessage("");
+    setSetLogs((current) => {
+      const logs = current[exercise.id] ?? [];
+      const previous = logs[logs.length - 1];
+      const nextLogs = {
+        ...current,
+        [exercise.id]: [
+          ...logs,
+          {
+            actual_reps: null,
+            actual_weight: null,
+            completed: false,
+            rpe: null,
+            set_index: logs.length + 1,
+            target_reps: previous?.target_reps ?? exercise.target_reps,
+            target_weight: previous?.target_weight ?? exercise.target_weight,
+            workout_exercise_id: exercise.id
+          }
+        ]
+      };
+      writeDraftLogs(workout.id, nextLogs);
+      return nextLogs;
+    });
+  }
+
+  function removeLastSet(exercise: WorkoutExerciseRow) {
+    if (!workout || workout.status === "completed" || workoutSummary) return;
+
+    const currentLogs = setLogs[exercise.id] ?? [];
+    if (currentLogs.length <= 1) {
+      setMessage("每个动作至少保留 1 组。");
+      return;
+    }
+
+    setSaveStatus("idle");
+    setValidationIssues([]);
+    setMessage("");
+    setSetLogs((current) => {
+      const nextLogs = {
+        ...current,
+        [exercise.id]: (current[exercise.id] ?? []).slice(0, -1)
+      };
+      writeDraftLogs(workout.id, nextLogs);
       return nextLogs;
     });
   }
@@ -890,6 +956,11 @@ export function TodayWorkout() {
         updated_at: new Date().toISOString()
       }));
 
+    const staleSetKeys = Object.entries(persistedSetIndexesRef.current).flatMap(([exerciseId, indexes]) => {
+      const currentIndexes = new Set((setLogs[exerciseId] ?? []).map((log) => log.set_index));
+      return indexes.filter((setIndex) => !currentIndexes.has(setIndex)).map((setIndex) => ({ exerciseId, setIndex }));
+    });
+
     const { error: upsertError } = await supabase
       .from(DB_TABLE.setLogs)
       .upsert(payload, { onConflict: "workout_exercise_id,set_index" });
@@ -899,6 +970,24 @@ export function TodayWorkout() {
       setMessage(upsertError.message);
       return;
     }
+
+    for (const { exerciseId, setIndex } of staleSetKeys) {
+      const { error: deleteError } = await supabase
+        .from(DB_TABLE.setLogs)
+        .delete()
+        .eq("workout_exercise_id", exerciseId)
+        .eq("set_index", setIndex);
+
+      if (deleteError) {
+        setSaveStatus("error");
+        setMessage(deleteError.message);
+        return;
+      }
+    }
+
+    persistedSetIndexesRef.current = Object.fromEntries(
+      Object.entries(setLogs).map(([exerciseId, logs]) => [exerciseId, logs.map((log) => log.set_index)])
+    );
 
     if (completeWorkout) {
       clearDraftLogs(workout.id);
@@ -1550,6 +1639,27 @@ export function TodayWorkout() {
                       </div>
                     ))}
                   </div>
+                  {workout.status !== "completed" && !workoutSummary ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        aria-label={`${exercise.exercises?.name ?? "动作"}增加一组`}
+                        className="pressable inline-flex h-11 items-center rounded-md border border-action px-3 text-sm font-semibold text-action"
+                        onClick={() => addSet(exercise)}
+                        type="button"
+                      >
+                        + 增加一组
+                      </button>
+                      <button
+                        aria-label={`${exercise.exercises?.name ?? "动作"}删除末组`}
+                        className="pressable inline-flex h-11 items-center rounded-md border border-line px-3 text-sm font-semibold text-muted disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={exerciseLogs.length <= 1}
+                        onClick={() => removeLastSet(exercise)}
+                        type="button"
+                      >
+                        删除末组
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </article>
@@ -1886,30 +1996,24 @@ function groupSetLogs(logs: SetLogRow[]) {
 function mergeDraftLogs(currentLogs: Record<string, SetLogRow[]>, draftLogs: Record<string, SetLogRow[]>) {
   return Object.fromEntries(
     Object.entries(currentLogs).map(([workoutExerciseId, logs]) => {
-      const draftBySetIndex = new Map(
-        (draftLogs[workoutExerciseId] ?? []).map((log) => [log.set_index, log])
-      );
+      const draftExerciseLogs = draftLogs[workoutExerciseId];
+      if (!draftExerciseLogs) return [workoutExerciseId, logs];
+
+      const currentBySetIndex = new Map(logs.map((log) => [log.set_index, log]));
 
       return [
         workoutExerciseId,
-        logs.map((log) => ({
-          ...log,
-          ...pickDraftFields(draftBySetIndex.get(log.set_index))
-        }))
+        draftExerciseLogs
+          .slice()
+          .sort((a, b) => a.set_index - b.set_index)
+          .map((draftLog) => ({
+            ...(currentBySetIndex.get(draftLog.set_index) ?? draftLog),
+            ...draftLog,
+            workout_exercise_id: workoutExerciseId
+          }))
       ];
     })
   );
-}
-
-function pickDraftFields(log?: SetLogRow) {
-  if (!log) return {};
-
-  return {
-    actual_reps: log.actual_reps,
-    actual_weight: log.actual_weight,
-    completed: log.completed,
-    rpe: log.rpe
-  };
 }
 
 function readDraftLogs(workoutId: string) {

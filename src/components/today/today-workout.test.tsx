@@ -22,12 +22,14 @@ vi.mock("@/lib/supabase/browser", () => ({
       const builder = {
         select: () => builder,
         eq: () => builder,
+        gt: () => builder,
         in: () => builder,
         lt: () => builder,
         order: () => builder,
         limit: () => builder,
         maybeSingle: () => Promise.resolve(result),
         upsert: () => Promise.resolve(result),
+        delete: () => builder,
         update: () => builder,
         insert: () => Promise.resolve(result),
         then: (resolve: (value: typeof result) => unknown, reject?: (reason: unknown) => unknown) =>
@@ -244,9 +246,44 @@ describe("TodayWorkout cache hydration", () => {
 
     expect(completion?.checked).toBe(true);
   });
+
+  it("allows adding or removing sets even after an exercise is fully completed", async () => {
+    writeCachedWorkout({ slug: "barbell_bench_press", targetSets: 3, completedSets: 3 });
+    ({ container, root } = renderTodayWorkout());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("3/3 组");
+    const addButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("增加一组"));
+    const removeButton = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("删除末组"));
+    expect(addButton).toBeDefined();
+    expect(removeButton).toBeDefined();
+
+    act(() => addButton?.click());
+    expect(container.textContent).toContain("3/4 组");
+    expect(container.querySelectorAll('input[aria-label$="组完成"]')).toHaveLength(4);
+    expect(JSON.parse(window.localStorage.getItem("strength-training-draft:workout-1") ?? "{}")["workout-exercise-1"]).toHaveLength(4);
+
+    act(() => removeButton?.click());
+    expect(container.textContent).toContain("3/3 组");
+    expect(container.querySelectorAll('input[aria-label$="组完成"]')).toHaveLength(3);
+    expect(JSON.parse(window.localStorage.getItem("strength-training-draft:workout-1") ?? "{}")["workout-exercise-1"]).toHaveLength(3);
+  });
 });
 
-function writeCachedWorkout({ slug, targetWeight = 100 }: { slug: string; targetWeight?: number }) {
+function writeCachedWorkout({
+  slug,
+  targetWeight = 100,
+  targetSets = 1,
+  completedSets = 0
+}: {
+  slug: string;
+  targetWeight?: number;
+  targetSets?: number;
+  completedSets?: number;
+}) {
   writeClientCache("strength-training-cache:today", {
     coachRecommendations: [],
     exercises: [
@@ -263,7 +300,7 @@ function writeCachedWorkout({ slug, targetWeight = 100 }: { slug: string; target
         id: "workout-exercise-1",
         order_index: 0,
         target_reps: 5,
-        target_sets: 1,
+        target_sets: targetSets,
         target_weight: targetWeight
       }
     ],
@@ -278,18 +315,16 @@ function writeCachedWorkout({ slug, targetWeight = 100 }: { slug: string; target
     },
     restItem: null,
     setLogs: {
-      "workout-exercise-1": [
-        {
-          actual_reps: null,
-          actual_weight: null,
-          completed: false,
-          rpe: null,
-          set_index: 1,
-          target_reps: 5,
-          target_weight: targetWeight,
-          workout_exercise_id: "workout-exercise-1"
-        }
-      ]
+      "workout-exercise-1": Array.from({ length: targetSets }, (_, index) => ({
+        actual_reps: completedSets > index ? 5 : null,
+        actual_weight: completedSets > index ? targetWeight : null,
+        completed: completedSets > index,
+        rpe: completedSets > index ? 8 : null,
+        set_index: index + 1,
+        target_reps: 5,
+        target_weight: targetWeight,
+        workout_exercise_id: "workout-exercise-1"
+      }))
     },
     userId: "user-1",
     workout: {
