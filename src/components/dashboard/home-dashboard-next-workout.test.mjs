@@ -26,4 +26,12 @@ describe("home dashboard next workout source contract", () => {
     expect(source).toContain("最近一次训练");
     expect(source).toContain('href={`/history?workout=${recentTraining.id}`}');
   });
+
+  test("shows current-workout completion progress next to every planned exercise", async () => {
+    const source = await readFile(sourcePath, "utf8");
+    expect(source).toContain("buildCurrentWorkoutProgress");
+    expect(source).toContain("loadNextWorkoutSetLogs");
+    expect(source).toContain("组已完成");
+    expect(source).toContain("nextWorkoutSetLogs");
+  });
 });

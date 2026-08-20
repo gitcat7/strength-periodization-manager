@@ -19,6 +19,7 @@ import {
 import { getDaysUntilTarget } from "@/domain/pr-planner";
 import { getNextWorkoutActionLabel, getNextWorkoutState } from "@/domain/next-workout";
 import { selectNextProgramWorkout } from "@/domain/next-program-workout";
+import { buildCurrentWorkoutProgress, type CurrentWorkoutSetLog } from "@/domain/current-workout-progress";
 import { formatPrescription, getWorkoutMeta } from "@/domain/training-format";
 import { filterTrainingMetricWorkouts } from "@/domain/training-metric-workouts";
 import { selectRecentTraining } from "@/domain/recent-training";
@@ -82,6 +83,7 @@ type HomeDashboardCache = {
   email: string;
   nextWorkout: WorkoutRow | null;
   nextWorkoutExercises: WorkoutExerciseRow[];
+  nextWorkoutSetLogs: CurrentWorkoutSetLog[];
   prGoals: PrGoalRow[];
   recommendations: RecommendationRow[];
   setLogs: SetLogRow[];
@@ -93,6 +95,7 @@ export function HomeDashboard() {
   const [email, setEmail] = useState("");
   const [nextWorkout, setNextWorkout] = useState<WorkoutRow | null>(null);
   const [nextWorkoutExercises, setNextWorkoutExercises] = useState<WorkoutExerciseRow[]>([]);
+  const [nextWorkoutSetLogs, setNextWorkoutSetLogs] = useState<CurrentWorkoutSetLog[]>([]);
   const [completedWorkouts, setCompletedWorkouts] = useState<WorkoutRow[]>([]);
   const [completedExercises, setCompletedExercises] = useState<WorkoutExerciseRow[]>([]);
   const [setLogs, setSetLogs] = useState<SetLogRow[]>([]);
@@ -109,6 +112,7 @@ export function HomeDashboard() {
       // The active program may have changed since this cache was written.
       setNextWorkout(null);
       setNextWorkoutExercises([]);
+      setNextWorkoutSetLogs([]);
       setCompletedWorkouts(cached.completedWorkouts);
       setCompletedExercises(cached.completedExercises);
       setSetLogs(cached.setLogs);
@@ -149,6 +153,11 @@ export function HomeDashboard() {
   const recentTraining = useMemo(
     () => selectRecentTraining(completedWorkouts, completedExercises, setLogs),
     [completedExercises, completedWorkouts, setLogs]
+  );
+
+  const nextWorkoutProgress = useMemo(
+    () => buildCurrentWorkoutProgress(nextWorkoutExercises, nextWorkoutSetLogs),
+    [nextWorkoutExercises, nextWorkoutSetLogs]
   );
 
   async function loadDashboard() {
@@ -269,6 +278,7 @@ export function HomeDashboard() {
         ...followUpLoads,
         nextWorkoutRow ? loadNextWorkoutExercises(nextWorkoutRow.id) : Promise.resolve([])
       ]);
+      const nextWorkoutSetLogRows = await loadNextWorkoutSetLogs(nextWorkoutExerciseRows);
 
       writeClientCache<HomeDashboardCache>(homeDashboardCacheKey, {
         completedExercises: completedDetails.completedExercises,
@@ -276,6 +286,7 @@ export function HomeDashboard() {
         email: user.email ?? "",
         nextWorkout: nextWorkoutRow,
         nextWorkoutExercises: nextWorkoutExerciseRows,
+        nextWorkoutSetLogs: nextWorkoutSetLogRows,
         prGoals: prGoalRows,
         recommendations: recommendationRows,
         setLogs: completedDetails.setLogs
@@ -302,6 +313,33 @@ export function HomeDashboard() {
 
     const rows = (data ?? []) as unknown as WorkoutExerciseRow[];
     setNextWorkoutExercises(rows);
+    return rows;
+  }
+
+  async function loadNextWorkoutSetLogs(exercises: WorkoutExerciseRow[]) {
+    const exerciseIds = exercises.map((exercise) => exercise.id);
+    if (exerciseIds.length === 0) {
+      setNextWorkoutSetLogs([]);
+      return [];
+    }
+
+    const supabase = createBrowserSupabaseClient();
+    const { data, error } = await withTimeout(
+      supabase
+        .from(DB_TABLE.setLogs)
+        .select("workout_exercise_id,completed")
+        .in("workout_exercise_id", exerciseIds),
+      "当前训练完成进度读取超时，请刷新页面后重试。"
+    );
+
+    if (error) {
+      console.warn("current workout set logs query failed", error.message);
+      setNextWorkoutSetLogs([]);
+      return [];
+    }
+
+    const rows = (data ?? []) as CurrentWorkoutSetLog[];
+    setNextWorkoutSetLogs(rows);
     return rows;
   }
 
@@ -526,17 +564,26 @@ export function HomeDashboard() {
                 {nextWorkoutExercises.slice(0, 5).map((exercise) => (
                   <div className="flex items-center justify-between border-b border-line/70 px-1 py-2 text-sm last:border-b-0" key={exercise.id}>
                     <span className="font-medium">{exercise.exercises?.name ?? "动作"}</span>
-                    <span className="text-action">
-                      {formatPrescription({
-                        slug: exercise.exercises?.slug,
-                        targetSets: exercise.target_sets,
-                        targetReps: exercise.target_reps,
-                        targetWeight: Number(exercise.target_weight)
-                      })}
+                    <span className="text-right">
+                      <span className="block text-action">
+                        {formatPrescription({
+                          slug: exercise.exercises?.slug,
+                          targetSets: exercise.target_sets,
+                          targetReps: exercise.target_reps,
+                          targetWeight: Number(exercise.target_weight)
+                        })}
+                      </span>
+                      <span className="block text-xs text-muted">
+                        {nextWorkoutProgress.byExerciseId[exercise.id]?.completedSets ?? 0}/
+                        {nextWorkoutProgress.byExerciseId[exercise.id]?.totalSets ?? exercise.target_sets} 组已完成
+                      </span>
                     </span>
                   </div>
                 ))}
               </div>
+              <p className="mt-3 text-sm font-semibold text-action">
+                本次进度：{nextWorkoutProgress.completedSets}/{nextWorkoutProgress.totalSets} 组已完成
+              </p>
               <Link className="pressable mt-4 inline-flex rounded-md border border-action px-3 py-2 text-sm font-semibold text-action" href="/single-workout">
                 快速记录自由训练
               </Link>
