@@ -253,8 +253,6 @@ export function TrainingHistory() {
         setWorkoutExercises(exerciseRows);
         setSetLogs(logRows);
         setRecommendations((recommendationData ?? []) as unknown as RecommendationRow[]);
-        const today = formatDate(new Date());
-        setSelectedDate(monthWorkouts.some((workout) => workout.scheduled_date === today) ? today : null);
         setLoadedMonth(visibleMonth);
         hasLoadedMonthRef.current = true;
         setStatus("ready");

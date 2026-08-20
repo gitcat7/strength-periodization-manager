@@ -35,4 +35,19 @@ describe("history calendar month boundaries", () => {
     expect(component).toContain("setLoadedMonth(visibleMonth)");
     expect(component).toContain("重新加载本月");
   });
+
+  it("does not select today automatically after the month query completes", async () => {
+    const component = await readFile(componentPath, "utf8");
+
+    expect(component).toContain("const [selectedDate, setSelectedDate] = useState<string | null>(null)");
+    expect(component).not.toContain("setSelectedDate(monthWorkouts.some((workout) => workout.scheduled_date === today) ? today : null)");
+  });
+
+  it("only reveals a day after an explicit date click and clears it on month navigation", async () => {
+    const component = await readFile(componentPath, "utf8");
+
+    expect(component).toContain("onSelect={() => setSelectedDate(day.date)}");
+    expect(component).toContain("setSelectedDate(null)");
+    expect(component).toContain("{selectedDay && selectedDay.workouts.length > 0 ? (");
+  });
 });
