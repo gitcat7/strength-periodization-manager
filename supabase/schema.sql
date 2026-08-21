@@ -2118,6 +2118,16 @@ begin
       select v_exercise_id,v_set_index,target_weight,target_reps,v_weight,v_reps,v_rpe,v_completed from public.plan_workout_exercises where id=v_exercise_id
       on conflict (workout_exercise_id,set_index) do update set actual_weight=excluded.actual_weight,actual_reps=excluded.actual_reps,rpe=excluded.rpe,completed=excluded.completed,updated_at=now();
   end loop;
+  delete from public.log_set_logs as log
+  using public.plan_workout_exercises as exercise
+  where log.workout_exercise_id = exercise.id
+    and exercise.workout_id = p_workout_id
+    and not exists (
+      select 1
+      from jsonb_array_elements(p_logs) as submitted(value)
+      where (submitted.value ->> 'workout_exercise_id')::uuid = log.workout_exercise_id
+        and (submitted.value ->> 'set_index')::integer = log.set_index
+    );
    update public.plan_workouts set status='completed',completed_at=coalesce(completed_at,now()),duration_seconds=p_duration_seconds,coach_revision=coach_revision+1,updated_at=now() where id=p_workout_id returning * into v_workout;
   v_recommendations := public.refresh_scientific_recommendations(p_workout_id);
   return jsonb_build_object('workout_id',p_workout_id,'status','completed','duration_seconds',p_duration_seconds,'recommendations',v_recommendations);

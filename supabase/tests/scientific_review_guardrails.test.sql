@@ -1,6 +1,6 @@
 begin;
 
-select plan(15);
+select plan(16);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values ('00000000-0000-0000-0000-000000008101', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'science-review@example.test', 'not-used', '{}'::jsonb, '{}'::jsonb, now(), now());
@@ -48,6 +48,11 @@ select lives_ok(
 );
 select is((select prescription_revision from public.plan_workouts where id='00000000-0000-0000-0000-000000008401'), 2, 'revision increments after a guarded save');
 select is((select count(*) from public.log_workout_prescription_revisions where workout_id='00000000-0000-0000-0000-000000008401'), 1::bigint, 'prescription audit is retained');
+
+reset role;
+insert into public.log_set_logs (workout_exercise_id, set_index, target_weight, target_reps, actual_weight, actual_reps, rpe, completed)
+select id, 4, 82.5, 5, null, null, null, false from public.plan_workout_exercises where workout_id='00000000-0000-0000-0000-000000008401';
+set local role authenticated;
 select lives_ok(
   format(
     'select public.complete_training_workout(%L::uuid, 900, %L::jsonb)',
@@ -64,5 +69,7 @@ select is((select duration_seconds from public.plan_workouts where id='00000000-
 select is((select count(*) from public.log_recommendations where workout_id='00000000-0000-0000-0000-000000008401' and status='pending'), 1::bigint, 'one pending recommendation is generated per source exercise');
 
 reset role;
+select is((select count(*) from public.log_set_logs where workout_exercise_id=(select id from public.plan_workout_exercises where workout_id='00000000-0000-0000-0000-000000008401')), 3::bigint, 'completion removes persisted sets omitted from the submitted payload');
+
 select * from finish();
 rollback;
