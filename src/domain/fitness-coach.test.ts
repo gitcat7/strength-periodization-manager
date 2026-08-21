@@ -24,7 +24,7 @@ describe("exercise coach recommendation safety gate", () => {
     ).toMatchObject({ suggestedWeight: 102.5, type: "increase" });
   });
 
-  it("does not increase when a completed main lift finishes at RPE 9", () => {
+  it("reduces rather than increases when a completed main lift finishes at RPE 9", () => {
     expect(
       buildExerciseCoachRecommendation({
         exerciseName: "杠铃卧推",
@@ -33,7 +33,7 @@ describe("exercise coach recommendation safety gate", () => {
         logs: [completedSet(6), completedSet(6), completedSet(9)],
         targetWeight: 100
       })
-    ).toMatchObject({ suggestedWeight: 100, type: "hold" });
+    ).toMatchObject({ suggestedWeight: 95, type: "decrease" });
   });
 
   it("does not increase when a completed main lift is missing its final RPE", () => {
@@ -82,6 +82,19 @@ describe("exercise coach recommendation safety gate", () => {
         targetWeight: 10
       })
     ).toMatchObject({ suggestedWeight: 10, type: "hold" });
+  });
+
+  it("uses the same recovery protection rule as the scientific review", () => {
+    expect(
+      buildExerciseCoachRecommendation({
+        exerciseName: "深蹲",
+        increment: 2.5,
+        isMainLift: true,
+        logs: [completedSet(7), completedSet(7), completedSet(7)],
+        recovery: "poor",
+        targetWeight: 100
+      })
+    ).toMatchObject({ type: "deload" });
   });
 });
 

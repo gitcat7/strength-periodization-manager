@@ -1,4 +1,5 @@
 import { roundToNearestPlate } from "@/domain/strength";
+import { buildScientificReview } from "@/domain/scientific-review";
 
 export type RecommendationType = "increase" | "hold" | "decrease" | "deload";
 
@@ -118,17 +119,16 @@ export function buildExerciseCoachRecommendation({
   increment,
   isMainLift = false,
   logs,
+  recovery,
   targetWeight
 }: {
+  recovery?: "normal" | "poor" | null;
   exerciseName: string;
   increment: number;
   isMainLift?: boolean;
   logs: CoachSetLog[];
   targetWeight: number;
 }): ExerciseCoachRecommendation {
-  const summary = summarizeSetLogs(logs);
-  const plateIncrement = increment > 0 ? increment : 2.5;
-
   if (targetWeight <= 0) {
     return {
       type: "hold",
@@ -137,60 +137,15 @@ export function buildExerciseCoachRecommendation({
     };
   }
 
-  if (summary.completionRatio <= 0.5) {
-    return {
-      type: "deload",
-      suggestedWeight: roundToNearestPlate(targetWeight * 0.9, plateIncrement),
-      reason: `${exerciseName} 完成组数不足一半，下次先降重约 10%，把动作质量找回来。`
-    };
-  }
-
-  if (summary.completionRatio < 1) {
-    return {
-      type: "hold",
-      suggestedWeight: targetWeight,
-      reason: `${exerciseName} 本次没有全部完成，下次先保持重量，目标是补齐计划组数。`
-    };
-  }
-
-  const finalRpe = logs.at(-1)?.rpe;
-  if (typeof finalRpe !== "number" || !Number.isFinite(finalRpe) || finalRpe < 1 || finalRpe > 10) {
-    return {
-      type: "hold",
-      suggestedWeight: targetWeight,
-      reason: `${exerciseName} 已完成，但末组缺少有效 RPE。先保持重量，再记录真实体感用于下次判断。`
-    };
-  }
-
-  if (finalRpe >= 9) {
-    return {
-      type: "hold",
-      suggestedWeight: targetWeight,
-      reason: `${exerciseName} 末组 RPE ${finalRpe.toFixed(1)} 偏高，下次先保持重量，优先保证恢复和动作质量。`
-    };
-  }
-
-  if (!isMainLift) {
-    return {
-      type: "hold",
-      suggestedWeight: targetWeight,
-      reason: `${exerciseName} 已完成。默认加重只用于主项，辅助动作先保持重量并观察下次完成质量。`
-    };
-  }
-
-  if (finalRpe <= 8) {
-    return {
-      type: "increase",
-      suggestedWeight: roundToNearestPlate(targetWeight + plateIncrement, plateIncrement),
-      reason: `${exerciseName} 全部完成且末组 RPE ${finalRpe.toFixed(1)}，下次可按默认增量小幅加重。`
-    };
-  }
-
-  return {
-    type: "hold",
-    suggestedWeight: targetWeight,
-    reason: `${exerciseName} 末组 RPE ${finalRpe.toFixed(1)}，完成质量合适，继续按当前重量巩固。`
-  };
+  const review = buildScientificReview({
+    increment,
+    isMainLift,
+    logs,
+    recovery,
+    targetSets: logs.length,
+    targetWeight
+  });
+  return { type: review.type, suggestedWeight: review.suggestedWeight, reason: `${exerciseName}：${review.reason}` };
 }
 
 function diffDays(fromDate: string, toDate: string) {
