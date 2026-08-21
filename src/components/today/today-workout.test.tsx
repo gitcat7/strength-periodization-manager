@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { writeClientCache } from "@/lib/client-cache";
 
 const router = { replace: vi.fn() };
+const rpc = vi.fn(() => Promise.resolve({ data: { recommendations: [] }, error: null }));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => router
@@ -14,6 +15,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/supabase/browser", () => ({
   createBrowserSupabaseClient: () => ({
+    rpc,
     auth: {
       getSession: () => new Promise(() => {})
     },
@@ -66,6 +68,7 @@ afterEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
   vi.useRealTimers();
+  rpc.mockClear();
 });
 
 describe("TodayWorkout cache hydration", () => {
@@ -199,6 +202,21 @@ describe("TodayWorkout cache hydration", () => {
 
     expect(view.querySelector('[role="dialog"]')).toBeNull();
     expect(view.textContent).toContain("本次训练摘要");
+  });
+
+  it("completes a planned workout through the single atomic RPC and consumes its recommendations", async () => {
+    writeCachedWorkout({ slug: "barbell_bench_press" });
+    ({ container, root } = renderTodayWorkout());
+    await act(async () => { await Promise.resolve(); });
+    const numberInputs = container!.querySelectorAll<HTMLInputElement>('input[type="number"]');
+    act(() => setInputValue(numberInputs[2]!, "7"));
+    act(() => container!.querySelector<HTMLInputElement>('input[aria-label="第 1 组完成"]')?.click());
+    const completeButton = [...container!.querySelectorAll("button")].find((button) => button.textContent === "保存并完成训练");
+    act(() => completeButton?.click());
+    const confirmButton = [...container!.querySelectorAll("button")].find((button) => button.textContent === "确认完成");
+    await act(async () => { confirmButton?.click(); await Promise.resolve(); });
+
+    expect(rpc).toHaveBeenCalledWith("complete_training_workout", expect.objectContaining({ p_workout_id: "workout-1" }));
   });
 
   it("fills planned strength values without fabricating RPE or completion", async () => {

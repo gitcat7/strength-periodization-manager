@@ -57,6 +57,7 @@ import {
   type ProgramReplacementPayload
 } from "@/domain/program-regeneration";
 import { ProgramRegenerationDialog } from "./program-regeneration-dialog";
+import { WorkoutPrescriptionGuardrailEditor, type GuardrailExercise } from "./workout-prescription-guardrail-editor";
 import { resolveProgramRegenerationOutcome } from "./program-regeneration-outcome";
 import {
   buildConfirmationPayload,
@@ -72,6 +73,7 @@ type ProgramRow = {
   schedule_config: Record<string, unknown>;
   custom_template_name: string | null;
   status: string;
+  prescription_revision?: number;
   start_date: string;
   end_date: string;
   schedule_revision?: number;
@@ -88,6 +90,7 @@ type WorkoutRow = {
   cycle_position?: number | null;
   name: string;
   status: string;
+  prescription_revision?: number;
 };
 
 type ScheduleEventRow = {
@@ -109,6 +112,7 @@ type AdjustmentDialogState = {
 
 type WorkoutExerciseRow = {
   id: string;
+  exercise_id: string;
   workout_id: string;
   order_index: number;
   target_sets: number;
@@ -117,6 +121,8 @@ type WorkoutExerciseRow = {
   exercises: {
     name: string;
     slug: string;
+    training_direction?: string | null;
+    is_main_lift?: boolean;
   } | null;
 };
 
@@ -138,6 +144,13 @@ type RecommendationRow = {
     sequence_index: number;
     name: string;
   } | null;
+};
+
+type RecommendationImpactPreview = {
+  recommendation: RecommendationRow;
+  sets: number | null;
+  weight: number;
+  workouts: Array<{ id: string; name: string; scheduled_date: string }>;
 };
 
 type ExerciseRow = {
@@ -192,6 +205,7 @@ export function ProgramManager() {
   const [workoutExercises, setWorkoutExercises] = useState<WorkoutExerciseRow[]>([]);
   const [recommendations, setRecommendations] = useState<RecommendationRow[]>([]);
   const [recommendationWeights, setRecommendationWeights] = useState<Record<string, string>>({});
+  const [recommendationPreview, setRecommendationPreview] = useState<RecommendationImpactPreview | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "generating" | "error">("loading");
   const [usesLegacyScheduleSchema, setUsesLegacyScheduleSchema] = useState(false);
   const [message, setMessage] = useState("");
@@ -202,6 +216,7 @@ export function ProgramManager() {
   const [customTemplateName, setCustomTemplateName] = useState("");
   const [useCustomName, setUseCustomName] = useState(false);
   const [mainLifts, setMainLifts] = useState<ExerciseRow[]>([]);
+  const [exerciseCatalog, setExerciseCatalog] = useState<GuardrailExercise[]>([]);
   const [planSetup, setPlanSetup] = useState<PlanSetupInput>(defaultPlanSetup);
   const [planSetupErrors, setPlanSetupErrors] = useState<Record<string, string>>({});
   const [showPlanSetup, setShowPlanSetup] = useState(false);
@@ -585,7 +600,7 @@ export function ProgramManager() {
   > {
     const supabase = createBrowserSupabaseClient();
     const { data: workoutData, error: workoutError, usedLegacySchema } = await loadWorkoutsWithDayTypeFallback(
-      () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,schedule_index,day_type,cycle_index,cycle_position,name,status").eq("program_id", programId).order("schedule_index", { ascending: true }),
+      () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,schedule_index,day_type,cycle_index,cycle_position,name,status,prescription_revision").eq("program_id", programId).order("schedule_index", { ascending: true }),
       () => supabase.from(DB_TABLE.workouts).select("id,scheduled_date,sequence_index,name,status").eq("program_id", programId).order("sequence_index", { ascending: true })
     );
 
@@ -612,7 +627,7 @@ export function ProgramManager() {
 
     const { data: exerciseData, error: exerciseError } = await supabase
       .from(DB_TABLE.workoutExercises)
-      .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug)")
+      .select("id,workout_id,order_index,target_sets,target_reps,target_weight,exercises(name,slug,training_direction,is_main_lift)")
       .in("workout_id", workoutIds)
       .order("order_index", { ascending: true });
 
@@ -623,6 +638,8 @@ export function ProgramManager() {
     }
 
     const workoutExerciseRows = (exerciseData ?? []) as unknown as WorkoutExerciseRow[];
+    const { data: catalogData } = await supabase.from(DB_TABLE.exercises).select("id,name,slug,training_direction,is_main_lift");
+    setExerciseCatalog((catalogData ?? []).map((item) => ({ id: item.id, name: item.name, slug: item.slug, trainingDirection: item.training_direction as GuardrailExercise["trainingDirection"], isMainLift: Boolean(item.is_main_lift) })));
     setWorkoutExercises(workoutExerciseRows);
     return { ok: true, value: { workoutExercises: workoutExerciseRows, workouts: workoutRows } };
   }
@@ -686,78 +703,50 @@ export function ProgramManager() {
     setMessage("");
 
     const supabase = createBrowserSupabaseClient();
-    let futureWorkoutsQuery = supabase
-      .from(DB_TABLE.workouts)
-      .select("id")
-      .eq("program_id", program.id)
-      .neq("status", "completed");
-
-    if (typeof recommendation.workouts?.sequence_index === "number") {
-      futureWorkoutsQuery = futureWorkoutsQuery.gt("sequence_index", recommendation.workouts.sequence_index);
-    } else {
-      futureWorkoutsQuery = futureWorkoutsQuery.gte("scheduled_date", formatDate(new Date()));
-    }
-
-    const { data: futureWorkouts, error: futureWorkoutError } = await futureWorkoutsQuery;
-
-    if (futureWorkoutError) {
+    const { data, error } = await supabase.rpc("preview_recommendation_application", {
+      p_recommendation_id: recommendation.id,
+      p_sets: null,
+      p_weight: appliedWeight
+    });
+    if (error) {
       setStatus("error");
-      setMessage(futureWorkoutError.message);
+      setMessage("建议影响预览失败，请重试。");
       return;
     }
+    const preview = data as { sets?: number | null; weight?: number; workouts?: Array<{ id: string; name: string; scheduled_date: string }> } | null;
+    setRecommendationPreview({ recommendation, sets: preview?.sets ?? null, weight: Number(preview?.weight ?? appliedWeight), workouts: preview?.workouts ?? [] });
+    setStatus("ready");
+  }
 
-    const workoutIds = (futureWorkouts ?? []).map((workout) => workout.id);
-    if (workoutIds.length === 0) {
-      setStatus("ready");
-      setMessage("当前周期没有可应用的后续训练日。");
-      return;
-    }
-
-    const { error: updateExerciseError } = await supabase
-      .from(DB_TABLE.workoutExercises)
-      .update({
-        target_weight: appliedWeight
-      })
-      .eq("exercise_id", recommendation.exercise_id)
-      .in("workout_id", workoutIds);
-
-    if (updateExerciseError) {
+  async function applyRecommendation() {
+    if (!recommendationPreview || !program || !userId) return;
+    setStatus("generating");
+    const supabase = createBrowserSupabaseClient();
+    const { error } = await supabase.rpc("apply_recommendation", {
+      p_recommendation_id: recommendationPreview.recommendation.id,
+      p_sets: recommendationPreview.sets,
+      p_weight: recommendationPreview.weight
+    });
+    if (error) {
       setStatus("error");
-      setMessage(updateExerciseError.message);
+      setMessage("应用建议失败，请重试。当前计划未被静默修改。");
       return;
     }
-
     clearTrainingDataCaches();
-    const recommendationStatus =
-      Number(appliedWeight) === Number(recommendation.suggested_weight) ? "accepted" : "modified";
-    const { error: updateRecommendationError } = await supabase
-      .from(DB_TABLE.recommendations)
-      .update({
-        status: recommendationStatus,
-        suggested_weight: appliedWeight,
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", recommendation.id);
-
-    if (updateRecommendationError) {
-      setStatus("error");
-      setMessage(updateRecommendationError.message);
-      return;
-    }
-
     await trackEvent({
-      eventName: recommendationStatus === "accepted" ? "recommendation_accepted" : "recommendation_modified",
+      eventName: Number(recommendationPreview.weight) === Number(recommendationPreview.recommendation.suggested_weight) ? "recommendation_accepted" : "recommendation_modified",
       properties: {
-        exercise_slug: recommendation.exercises?.slug,
-        previous_weight: recommendation.previous_weight,
-        suggested_weight: recommendation.suggested_weight,
-        applied_weight: appliedWeight
+        exercise_slug: recommendationPreview.recommendation.exercises?.slug,
+        previous_weight: recommendationPreview.recommendation.previous_weight,
+        suggested_weight: recommendationPreview.recommendation.suggested_weight,
+        applied_weight: recommendationPreview.weight
       },
       supabase,
       userId
     });
 
-    setMessage(`${recommendation.exercises?.name ?? "动作"} 的后续计划已更新为 ${appliedWeight}kg。`);
+    setMessage(`${recommendationPreview.recommendation.exercises?.name ?? "动作"} 的后续计划已更新为 ${recommendationPreview.weight}kg。`);
+    setRecommendationPreview(null);
     await loadRecommendations(userId);
     await loadWorkouts(program.id);
     setStatus("ready");
@@ -1503,6 +1492,20 @@ export function ProgramManager() {
                         来源：{recommendation.workouts.scheduled_date} · {recommendation.workouts.name}
                       </p>
                     ) : null}
+                    {recommendationPreview?.recommendation.id === recommendation.id ? (
+                      <div className="mt-3 rounded-lg border border-action/30 bg-white p-3 text-sm">
+                        <p className="font-semibold">受影响的后续训练日</p>
+                        {recommendationPreview.workouts.length > 0 ? (
+                          <ul className="mt-2 space-y-1 text-muted">
+                            {recommendationPreview.workouts.map((workout) => <li key={workout.id}>{workout.scheduled_date} · {workout.name}</li>)}
+                          </ul>
+                        ) : <p className="mt-2 text-muted">当前周期没有可调整的后续训练日。</p>}
+                        <div className="mt-3 flex gap-2">
+                          <button className="h-11 rounded-lg bg-action px-3 font-semibold text-white" disabled={status === "generating"} onClick={applyRecommendation} type="button">确认应用</button>
+                          <button className="h-11 rounded-lg border border-line px-3 font-semibold" onClick={() => setRecommendationPreview(null)} type="button">取消</button>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:w-48">
                     <button
@@ -1512,7 +1515,7 @@ export function ProgramManager() {
                       type="button"
                     >
                       <CheckCircle2 size={16} />
-                      应用
+                      预览影响
                     </button>
                     <button
                       className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
@@ -1609,6 +1612,26 @@ export function ProgramManager() {
                       </span>
                     </div>
                   ))}
+                  {workout.status === "scheduled" || workout.status === "draft" ? (
+                    <WorkoutPrescriptionGuardrailEditor
+                      catalog={exerciseCatalog}
+                      exercises={(workoutExercisesByWorkoutId[workout.id] ?? []).map((exercise) => ({
+                        exercise: {
+                          id: exercise.exercise_id,
+                          name: exercise.exercises?.name ?? "动作",
+                          slug: exercise.exercises?.slug ?? "",
+                          trainingDirection: (exercise.exercises?.training_direction as GuardrailExercise["trainingDirection"]) ?? null,
+                          isMainLift: Boolean(exercise.exercises?.is_main_lift)
+                        },
+                        targetSets: Number(exercise.target_sets),
+                        targetReps: Number(exercise.target_reps),
+                        targetWeight: Number(exercise.target_weight)
+                      }))}
+                      onSaved={async () => { await loadWorkouts(program?.id ?? ""); }}
+                      prescriptionRevision={workout.prescription_revision ?? 1}
+                      workoutId={workout.id}
+                    />
+                  ) : null}
                 </div>
               ) : null}
             </article>

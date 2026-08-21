@@ -381,22 +381,17 @@ export function TrainingHistory() {
     setMessage("");
 
     const supabase = createBrowserSupabaseClient();
-    const { error } = await supabase
-      .from(DB_TABLE.setLogs)
-      .upsert(
-        normalizedLogs.map((log) => ({
+    const { error } = await supabase.rpc("revise_completed_workout_logs", {
+      p_logs: normalizedLogs.map((log) => ({
           workout_exercise_id: log.workout_exercise_id,
           set_index: log.set_index,
-          target_weight: log.target_weight,
-          target_reps: log.target_reps,
           actual_weight: log.actual_weight,
           actual_reps: log.actual_reps,
           rpe: log.rpe,
-          completed: log.completed,
-          updated_at: new Date().toISOString()
+          completed: log.completed
         })),
-        { onConflict: "workout_exercise_id,set_index" }
-      );
+      p_workout_id: workoutId
+    });
 
     if (error) {
       setSaveStatus("error");
@@ -408,7 +403,7 @@ export function TrainingHistory() {
     const normalizedById = new Map(normalizedLogs.map((log) => [log.id, log]));
     setSetLogs((current) => current.map((log) => normalizedById.get(log.id) ?? log));
     setSaveStatus("saved");
-    setMessage("历史训练已保存。进展页会按新的记录重新计算。");
+    setMessage("历史训练已保存，Coach 建议已按新记录重新计算。进展页会按新的记录重新计算。");
   }
 
   const summary = useMemo(() => {

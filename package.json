@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:db": "pnpm dlx supabase@2.34.3 test db supabase/tests/standalone_workout_drafts.test.sql --local",
     "test:db:sequence": "pnpm dlx supabase@2.34.3 test db supabase/tests/sequence_calendar_scheduling.test.sql --local",
+    "test:db:science": "pnpm dlx supabase@2.34.3 test db supabase/tests/scientific_review_guardrails.test.sql --local",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },

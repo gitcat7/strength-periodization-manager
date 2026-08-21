@@ -961,6 +961,56 @@ export function TodayWorkout() {
       return indexes.filter((setIndex) => !currentIndexes.has(setIndex)).map((setIndex) => ({ exerciseId, setIndex }));
     });
 
+    if (completeWorkout) {
+      const { data: completionData, error: completionError } = await supabase.rpc("complete_training_workout", {
+        p_duration_seconds: 0,
+        p_logs: payload,
+        p_workout_id: workout.id
+      });
+
+      if (completionError) {
+        setSaveStatus("error");
+        setMessage("训练完成保存失败，请重试。已填写的数据仍保留。");
+        return;
+      }
+
+      const completedRecommendations = (completionData as { recommendations?: Array<Record<string, unknown>> } | null)?.recommendations ?? [];
+      setCoachRecommendations(
+        completedRecommendations.map((item) => ({
+          exerciseName: exercises.find((exercise) => exercise.exercise_id === item.exercise_id)?.exercises?.name ?? "动作",
+          reason: String(item.reason ?? "数据不足，保持当前处方并继续记录。"),
+          suggestedWeight: Number(item.suggested_weight ?? 0),
+          type: (item.type === "increase" || item.type === "decrease" || item.type === "deload" ? item.type : "hold") as ExerciseCoachRecommendation["type"]
+        }))
+      );
+      persistedSetIndexesRef.current = Object.fromEntries(
+        Object.entries(setLogs).map(([exerciseId, logs]) => [exerciseId, logs.map((log) => log.set_index)])
+      );
+      clearDraftLogs(workout.id);
+      clearTrainingDataCaches();
+      const summary = buildWorkoutSummary({ exercises, setLogs });
+      setWorkout({ ...workout, status: "completed" });
+      setValidationIssues([]);
+      setWorkoutSummary(summary);
+      setCompletionPreview(null);
+      await trackEvent({
+        eventName: "workout_completed",
+        properties: {
+          completed_sets: allLogs.filter((log) => log.completed).length,
+          average_rpe: summary.averageRpe,
+          completion_rate: summary.completionRate,
+          recommendations: completedRecommendations.length,
+          total_volume: summary.totalVolume,
+          workout_name: workout.name
+        },
+        supabase,
+        userId
+      });
+      setMessage("训练已完成。下次训练建议仍待你在计划页明确应用，当前计划尚未更新。");
+      setSaveStatus("saved");
+      return;
+    }
+
     const { error: upsertError } = await supabase
       .from(DB_TABLE.setLogs)
       .upsert(payload, { onConflict: "workout_exercise_id,set_index" });

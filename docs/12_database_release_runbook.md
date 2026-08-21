@@ -218,6 +218,25 @@ where w.day_type = 'rest';
 
 顺序日历排程的回滚补充：该迁移涉及已创建的计划和审计记录，不能通过删除列或删除表“回滚”。若生产出现问题，先将 Vercel 回退到最后一个不依赖排程 RPC 的稳定前端版本，并暂停新的排程调整；随后基于本次发布前备份和已记录的 `ops_schedule_events` 制定数据修复方案。任何数据恢复或补偿均需先在非生产环境演练，并保留用户已完成训练记录。
 
+## 科学复盘与处方护栏迁移（20260821010000）
+
+在 Supabase SQL Editor 完整执行 `supabase/migrations/20260821010000_scientific_review_and_prescription_guardrails.sql`，不要拆段执行。该迁移仅新增复盘/处方版本字段、审计表、唯一 pending 索引与 security-definer RPC；不回填或删除历史训练。
+
+执行后验证：
+
+```sql
+select routine_name
+from information_schema.routines
+where routine_schema = 'public'
+  and routine_name in ('complete_training_workout', 'revise_completed_workout_logs', 'preview_recommendation_application', 'apply_recommendation', 'preview_workout_prescription_revision', 'revise_workout_prescription');
+
+select indexname
+from pg_indexes
+where schemaname = 'public' and indexname = 'log_recommendations_pending_source_idx';
+```
+
+回滚原则：不要删除审计记录或覆盖 accepted/modified/rejected 建议。若前端出现问题，只回滚到上一版 Vercel；暂停新建议应用，保留服务端已完成的训练和审计事实，随后在非生产环境修复并重新验证。
+
 ## 6. 内测期间节奏
 
 - 每次改 schema 前备份。
