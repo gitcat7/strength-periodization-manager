@@ -2,8 +2,10 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "vitest";
 
 const migrationPath = new URL("../supabase/migrations/20260821010000_scientific_review_and_prescription_guardrails.sql", import.meta.url);
+const protectionMigrationPath = new URL("../supabase/migrations/20260821020000_scientific_review_protection_rules.sql", import.meta.url);
 const schemaPath = new URL("../supabase/schema.sql", import.meta.url);
 const packagePath = new URL("../package.json", import.meta.url);
+const ruleSourcePath = new URL("../src/domain/scientific-review.ts", import.meta.url);
 
 describe("scientific review SQL contract", () => {
   test("keeps recommendation generation atomic, idempotent, and user-scoped", async () => {
@@ -32,5 +34,25 @@ describe("scientific review SQL contract", () => {
     expect(schema).toContain("log_workout_prescription_revisions");
     expect(schema).toContain("preview_workout_prescription_revision");
     expect(pkg.scripts["test:db:science"]).toContain("scientific_review_guardrails.test.sql");
+  });
+
+  test("locks the production protection thresholds and profile metrics contract", async () => {
+    const [patch, schema, ruleSource] = await Promise.all([readFile(protectionMigrationPath, "utf8"), readFile(schemaPath, "utf8"), readFile(ruleSourcePath, "utf8")]);
+    expect(patch).toContain("actual_weight");
+    expect(patch).toContain("actual_reps");
+    expect(patch).toContain("short_recovery_gap");
+    expect(patch).toContain("v_days <= 1");
+    expect(patch).toContain("nutrition_adherence");
+    expect(patch).toContain("bodyweight_change_percent");
+    expect(patch).toContain("profile_caution");
+    expect(patch).toContain("goal_experience_mismatch");
+    expect(patch).toContain("abs(w.scheduled_date - v_workout.scheduled_date) <= 1");
+    expect(schema).toContain("bodyweight_change_percent");
+    expect(ruleSource).toContain("shortRecoveryGapDays: 1");
+    expect(ruleSource).toContain("longInterruptionDays: 14");
+    expect(ruleSource).toContain("bodyweightChangePercent: 3");
+    expect(patch).toContain("v_days <= 1");
+    expect(patch).toContain("v_days > 14");
+    expect(patch).toContain("abs(v_profile.bodyweight_change_percent) >= 3");
   });
 });

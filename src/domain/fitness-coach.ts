@@ -1,5 +1,5 @@
 import { roundToNearestPlate } from "@/domain/strength";
-import { buildScientificReview } from "@/domain/scientific-review";
+import { buildScientificReview, type ScientificReviewReasonCode } from "@/domain/scientific-review";
 
 export type RecommendationType = "increase" | "hold" | "decrease" | "deload";
 
@@ -15,6 +15,7 @@ export type CoachSetLog = {
 export type ExerciseCoachRecommendation = {
   type: RecommendationType;
   suggestedWeight: number;
+  reasonCode?: ScientificReviewReasonCode | "bodyweight_observe";
   reason: string;
 };
 
@@ -119,9 +120,15 @@ export function buildExerciseCoachRecommendation({
   increment,
   isMainLift = false,
   logs,
+  daysSincePreviousTraining,
+  nutrition,
+  bodyweightChangePercent,
   recovery,
   targetWeight
 }: {
+  bodyweightChangePercent?: number | null;
+  daysSincePreviousTraining?: number | null;
+  nutrition?: "adequate" | "poor" | null;
   recovery?: "normal" | "poor" | null;
   exerciseName: string;
   increment: number;
@@ -133,19 +140,23 @@ export function buildExerciseCoachRecommendation({
     return {
       type: "hold",
       suggestedWeight: 0,
+      reasonCode: "bodyweight_observe",
       reason: `${exerciseName} 不按 kg 递进，先保持当前安排，记录完成时间和体感。`
     };
   }
 
   const review = buildScientificReview({
+    bodyweightChangePercent,
+    daysSincePreviousTraining,
     increment,
     isMainLift,
     logs,
+    nutrition,
     recovery,
     targetSets: logs.length,
     targetWeight
   });
-  return { type: review.type, suggestedWeight: review.suggestedWeight, reason: `${exerciseName}：${review.reason}` };
+  return { type: review.type, suggestedWeight: review.suggestedWeight, reasonCode: review.reasonCode, reason: `${exerciseName}：${review.reason}` };
 }
 
 function diffDays(fromDate: string, toDate: string) {

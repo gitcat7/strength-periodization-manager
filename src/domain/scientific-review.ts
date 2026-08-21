@@ -4,11 +4,22 @@ export type ScientificReviewType = "increase" | "hold" | "decrease" | "deload";
 export type ScientificReviewReasonCode =
   | "insufficient_data"
   | "incomplete_sets"
+  | "below_target_performance"
   | "high_rpe"
   | "long_interruption"
+  | "short_recovery_gap"
   | "recovery_caution"
+  | "profile_caution"
   | "progression_ready"
   | "accessory_observe";
+
+export const SCIENTIFIC_REVIEW_THRESHOLDS = {
+  bodyweightChangePercent: 3,
+  highRpe: 9,
+  longInterruptionDays: 14,
+  progressionMaxRpe: 8,
+  shortRecoveryGapDays: 1
+} as const;
 
 export type ScientificReviewSet = {
   targetWeight: number;
@@ -33,6 +44,8 @@ export function buildScientificReview({
   increment,
   isMainLift,
   logs,
+  nutrition,
+  bodyweightChangePercent,
   recovery,
   targetSets,
   targetWeight
@@ -41,6 +54,8 @@ export function buildScientificReview({
   increment: number;
   isMainLift: boolean;
   logs: ScientificReviewSet[];
+  nutrition?: "adequate" | "poor" | null;
+  bodyweightChangePercent?: number | null;
   recovery?: "normal" | "poor" | null;
   targetSets: number;
   targetWeight: number;
@@ -50,7 +65,7 @@ export function buildScientificReview({
   const completed = logs.filter((log) => log.completed);
   const incrementKg = increment > 0 ? increment : 2.5;
   const invalidPerformance = completed.length === 0 || completed.some(
-    (log) => !isPositiveInteger(log.actualReps) || !isFiniteNonNegative(log.actualWeight) || !isValidRpe(log.rpe)
+    (log) => !isPositiveInteger(log.actualReps) || !isPositiveWeight(log.actualWeight) || !isValidRpe(log.rpe)
   );
 
   if (safeWeight <= 0 || invalidPerformance) {
@@ -61,17 +76,37 @@ export function buildScientificReview({
     return hold(safeWeight, safeSets, "incomplete_sets", "完成组数未达到计划，保持当前处方，先补齐动作质量。");
   }
 
-  if (recovery === "poor") {
-    return deload(safeWeight, safeSets, incrementKg, "recovery_caution", "恢复状态偏差，建议下次减量恢复，不进行加重。", "recovery");
+  if (completed.some((log) => Number(log.actualWeight) < log.targetWeight || Number(log.actualReps) < log.targetReps)) {
+    return hold(safeWeight, safeSets, "below_target_performance", "实际重量或次数未达到目标，保持当前处方并优先完成质量。");
   }
 
-  if (typeof daysSincePreviousTraining === "number" && daysSincePreviousTraining > 14) {
+  if (
+    recovery === "poor"
+    || nutrition === "poor"
+    || (typeof bodyweightChangePercent === "number" && Number.isFinite(bodyweightChangePercent) && Math.abs(bodyweightChangePercent) >= SCIENTIFIC_REVIEW_THRESHOLDS.bodyweightChangePercent)
+  ) {
+    const profileReasonCode = recovery === "poor" ? "recovery_caution" : "profile_caution";
+    return deload(
+      safeWeight,
+      safeSets,
+      incrementKg,
+      profileReasonCode,
+      recovery === "poor" ? "恢复状态偏差，建议下次减量恢复，不进行加重。" : "饮食执行或体重变化提示恢复风险，建议下次减量恢复，不进行加重。",
+      "recovery"
+    );
+  }
+
+  if (typeof daysSincePreviousTraining === "number" && daysSincePreviousTraining >= 0 && daysSincePreviousTraining <= SCIENTIFIC_REVIEW_THRESHOLDS.shortRecoveryGapDays) {
+    return { advice: "delay", reason: "与上次训练间隔不足 2 个日历日，建议保持处方并延后推进。", reasonCode: "short_recovery_gap", suggestedSets: safeSets, suggestedWeight: safeWeight, type: "hold" };
+  }
+
+  if (typeof daysSincePreviousTraining === "number" && daysSincePreviousTraining > SCIENTIFIC_REVIEW_THRESHOLDS.longInterruptionDays) {
     return deload(safeWeight, safeSets, incrementKg, "long_interruption", "训练间隔较长，建议减量恢复后再推进。", "recovery");
   }
 
   const finalRpe = completed.at(-1)?.rpe;
   const averageRpe = completed.reduce((sum, log) => sum + Number(log.rpe), 0) / completed.length;
-  if ((typeof finalRpe === "number" && finalRpe >= 9) || averageRpe >= 9) {
+  if ((typeof finalRpe === "number" && finalRpe >= SCIENTIFIC_REVIEW_THRESHOLDS.highRpe) || averageRpe >= SCIENTIFIC_REVIEW_THRESHOLDS.highRpe) {
     return {
       advice: "recovery",
       reason: "RPE 偏高，下次先小幅降重，优先恢复与动作质量。",
@@ -86,7 +121,7 @@ export function buildScientificReview({
     return hold(safeWeight, safeSets, "accessory_observe", "辅助动作完成良好，先保持重量并继续观察完成质量。");
   }
 
-  if (typeof finalRpe === "number" && finalRpe <= 8 && averageRpe <= 8) {
+  if (typeof finalRpe === "number" && finalRpe <= SCIENTIFIC_REVIEW_THRESHOLDS.progressionMaxRpe && averageRpe <= SCIENTIFIC_REVIEW_THRESHOLDS.progressionMaxRpe) {
     return {
       advice: "none",
       reason: "主项全部完成且 RPE 合适，下次可按器械增量小幅加重。",
@@ -122,8 +157,8 @@ function deload(
   };
 }
 
-function isFiniteNonNegative(value: number | null) {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+function isPositiveWeight(value: number | null) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 function isPositiveInteger(value: number | null) {

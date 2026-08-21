@@ -10,5 +10,6 @@ describe("WorkoutPrescriptionGuardrailEditor", () => {
     expect(source).toContain('rpc("preview_workout_prescription_revision"');
     expect(source).toContain('rpc("revise_workout_prescription"');
     expect(source).toContain("二次确认保存");
+    expect(source).toContain("warningMessages");
   });
 });

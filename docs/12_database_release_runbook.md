@@ -237,6 +237,29 @@ where schemaname = 'public' and indexname = 'log_recommendations_pending_source_
 
 回滚原则：不要删除审计记录或覆盖 accepted/modified/rejected 建议。若前端出现问题，只回滚到上一版 Vercel；暂停新建议应用，保留服务端已完成的训练和审计事实，随后在非生产环境修复并重新验证。
 
+## 科学建议保护条件补丁（20260821020000）
+
+在已经成功执行 `20260821010000_scientific_review_and_prescription_guardrails.sql` 后，完整执行 `supabase/migrations/20260821020000_scientific_review_protection_rules.sql`。这是补丁迁移，不能用修改旧迁移文件代替。
+
+它只增加可为空的结构化自报字段（恢复状态、饮食执行、体重变化百分比）并替换现有科学建议/处方预览函数；为空时不作推断。它不会回填、删除或覆盖既有训练、处方审计，且不会改写 accepted、modified、rejected 建议。
+
+执行后验证：
+
+```sql
+select column_name
+from information_schema.columns
+where table_schema = 'public'
+  and table_name = 'usr_athlete_profiles'
+  and column_name in ('recovery_status', 'nutrition_adherence', 'bodyweight_change_percent');
+
+select routine_name
+from information_schema.routines
+where routine_schema = 'public'
+  and routine_name in ('refresh_scientific_recommendations', 'preview_workout_prescription_revision');
+```
+
+回滚原则：若仅前端显示异常，先回滚 Vercel 前端并暂停应用 pending 建议；不要删除推荐、完成训练或处方修订审计。数据库函数修复必须通过新的、经过本地 pgTAP 验证的补丁迁移发布。
+
 ## 6. 内测期间节奏
 
 - 每次改 schema 前备份。

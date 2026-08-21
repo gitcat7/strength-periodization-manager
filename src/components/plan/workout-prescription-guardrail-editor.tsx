@@ -43,8 +43,12 @@ export function WorkoutPrescriptionGuardrailEditor({
     const supabase = createBrowserSupabaseClient();
     const { data, error } = await supabase.rpc("preview_workout_prescription_revision", { p_expected_revision: prescriptionRevision, p_payload: payload, p_workout_id: workoutId });
     if (error) { setMessage("处方护栏检查失败，请刷新后重试。"); return; }
-    const needsConfirmation = Boolean((data as { requires_confirmation?: boolean } | null)?.requires_confirmation) || assessment.requiresConfirmation;
-    if (needsConfirmation && !confirming) { setConfirming(true); setMessage("存在训练量或恢复警告，请确认后再保存。"); return; }
+    const preview = data as { requires_confirmation?: boolean; warnings?: Array<{ message?: unknown }> } | null;
+    const warningMessages = (preview?.warnings ?? [])
+      .map((warning) => typeof warning.message === "string" ? warning.message : null)
+      .filter((message): message is string => Boolean(message));
+    const needsConfirmation = Boolean(preview?.requires_confirmation) || assessment.requiresConfirmation;
+    if (needsConfirmation && !confirming) { setConfirming(true); setMessage(warningMessages[0] ?? "存在训练量或恢复警告，请确认后再保存。"); return; }
     const { error: saveError } = await supabase.rpc("revise_workout_prescription", { p_confirm_warnings: true, p_expected_revision: prescriptionRevision, p_payload: payload, p_workout_id: workoutId });
     if (saveError) { setMessage("保存处方失败，当前训练日未被修改。"); return; }
     clearTrainingDataCaches(); setMessage(""); setOpen(false); await onSaved();

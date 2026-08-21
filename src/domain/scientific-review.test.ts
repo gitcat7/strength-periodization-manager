@@ -59,6 +59,50 @@ describe("buildScientificReview", () => {
     })).toMatchObject({ advice: "recovery", reasonCode: "recovery_caution", type: "deload" });
   });
 
+  it("does not increase when actual repetitions or load fall below the prescription", () => {
+    expect(buildScientificReview({
+      daysSincePreviousTraining: 3,
+      increment: 2.5,
+      isMainLift: true,
+      logs: [
+        completedSet(7),
+        { ...completedSet(7), actualReps: 4 },
+        { ...completedSet(7), actualWeight: 97.5 }
+      ],
+      recovery: "normal",
+      targetSets: 3,
+      targetWeight: 100
+    })).toMatchObject({ reasonCode: "below_target_performance", suggestedWeight: 100, type: "hold" });
+  });
+
+  it("keeps a main lift when the previous training day was today or yesterday", () => {
+    for (const daysSincePreviousTraining of [0, 1]) {
+      expect(buildScientificReview({
+        daysSincePreviousTraining,
+        increment: 2.5,
+        isMainLift: true,
+        logs: [completedSet(7), completedSet(7), completedSet(7)],
+        recovery: "normal",
+        targetSets: 3,
+        targetWeight: 100
+      })).toMatchObject({ advice: "delay", reasonCode: "short_recovery_gap", suggestedWeight: 100, type: "hold" });
+    }
+  });
+
+  it("lets structured nutrition and bodyweight cautions override an otherwise easy main lift", () => {
+    expect(buildScientificReview({
+      daysSincePreviousTraining: 3,
+      increment: 2.5,
+      isMainLift: true,
+      logs: [completedSet(7), completedSet(7), completedSet(7)],
+      nutrition: "poor",
+      bodyweightChangePercent: 3,
+      recovery: "normal",
+      targetSets: 3,
+      targetWeight: 100
+    } as never)).toMatchObject({ advice: "recovery", reasonCode: "profile_caution", type: "deload" });
+  });
+
   it("only advances a complete main lift with normal recovery and an RPE at or below eight", () => {
     expect(buildScientificReview({
       daysSincePreviousTraining: 3,

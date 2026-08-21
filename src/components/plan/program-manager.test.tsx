@@ -139,16 +139,64 @@ describe("ProgramManager cache hydration", () => {
     expect(container.textContent).toContain("先选训练结构，再选安排方式");
     expect(container.textContent).toContain("训练安排与主项最近工作组");
   });
+
+  it("does not offer plan-day structural editing after a completed set has loaded", async () => {
+    supabaseClient = createSupabaseClient({
+      program: {
+        id: "active-program",
+        name: "推/拉/蹲 A-B 周期",
+        template_type: "push_pull_squat",
+        schedule_mode: "fixed_weekdays",
+        schedule_config: { weekdays: [1, 3, 5] },
+        custom_template_name: null,
+        status: "active",
+        start_date: "2026-08-01",
+        end_date: "2026-08-28"
+      },
+      completedSetWorkoutExerciseIds: ["workout-exercise-1"],
+      workoutExercises: [{
+        exercise_id: "bench",
+        exercises: { is_main_lift: true, name: "卧推", slug: "bench_press", training_direction: "push" },
+        id: "workout-exercise-1",
+        order_index: 1,
+        target_reps: 5,
+        target_sets: 3,
+        target_weight: 80,
+        workout_id: "workout-1"
+      }],
+      workouts: [{ day_type: "training", id: "workout-1", name: "推 A", prescription_revision: 1, schedule_index: 1, scheduled_date: "2026-08-11", sequence_index: 1, status: "scheduled" }]
+    });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("已记录完成组，本训练日的动作结构已锁定。");
+    expect(container.textContent).not.toContain("调整本日动作");
+  });
 });
 
 function createSupabaseClient({
   pendingAuth = false,
   profileUpsertError,
-  program = null
+  program = null,
+  completedSetWorkoutExerciseIds = [],
+  workoutExercises = [],
+  workouts = []
 }: {
   pendingAuth?: boolean;
   profileUpsertError?: Error;
   program?: Record<string, unknown> | null;
+  completedSetWorkoutExerciseIds?: string[];
+  workoutExercises?: Record<string, unknown>[];
+  workouts?: Record<string, unknown>[];
 }) {
   const mainLifts = [
     { default_increment: 2.5, id: "squat", is_main_lift: true, name: "深蹲", slug: "squat" },
@@ -179,6 +227,9 @@ function createSupabaseClient({
       if (table === "cfg_exercises") return createQuery({ data: mainLifts, error: null });
       if (table === "log_recommendations") return createQuery({ data: [], error: null });
       if (table === "plan_programs") return createQuery({ data: program, error: null });
+      if (table === "plan_workouts") return createQuery({ data: workouts, error: null });
+      if (table === "plan_workout_exercises") return createQuery({ data: workoutExercises, error: null });
+      if (table === "log_set_logs") return createQuery({ data: completedSetWorkoutExerciseIds.map((workout_exercise_id) => ({ workout_exercise_id })), error: null });
       if (table === "usr_lift_profiles") return Object.assign(createQuery({ data: [], error: null }), { upsert: () => Promise.resolve({ error: null }) });
       return createQuery({ data: [], error: null });
     }

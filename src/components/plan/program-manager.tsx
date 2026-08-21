@@ -178,6 +178,7 @@ const weekdayOptions = [
 ];
 
 type PlanCache = {
+  completedSetWorkoutExerciseIds?: string[];
   program: ProgramRow | null;
   recommendationWeights: Record<string, string>;
   recommendations: RecommendationRow[];
@@ -203,6 +204,7 @@ export function ProgramManager() {
   const [program, setProgram] = useState<ProgramRow | null>(null);
   const [workouts, setWorkouts] = useState<WorkoutRow[]>([]);
   const [workoutExercises, setWorkoutExercises] = useState<WorkoutExerciseRow[]>([]);
+  const [completedSetWorkoutExerciseIds, setCompletedSetWorkoutExerciseIds] = useState<string[]>([]);
   const [recommendations, setRecommendations] = useState<RecommendationRow[]>([]);
   const [recommendationWeights, setRecommendationWeights] = useState<Record<string, string>>({});
   const [recommendationPreview, setRecommendationPreview] = useState<RecommendationImpactPreview | null>(null);
@@ -256,6 +258,7 @@ export function ProgramManager() {
       return groups;
     }, {});
   }, [workoutExercises]);
+  const completedSetExerciseIdSet = useMemo(() => new Set(completedSetWorkoutExerciseIds), [completedSetWorkoutExerciseIds]);
 
   const pauseState = useMemo(() => {
     // Schedule events load newest-first, so the first row decides the pause state.
@@ -381,6 +384,7 @@ export function ProgramManager() {
       setShowPlanSetup(false);
       setWorkouts([]);
       setWorkoutExercises([]);
+      setCompletedSetWorkoutExerciseIds([]);
       setScheduleEvents([]);
       setUnavailableDates([]);
       writePlanCache({
@@ -388,6 +392,7 @@ export function ProgramManager() {
         recommendationWeights: nextRecommendationWeights,
         recommendations: recommendationsResult.rows,
         userId: userData.user.id,
+        completedSetWorkoutExerciseIds: [],
         workoutExercises: [],
         workouts: []
       });
@@ -414,6 +419,7 @@ export function ProgramManager() {
       ),
       recommendations: recommendationsResult.rows,
       userId: userData.user.id,
+      completedSetWorkoutExerciseIds: loadedWorkouts.value.completedSetWorkoutExerciseIds,
       workoutExercises: loadedWorkouts.value.workoutExercises,
       workouts: loadedWorkouts.value.workouts
     });
@@ -595,7 +601,7 @@ export function ProgramManager() {
   }
 
   async function loadWorkouts(programId: string): Promise<
-    | { ok: true; value: { workoutExercises: WorkoutExerciseRow[]; workouts: WorkoutRow[] } }
+    | { ok: true; value: { completedSetWorkoutExerciseIds: string[]; workoutExercises: WorkoutExerciseRow[]; workouts: WorkoutRow[] } }
     | { ok: false }
   > {
     const supabase = createBrowserSupabaseClient();
@@ -622,7 +628,8 @@ export function ProgramManager() {
 
     if (workoutIds.length === 0) {
       setWorkoutExercises([]);
-      return { ok: true, value: { workoutExercises: [], workouts: workoutRows } };
+      setCompletedSetWorkoutExerciseIds([]);
+      return { ok: true, value: { completedSetWorkoutExerciseIds: [], workoutExercises: [], workouts: workoutRows } };
     }
 
     const { data: exerciseData, error: exerciseError } = await supabase
@@ -638,10 +645,25 @@ export function ProgramManager() {
     }
 
     const workoutExerciseRows = (exerciseData ?? []) as unknown as WorkoutExerciseRow[];
+    const workoutExerciseIds = workoutExerciseRows.map((exercise) => exercise.id);
+    const { data: completedSetData, error: completedSetError } = workoutExerciseIds.length > 0
+      ? await supabase
+        .from(DB_TABLE.setLogs)
+        .select("workout_exercise_id")
+        .in("workout_exercise_id", workoutExerciseIds)
+        .eq("completed", true)
+      : { data: [], error: null };
+    if (completedSetError) {
+      setStatus("error");
+      setMessage("已完成训练组读取失败，请刷新后再调整动作。");
+      return { ok: false };
+    }
+    const completedIds = [...new Set((completedSetData ?? []).map((row) => String(row.workout_exercise_id)))];
     const { data: catalogData } = await supabase.from(DB_TABLE.exercises).select("id,name,slug,training_direction,is_main_lift");
     setExerciseCatalog((catalogData ?? []).map((item) => ({ id: item.id, name: item.name, slug: item.slug, trainingDirection: item.training_direction as GuardrailExercise["trainingDirection"], isMainLift: Boolean(item.is_main_lift) })));
     setWorkoutExercises(workoutExerciseRows);
-    return { ok: true, value: { workoutExercises: workoutExerciseRows, workouts: workoutRows } };
+    setCompletedSetWorkoutExerciseIds(completedIds);
+    return { ok: true, value: { completedSetWorkoutExerciseIds: completedIds, workoutExercises: workoutExerciseRows, workouts: workoutRows } };
   }
 
   async function loadScheduleAdjustmentData(programId: string) {
@@ -684,6 +706,7 @@ export function ProgramManager() {
     setProgram(cache.program);
     setWorkouts(cache.workouts);
     setWorkoutExercises(cache.workoutExercises);
+    setCompletedSetWorkoutExerciseIds(cache.completedSetWorkoutExerciseIds ?? []);
     setRecommendations(cache.recommendations);
     setRecommendationWeights(cache.recommendationWeights);
     setStatus("ready");
@@ -1612,7 +1635,10 @@ export function ProgramManager() {
                       </span>
                     </div>
                   ))}
-                  {workout.status === "scheduled" || workout.status === "draft" ? (
+                  {(workout.status === "scheduled" || workout.status === "draft") && (workoutExercisesByWorkoutId[workout.id] ?? []).some((exercise) => completedSetExerciseIdSet.has(exercise.id)) ? (
+                    <p className="mt-3 text-sm text-muted">已记录完成组，本训练日的动作结构已锁定。</p>
+                  ) : null}
+                  {(workout.status === "scheduled" || workout.status === "draft") && !(workoutExercisesByWorkoutId[workout.id] ?? []).some((exercise) => completedSetExerciseIdSet.has(exercise.id)) ? (
                     <WorkoutPrescriptionGuardrailEditor
                       catalog={exerciseCatalog}
                       exercises={(workoutExercisesByWorkoutId[workout.id] ?? []).map((exercise) => ({

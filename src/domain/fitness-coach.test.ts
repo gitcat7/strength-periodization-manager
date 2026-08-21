@@ -96,6 +96,19 @@ describe("exercise coach recommendation safety gate", () => {
       })
     ).toMatchObject({ type: "deload" });
   });
+
+  it("uses the same short recovery-gap protection rule as the scientific review", () => {
+    expect(
+      buildExerciseCoachRecommendation({
+        daysSincePreviousTraining: 1,
+        exerciseName: "深蹲",
+        increment: 2.5,
+        isMainLift: true,
+        logs: [completedSet(7), completedSet(7), completedSet(7)],
+        targetWeight: 100
+      })
+    ).toMatchObject({ reasonCode: "short_recovery_gap", suggestedWeight: 100, type: "hold" });
+  });
 });
 
 describe("recommendation status copy", () => {
