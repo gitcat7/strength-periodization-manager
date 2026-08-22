@@ -55,4 +55,19 @@ describe("scientific review SQL contract", () => {
     expect(patch).toContain("v_days > 14");
     expect(patch).toContain("abs(v_profile.bodyweight_change_percent) >= 3");
   });
+
+  test("normalizes incompatible legacy profile values before enforcing new constraints", async () => {
+    const patch = await readFile(protectionMigrationPath, "utf8");
+    const recoveryCleanup = "set recovery_status = null";
+    const nutritionCleanup = "set nutrition_adherence = null";
+    const bodyweightCleanup = "set bodyweight_change_percent = null";
+    const firstConstraint = "add constraint athlete_profiles_recovery_status_check";
+
+    expect(patch).toContain(recoveryCleanup);
+    expect(patch).toContain(nutritionCleanup);
+    expect(patch).toContain(bodyweightCleanup);
+    expect(patch.indexOf(recoveryCleanup)).toBeLessThan(patch.indexOf(firstConstraint));
+    expect(patch.indexOf(nutritionCleanup)).toBeLessThan(patch.indexOf(firstConstraint));
+    expect(patch.indexOf(bodyweightCleanup)).toBeLessThan(patch.indexOf(firstConstraint));
+  });
 });

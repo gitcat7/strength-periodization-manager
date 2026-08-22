@@ -6,6 +6,23 @@ alter table public.usr_athlete_profiles
   add column if not exists nutrition_adherence text,
   add column if not exists bodyweight_change_percent numeric;
 
+-- Legacy free-form values are not reliable enough to infer a protection signal.
+-- Preserve the row while treating them as unrecorded before adding strict options.
+update public.usr_athlete_profiles
+set recovery_status = null
+where recovery_status is not null
+  and recovery_status not in ('normal', 'poor');
+
+update public.usr_athlete_profiles
+set nutrition_adherence = null
+where nutrition_adherence is not null
+  and nutrition_adherence not in ('adequate', 'poor');
+
+update public.usr_athlete_profiles
+set bodyweight_change_percent = null
+where bodyweight_change_percent is not null
+  and bodyweight_change_percent not between -30 and 30;
+
 alter table public.usr_athlete_profiles
   drop constraint if exists athlete_profiles_recovery_status_check;
 alter table public.usr_athlete_profiles
