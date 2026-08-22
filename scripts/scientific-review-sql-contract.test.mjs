@@ -58,15 +58,19 @@ describe("scientific review SQL contract", () => {
 
   test("normalizes incompatible legacy profile values before enforcing new constraints", async () => {
     const patch = await readFile(protectionMigrationPath, "utf8");
+    const removeLegacyNotNull = "alter column recovery_status drop not null";
+    const preserveLegacyHigh = "when lower(trim(recovery_status)) = 'high' then 'normal'";
     const recoveryCleanup = "set recovery_status = null";
     const nutritionCleanup = "set nutrition_adherence = null";
     const bodyweightCleanup = "set bodyweight_change_percent = null";
     const firstConstraint = "add constraint athlete_profiles_recovery_status_check";
 
-    expect(patch).toContain(recoveryCleanup);
+    expect(patch).toContain(removeLegacyNotNull);
+    expect(patch).toContain(preserveLegacyHigh);
     expect(patch).toContain(nutritionCleanup);
     expect(patch).toContain(bodyweightCleanup);
-    expect(patch.indexOf(recoveryCleanup)).toBeLessThan(patch.indexOf(firstConstraint));
+    expect(patch.indexOf(removeLegacyNotNull)).toBeLessThan(patch.indexOf(firstConstraint));
+    expect(patch.indexOf(preserveLegacyHigh)).toBeLessThan(patch.indexOf(firstConstraint));
     expect(patch.indexOf(nutritionCleanup)).toBeLessThan(patch.indexOf(firstConstraint));
     expect(patch.indexOf(bodyweightCleanup)).toBeLessThan(patch.indexOf(firstConstraint));
   });

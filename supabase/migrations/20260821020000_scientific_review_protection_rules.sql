@@ -6,12 +6,20 @@ alter table public.usr_athlete_profiles
   add column if not exists nutrition_adherence text,
   add column if not exists bodyweight_change_percent numeric;
 
--- Legacy free-form values are not reliable enough to infer a protection signal.
--- Preserve the row while treating them as unrecorded before adding strict options.
+-- The legacy profile used non-null, broader values. Only its known `high`
+-- recovery value maps to the new neutral state; unknown values stay unrecorded.
+alter table public.usr_athlete_profiles
+  alter column recovery_status drop not null,
+  alter column nutrition_adherence drop not null,
+  alter column bodyweight_change_percent drop not null;
+
 update public.usr_athlete_profiles
-set recovery_status = null
-where recovery_status is not null
-  and recovery_status not in ('normal', 'poor');
+set recovery_status = case
+  when lower(trim(recovery_status)) = 'high' then 'normal'
+  when recovery_status in ('normal', 'poor') then recovery_status
+  else null
+end
+where recovery_status is not null;
 
 update public.usr_athlete_profiles
 set nutrition_adherence = null
