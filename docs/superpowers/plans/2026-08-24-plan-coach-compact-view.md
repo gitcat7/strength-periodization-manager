@@ -25,6 +25,12 @@
 - Modify: src/components/plan/program-manager.test.tsx — DOM、交互、RPC 与移动端 CSS 契约。
 - Carry: docs/superpowers/specs/2026-08-24-plan-coach-compact-view-design.md — 已确认规格。
 
+## Execution Record
+
+- [x] Task 1–3：在提交 `ded13d9519d58521a22cca3f2b007e6d81182aa7` 中完成。RED：ProgramManager 组件测试新增 4 项失败（默认全量展示、无批量确认、计划全量展示）；GREEN：focused 9/9 通过。
+- [x] Task 4：`pnpm test` 为 78 files passed、361 passed、2 skipped；`pnpm release:check` 的 typecheck、生产构建和本地 14 路由含 `/api/health` smoke 通过；`git diff --check` 通过。
+- [x] 无 SQL migration、schema、RPC、依赖或环境变更；隔离 worktree 内仅读取既有忽略的本地环境配置以运行本地 health smoke，未写入或提交密钥。
+
 ### Task 1: Coach 紧凑区与批量操作的 RED 测试
 
 **Files:**
