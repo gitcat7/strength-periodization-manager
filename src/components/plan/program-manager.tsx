@@ -1375,13 +1375,17 @@ export function ProgramManager() {
   }
 
   const nextPlanWorkoutId =
-    workouts.find((workout) => workout.day_type === "training" && workout.status !== "completed")?.id ?? null;
+    workouts.find(
+      (workout) =>
+        workout.day_type === "training" &&
+        (workout.status === "scheduled" || workout.status === "draft")
+    )?.id ?? null;
 
   const visiblePlanWorkouts = planContentsExpanded
     ? workouts
     : (() => {
       const nextWorkout = workouts.find((workout) => workout.id === nextPlanWorkoutId);
-      return nextWorkout ? [nextWorkout] : workouts.slice(0, 1);
+      return nextWorkout ? [nextWorkout] : [];
     })();
 
   const todayDate = formatDate(new Date());
@@ -1805,7 +1809,11 @@ export function ProgramManager() {
             <div>
               <h2 className="font-semibold">计划内容 · 共 {workouts.length} 节</h2>
               <p className="mt-1 text-sm text-muted">
-                {planContentsExpanded ? "已展开完整计划，可按训练日查看处方。" : "当前仅显示下一节训练。"}
+                {planContentsExpanded
+                  ? "已展开完整计划，可按训练日查看处方。"
+                  : nextPlanWorkoutId
+                    ? "当前仅显示下一节训练。"
+                    : "当前周期没有待执行训练。"}
               </p>
             </div>
             <button
@@ -1820,12 +1828,10 @@ export function ProgramManager() {
             </button>
           </div>
           <div
-            className={`overflow-hidden transition-[max-height,opacity] duration-200 ease-out motion-reduce:transition-none ${
-              planContentsExpanded ? "max-h-[12000px] opacity-100" : "max-h-[900px] opacity-100"
-            }`}
+            className="transition-opacity duration-200 ease-out motion-reduce:transition-none"
             id="full-plan-workouts"
           >
-            <div className="min-h-0 overflow-hidden space-y-3">
+            <div className="space-y-3">
           {visiblePlanWorkouts.map((workout, index) => {
             const isRestDay = workout.day_type === "rest";
             const presentation = getScheduleItemPresentation({ dayType: workout.day_type, status: workout.status });

@@ -421,6 +421,66 @@ describe("ProgramManager cache hydration", () => {
     expect(findButton(container, "收起完整计划")?.className).toContain("whitespace-nowrap");
     expect(container.querySelector("#full-plan-workouts")?.className).toContain("motion-reduce:transition-none");
   });
+
+  it("renders every action in the next workout at its natural height while the full plan is collapsed", async () => {
+    const nextWorkoutExercises = Array.from({ length: 12 }, (_, index) => ({
+      exercise_id: `exercise-${index + 1}`,
+      exercises: { is_main_lift: index === 0, name: `动作 ${index + 1}`, slug: `exercise_${index + 1}`, training_direction: "squat" },
+      id: `workout-exercise-${index + 1}`,
+      order_index: index + 1,
+      target_reps: 8,
+      target_sets: 2,
+      target_weight: 50,
+      workout_id: "workout-next"
+    }));
+    supabaseClient = createSupabaseClient({
+      program: activeProgram(),
+      workoutExercises: nextWorkoutExercises,
+      workouts: [
+        { day_type: "training", id: "workout-next", name: "蹲 A", prescription_revision: 1, schedule_index: 1, scheduled_date: "2026-08-24", sequence_index: 1, status: "scheduled" },
+        { day_type: "training", id: "workout-later", name: "推 B", prescription_revision: 1, schedule_index: 2, scheduled_date: "2026-08-26", sequence_index: 2, status: "scheduled" }
+      ]
+    });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("动作 12");
+    expect(container.querySelector("#full-plan-workouts")?.className).not.toContain("max-h-[900px]");
+    expect(container.querySelector("#full-plan-workouts")?.className).not.toContain("overflow-hidden");
+  });
+
+  it("shows an explicit empty state instead of presenting a completed workout as the next workout", async () => {
+    supabaseClient = createSupabaseClient({
+      program: activeProgram(),
+      workouts: [
+        { day_type: "training", id: "workout-completed", name: "蹲 A", prescription_revision: 1, schedule_index: 1, scheduled_date: "2026-08-20", sequence_index: 1, status: "completed" },
+        { day_type: "rest", id: "workout-rest", name: "休息日", prescription_revision: 1, schedule_index: 2, scheduled_date: "2026-08-21", sequence_index: 2, status: "completed" }
+      ]
+    });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("当前周期没有待执行训练");
+    expect(container.textContent).not.toContain("第 1 节 · 建议 2026-08-20");
+  });
 });
 
 function activeProgram() {
