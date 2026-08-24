@@ -334,6 +334,13 @@ export function TodayWorkout() {
   }, [restRemaining, restRunning]);
 
   useEffect(() => {
+    if (!workoutSummary) return;
+
+    setRestRunning(false);
+    setRestRemaining(0);
+  }, [workoutSummary]);
+
+  useEffect(() => {
     async function loadTodayWorkout() {
       try {
         setScheduleResolved(false);
@@ -1434,6 +1441,16 @@ export function TodayWorkout() {
   const coachCue = getWorkoutCoachCue(workout.name);
   const headerView = buildTodayHeaderView({ completedSets, totalSets, workoutName: workout.name });
 
+  if (workoutSummary) {
+    return (
+      <WorkoutCompletionResult
+        coachRecommendations={coachRecommendations}
+        earlyFinished={workoutSummary.completedSets < workoutSummary.totalSets}
+        summary={workoutSummary}
+      />
+    );
+  }
+
   return (
     <section className="space-y-4">
       <div className="action-surface p-4">
@@ -1545,8 +1562,6 @@ export function TodayWorkout() {
         }}
         onToggle={(enabled) => updateRestTimerSettings({ enabled })}
       />
-
-      {workoutSummary ? <WorkoutSummaryPanel summary={workoutSummary} /> : null}
 
       {coachRecommendations.length > 0 ? (
         <div className="rounded-xl border border-line bg-white p-4">
@@ -1927,6 +1942,71 @@ function WorkoutSummaryPanel({ summary }: { summary: WorkoutSummary }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function WorkoutCompletionResult({
+  coachRecommendations,
+  earlyFinished,
+  summary
+}: {
+  coachRecommendations: Array<ExerciseCoachRecommendation & { exerciseName: string }>;
+  earlyFinished: boolean;
+  summary: WorkoutSummary;
+}) {
+  return (
+    <section className="space-y-4">
+      <div className="rounded-xl border border-action/20 bg-action/5 p-4">
+        <div className="flex items-start gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-action text-white">
+            <CheckCircle2 size={20} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-bold">训练已结束</h2>
+              {earlyFinished ? <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">已提前结束</span> : null}
+            </div>
+            {earlyFinished ? (
+              <p className="mt-2 text-sm leading-6 text-muted">
+                只有已勾选完成的组会计入训练量、e1RM 和后续建议；未完成组将保留为未完成记录。
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <WorkoutSummaryPanel summary={summary} />
+
+      {coachRecommendations.length > 0 ? (
+        <div className="rounded-xl border border-line bg-white p-4">
+          <h3 className="font-semibold">下次训练建议</h3>
+          <div className="mt-3 space-y-2">
+            {coachRecommendations.map((item) => (
+              <div className="rounded-lg bg-field px-3 py-2 text-sm" key={`${item.exerciseName}-${item.reason}`}>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-semibold">{item.exerciseName}</span>
+                  <span className="rounded-full bg-white px-2 py-1 text-xs font-semibold text-action">
+                    {formatRecommendationType(item.type)}
+                  </span>
+                </div>
+                <p className="mt-1 text-muted">{item.reason}</p>
+                {item.suggestedWeight > 0 ? <p className="mt-1 font-semibold text-ink">建议下次：{item.suggestedWeight}kg</p> : null}
+                <p className="mt-1 text-xs text-muted">待处理 · 请在计划页明确应用后，才会更新下次训练。</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Link className="inline-flex h-11 items-center justify-center rounded-lg bg-action px-4 font-semibold text-white transition active:scale-[0.98]" href="/history">
+          查看训练历史
+        </Link>
+        <Link className="inline-flex h-11 items-center justify-center rounded-lg border border-line px-4 font-semibold text-ink transition active:scale-[0.98]" href="/">
+          返回首页
+        </Link>
+      </div>
+    </section>
   );
 }
 

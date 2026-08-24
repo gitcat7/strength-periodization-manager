@@ -1530,9 +1530,9 @@ export function ProgramManager() {
                       </div>
                     ) : null}
                   </div>
-                  <div className="grid grid-cols-2 gap-2 sm:w-48">
+                  <div className="flex flex-wrap justify-end gap-2">
                     <button
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-action px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-action px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={status === "generating"}
                       onClick={() => acceptRecommendation(recommendation)}
                       type="button"
@@ -1541,7 +1541,7 @@ export function ProgramManager() {
                       预览影响
                     </button>
                     <button
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
+                      className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
                       disabled={status === "generating"}
                       onClick={() => rejectRecommendation(recommendation.id)}
                       type="button"

@@ -10,4 +10,12 @@ describe("recommendation application", () => {
     expect(source).toContain('rpc("apply_recommendation"');
     expect(source).toContain("受影响的后续训练日");
   });
+
+  test("keeps recommendation actions readable without fixed equal-width narrow columns", async () => {
+    const source = await readFile(managerPath, "utf8");
+
+    expect(source).not.toContain("grid grid-cols-2 gap-2 sm:w-48");
+    expect(source).toMatch(/className="[^"]*whitespace-nowrap[^"]*"[\s\S]*?预览影响/);
+    expect(source).toMatch(/className="[^"]*whitespace-nowrap[^"]*"[\s\S]*?忽略/);
+  });
 });

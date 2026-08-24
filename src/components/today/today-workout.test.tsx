@@ -201,7 +201,55 @@ describe("TodayWorkout cache hydration", () => {
     });
 
     expect(view.querySelector('[role="dialog"]')).toBeNull();
+    expect(view.textContent).toContain("训练已结束");
+    expect(view.textContent).not.toContain("已提前结束");
     expect(view.textContent).toContain("本次训练摘要");
+    expect(view.textContent).not.toContain("训练执行");
+    expect(view.querySelectorAll('input[aria-label$="组完成"]')).toHaveLength(0);
+  });
+
+  it("ends an early-finished workout in a read-only result state without execution controls", async () => {
+    writeCachedWorkout({ slug: "barbell_bench_press", targetSets: 2, completedSets: 1 });
+    ({ container, root } = renderTodayWorkout());
+    const view = container!;
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const completeButton = [...view.querySelectorAll("button")].find((button) => button.textContent === "保存并完成训练");
+    act(() => completeButton?.click());
+    expect(view.querySelector('[role="dialog"]')).not.toBeNull();
+
+    const confirmButton = [...view.querySelectorAll("button")].find((button) => button.textContent === "仍然结束训练");
+    await act(async () => {
+      confirmButton?.click();
+      await Promise.resolve();
+    });
+
+    expect(rpc).toHaveBeenCalledWith(
+      "complete_training_workout",
+      expect.objectContaining({
+        p_logs: expect.arrayContaining([
+          expect.objectContaining({ completed: true, set_index: 1 }),
+          expect.objectContaining({ completed: false, set_index: 2 })
+        ])
+      })
+    );
+    expect(view.querySelector('[role="dialog"]')).toBeNull();
+    expect(view.textContent).toContain("训练已结束");
+    expect(view.textContent).toContain("已提前结束");
+    expect(view.textContent).toContain("完成组数");
+    expect(view.textContent).toContain("1/2");
+    expect(view.textContent).toContain("查看训练历史");
+    expect(view.textContent).toContain("返回首页");
+    expect(view.textContent).not.toContain("训练执行");
+    expect(view.textContent).not.toContain("杠铃卧推");
+    expect(view.querySelectorAll('input[type="number"]')).toHaveLength(0);
+    expect(view.querySelectorAll('input[aria-label$="组完成"]')).toHaveLength(0);
+    expect(view.textContent).not.toContain("组间休息");
+    expect(view.textContent).not.toContain("训练已完成");
+    expect(view.textContent).not.toContain("保存并完成训练");
   });
 
   it("completes a planned workout through the single atomic RPC and consumes its recommendations", async () => {
