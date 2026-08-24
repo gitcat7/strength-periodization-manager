@@ -5,7 +5,7 @@ import { DB_TABLE } from "../../lib/supabase/table-names";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Brain, CheckCircle2, Dumbbell, Loader2, Moon, Pause, Play, PlusCircle, XCircle } from "lucide-react";
+import { Brain, CheckCircle2, ChevronDown, ChevronUp, Dumbbell, Loader2, Moon, Pause, Play, PlusCircle, XCircle } from "lucide-react";
 import type { RecommendationType } from "@/domain/fitness-coach";
 import { getNextWorkoutState } from "@/domain/next-workout";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
@@ -153,6 +153,11 @@ type RecommendationImpactPreview = {
   workouts: Array<{ id: string; name: string; scheduled_date: string }>;
 };
 
+type BulkRecommendationDialog =
+  | { kind: "apply"; items: RecommendationImpactPreview[] }
+  | { kind: "ignore"; recommendationIds: string[] }
+  | null;
+
 type ExerciseRow = {
   id: string;
   slug: string;
@@ -208,6 +213,9 @@ export function ProgramManager() {
   const [recommendations, setRecommendations] = useState<RecommendationRow[]>([]);
   const [recommendationWeights, setRecommendationWeights] = useState<Record<string, string>>({});
   const [recommendationPreview, setRecommendationPreview] = useState<RecommendationImpactPreview | null>(null);
+  const [coachExpanded, setCoachExpanded] = useState(false);
+  const [bulkRecommendationDialog, setBulkRecommendationDialog] = useState<BulkRecommendationDialog>(null);
+  const [planContentsExpanded, setPlanContentsExpanded] = useState(false);
   const [status, setStatus] = useState<"loading" | "ready" | "generating" | "error">("loading");
   const [usesLegacyScheduleSchema, setUsesLegacyScheduleSchema] = useState(false);
   const [message, setMessage] = useState("");
@@ -775,6 +783,105 @@ export function ProgramManager() {
     setStatus("ready");
   }
 
+  async function openBulkApplicationPreview() {
+    if (!program || !userId || recommendations.length === 0) return;
+
+    const weights = recommendations.map((recommendation) => ({
+      recommendation,
+      weight: Number(recommendationWeights[recommendation.id] ?? recommendation.suggested_weight)
+    }));
+    if (weights.some((item) => !Number.isFinite(item.weight) || item.weight <= 0)) {
+      setStatus("error");
+      setMessage("请为每条建议填写有效的应用重量。");
+      return;
+    }
+
+    setStatus("generating");
+    setMessage("");
+    const supabase = createBrowserSupabaseClient();
+    try {
+      const items = await Promise.all(weights.map(async ({ recommendation, weight }) => {
+        const { data, error } = await supabase.rpc("preview_recommendation_application", {
+          p_recommendation_id: recommendation.id,
+          p_sets: null,
+          p_weight: weight
+        });
+        if (error) throw new Error("preview failed");
+        const preview = data as {
+          sets?: number | null;
+          weight?: number;
+          workouts?: Array<{ id: string; name: string; scheduled_date: string }>;
+        } | null;
+        return {
+          recommendation,
+          sets: preview?.sets ?? null,
+          weight: Number(preview?.weight ?? weight),
+          workouts: preview?.workouts ?? []
+        };
+      }));
+      setBulkRecommendationDialog({ kind: "apply", items });
+      setStatus("ready");
+    } catch {
+      setStatus("error");
+      setMessage("建议影响预览失败，请重试。");
+    }
+  }
+
+  async function confirmBulkApplication() {
+    if (!program || !userId || bulkRecommendationDialog?.kind !== "apply") return;
+
+    setStatus("generating");
+    setMessage("");
+    const supabase = createBrowserSupabaseClient();
+    for (const item of bulkRecommendationDialog.items) {
+      const { error } = await supabase.rpc("apply_recommendation", {
+        p_recommendation_id: item.recommendation.id,
+        p_sets: item.sets,
+        p_weight: item.weight
+      });
+      if (error) {
+        clearTrainingDataCaches();
+        await loadRecommendations(userId);
+        await loadWorkouts(program.id);
+        setBulkRecommendationDialog(null);
+        setStatus("error");
+        setMessage(`批量应用在${item.recommendation.exercises?.name ?? "该动作"}处失败，请重试。`);
+        return;
+      }
+      await trackEvent({
+        eventName: Number(item.weight) === Number(item.recommendation.suggested_weight) ? "recommendation_accepted" : "recommendation_modified",
+        properties: {
+          exercise_slug: item.recommendation.exercises?.slug,
+          previous_weight: item.recommendation.previous_weight,
+          suggested_weight: item.recommendation.suggested_weight,
+          applied_weight: item.weight
+        },
+        supabase,
+        userId
+      });
+    }
+
+    clearTrainingDataCaches();
+    await loadRecommendations(userId);
+    await loadWorkouts(program.id);
+    setBulkRecommendationDialog(null);
+    setStatus("ready");
+    setMessage(`已应用 ${bulkRecommendationDialog.items.length} 条建议。`);
+  }
+
+  async function markRecommendationRejected(
+    supabase: ReturnType<typeof createBrowserSupabaseClient>,
+    recommendationId: string
+  ) {
+    return supabase
+      .from(DB_TABLE.recommendations)
+      .update({
+        status: "rejected",
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", recommendationId);
+  }
+
   async function rejectRecommendation(recommendationId: string) {
     if (!userId) return;
 
@@ -782,13 +889,7 @@ export function ProgramManager() {
     setMessage("");
 
     const supabase = createBrowserSupabaseClient();
-    const { error } = await supabase
-      .from(DB_TABLE.recommendations)
-      .update({
-        status: "rejected",
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", recommendationId);
+    const { error } = await markRecommendationRejected(supabase, recommendationId);
 
     if (error) {
       setStatus("error");
@@ -809,6 +910,37 @@ export function ProgramManager() {
     setMessage("已忽略该建议。");
     await loadRecommendations(userId);
     setStatus("ready");
+  }
+
+  async function confirmBulkIgnore() {
+    if (!userId || bulkRecommendationDialog?.kind !== "ignore") return;
+
+    setStatus("generating");
+    setMessage("");
+    const supabase = createBrowserSupabaseClient();
+    for (const recommendationId of bulkRecommendationDialog.recommendationIds) {
+      const { error } = await markRecommendationRejected(supabase, recommendationId);
+      if (error) {
+        clearTrainingDataCaches();
+        await loadRecommendations(userId);
+        setBulkRecommendationDialog(null);
+        setStatus("error");
+        setMessage("批量忽略失败，请重试。");
+        return;
+      }
+      await trackEvent({
+        eventName: "recommendation_rejected",
+        properties: { recommendation_id: recommendationId },
+        supabase,
+        userId
+      });
+    }
+
+    clearTrainingDataCaches();
+    await loadRecommendations(userId);
+    setBulkRecommendationDialog(null);
+    setStatus("ready");
+    setMessage(`已忽略 ${bulkRecommendationDialog.recommendationIds.length} 条建议。`);
   }
 
   function openAdjustmentDialog(action: "resume" | "extra_rest") {
@@ -1245,6 +1377,13 @@ export function ProgramManager() {
   const nextPlanWorkoutId =
     workouts.find((workout) => workout.day_type === "training" && workout.status !== "completed")?.id ?? null;
 
+  const visiblePlanWorkouts = planContentsExpanded
+    ? workouts
+    : (() => {
+      const nextWorkout = workouts.find((workout) => workout.id === nextPlanWorkoutId);
+      return nextWorkout ? [nextWorkout] : workouts.slice(0, 1);
+    })();
+
   const todayDate = formatDate(new Date());
   const daysInterrupted = pauseState.event
     ? Math.max(0, daysBetweenDates(pauseState.event.effective_date, todayDate))
@@ -1470,16 +1609,57 @@ export function ProgramManager() {
 
       {recommendations.length > 0 ? (
         <section className="rounded-xl border border-line bg-white p-4">
-          <div className="mb-4 flex items-center gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-full bg-action/10 text-action">
               <Brain size={20} />
             </span>
             <div>
               <h2 className="font-semibold">Fitness Coach 建议</h2>
-              <p className="text-sm text-muted">训练完成后生成，可一键应用到当前周期后续训练日。</p>
+              <p className="text-sm text-muted">待处理 {recommendations.length} 条建议，可一键应用到当前周期后续训练日。</p>
+            </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-action px-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={status === "generating"}
+                onClick={() => void openBulkApplicationPreview()}
+                type="button"
+              >
+                <CheckCircle2 size={16} />
+                一键应用
+              </button>
+              <button
+                className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={status === "generating"}
+                onClick={() => setBulkRecommendationDialog({ kind: "ignore", recommendationIds: recommendations.map((item) => item.id) })}
+                type="button"
+              >
+                <XCircle size={16} />
+                一键忽略
+              </button>
+              <button
+                aria-controls="coach-pending-recommendations"
+                aria-expanded={coachExpanded}
+                className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink"
+                onClick={() => setCoachExpanded((current) => !current)}
+                type="button"
+              >
+                {coachExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                {coachExpanded ? "收起建议" : "展开建议"}
+              </button>
             </div>
           </div>
-          <div className="space-y-3">
+          <div
+            aria-hidden={!coachExpanded}
+            className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none ${
+              coachExpanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+            }`}
+            id="coach-pending-recommendations"
+            inert={!coachExpanded}
+          >
+            <div className="min-h-0 overflow-hidden pt-3">
+              <div className="space-y-3">
             {recommendations.map((recommendation) => (
               <article className="rounded-lg bg-field p-3" key={recommendation.id}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1497,6 +1677,7 @@ export function ProgramManager() {
                     <label className="mt-3 block max-w-40">
                       <span className="mb-1 block text-xs text-muted">应用重量 kg</span>
                       <input
+                        aria-label={`${recommendation.exercises?.name ?? "动作"}应用重量 kg`}
                         className="h-10 w-full rounded-lg border border-line bg-white px-3 text-sm outline-none ring-action/20 transition focus:border-action focus:ring-4"
                         min="0"
                         onChange={(event) =>
@@ -1553,13 +1734,99 @@ export function ProgramManager() {
                 </div>
               </article>
             ))}
+              </div>
+            </div>
           </div>
+          {bulkRecommendationDialog?.kind === "apply" ? (
+            <div className="mt-3 rounded-lg border border-action/30 bg-action/5 p-3 text-sm">
+              <p className="font-semibold">即将应用 {bulkRecommendationDialog.items.length} 条建议</p>
+              <ul className="mt-2 space-y-2 text-muted">
+                {bulkRecommendationDialog.items.map((item) => (
+                  <li key={item.recommendation.id}>
+                    <span className="font-medium text-ink">{item.recommendation.exercises?.name ?? "动作"}</span>
+                    {item.workouts.length > 0 ? (
+                      <ul className="mt-1 space-y-1 pl-4">
+                        {item.workouts.map((workout) => <li key={workout.id}>{workout.scheduled_date} · {workout.name}</li>)}
+                      </ul>
+                    ) : <p className="mt-1">当前周期没有可调整的后续训练日。</p>}
+                  </li>
+                ))}
+              </ul>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-lg bg-action px-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={status === "generating"}
+                  onClick={() => void confirmBulkApplication()}
+                  type="button"
+                >
+                  确认应用 {bulkRecommendationDialog.items.length} 条建议
+                </button>
+                <button
+                  className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-lg border border-line bg-white px-3 font-semibold text-ink"
+                  disabled={status === "generating"}
+                  onClick={() => setBulkRecommendationDialog(null)}
+                  type="button"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {bulkRecommendationDialog?.kind === "ignore" ? (
+            <div className="mt-3 rounded-lg border border-line bg-field p-3 text-sm">
+              <p className="font-semibold">将忽略 {bulkRecommendationDialog.recommendationIds.length} 条待处理建议。</p>
+              <p className="mt-1 text-muted">忽略后不会修改当前或后续训练处方。</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-lg border border-line bg-white px-3 font-semibold text-ink"
+                  disabled={status === "generating"}
+                  onClick={() => setBulkRecommendationDialog(null)}
+                  type="button"
+                >
+                  取消
+                </button>
+                <button
+                  className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-lg border border-line bg-white px-3 font-semibold text-ink disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={status === "generating"}
+                  onClick={() => void confirmBulkIgnore()}
+                  type="button"
+                >
+                  确认忽略 {bulkRecommendationDialog.recommendationIds.length} 条建议
+                </button>
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
       {workouts.length > 0 ? (
         <section className="space-y-3">
-          {workouts.map((workout, index) => {
+          <div className="flex flex-col gap-3 rounded-xl border border-line bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="font-semibold">计划内容 · 共 {workouts.length} 节</h2>
+              <p className="mt-1 text-sm text-muted">
+                {planContentsExpanded ? "已展开完整计划，可按训练日查看处方。" : "当前仅显示下一节训练。"}
+              </p>
+            </div>
+            <button
+              aria-controls="full-plan-workouts"
+              aria-expanded={planContentsExpanded}
+              className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-line bg-white px-3 text-sm font-semibold text-ink"
+              onClick={() => setPlanContentsExpanded((current) => !current)}
+              type="button"
+            >
+              {planContentsExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              {planContentsExpanded ? "收起完整计划" : "展开完整计划"}
+            </button>
+          </div>
+          <div
+            className={`overflow-hidden transition-[max-height,opacity] duration-200 ease-out motion-reduce:transition-none ${
+              planContentsExpanded ? "max-h-[12000px] opacity-100" : "max-h-[900px] opacity-100"
+            }`}
+            id="full-plan-workouts"
+          >
+            <div className="min-h-0 overflow-hidden space-y-3">
+          {visiblePlanWorkouts.map((workout, index) => {
             const isRestDay = workout.day_type === "rest";
             const presentation = getScheduleItemPresentation({ dayType: workout.day_type, status: workout.status });
             const workoutMeta = isRestDay ? null : getWorkoutMeta(workout.name);
@@ -1663,6 +1930,8 @@ export function ProgramManager() {
             </article>
             );
           })}
+            </div>
+          </div>
         </section>
       ) : null}
       {adjustmentDialog ? (
