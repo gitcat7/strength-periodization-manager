@@ -73,7 +73,7 @@ describe("TodayWorkout Fitness Coach", () => {
       error: null
     });
     const exercises = createQuery({ data: [], error: null });
-    const lastCompleted = createQuery({ data: null, error: null });
+    const lastCompleted = createQuery({ data: { name: "拉 B · 容量", scheduled_date: "2026-07-15" }, error: null });
     const queries = [program, scheduleEvents, rest, training, exercises, lastCompleted];
     mocks.from.mockImplementation(() => queries.shift()?.query);
 
@@ -95,5 +95,8 @@ describe("TodayWorkout Fitness Coach", () => {
     expect(lastCompleted.calls.findIndex(([method]) => method === "limit")).toBeGreaterThan(
       lastCompleted.calls.findIndex(([method, args]) => method === "eq" && args[0] === "day_type")
     );
+    expect(container?.textContent).toContain("训练状态：可按计划推进");
+    expect(container?.textContent).toContain("判断依据：训练间隔 1 天，处于常规恢复窗口。");
+    expect(container?.textContent).toContain("执行建议：主项以 RPE 7–8 为上限");
   });
 });

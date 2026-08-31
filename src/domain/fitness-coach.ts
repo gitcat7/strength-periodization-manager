@@ -35,9 +35,11 @@ export function getInterruptionAdvice({
 }) {
   if (!lastCompletedDate) {
     return {
+      action: "优先记录真实重量、次数和 RPE，先建立个人训练基线。",
+      basis: "暂无已完成训练记录，当前缺少用于判断恢复与递进的数据。",
       level: "baseline",
-      title: "建立基线",
-      message: "暂无已完成训练记录。今天优先记录真实重量、次数和 RPE，先把个人基线建起来。",
+      title: "建立训练基线",
+      message: "暂无已完成训练记录，当前缺少用于判断恢复与递进的数据。优先记录真实重量、次数和 RPE，先建立个人训练基线。",
       loadMultiplier: 1
     };
   }
@@ -46,36 +48,72 @@ export function getInterruptionAdvice({
 
   if (days < 7) {
     return {
+      action: "主项以 RPE 7–8 为上限，保留约 1–2 次 RIR（余力次数）。",
+      basis: `训练间隔 ${days} 天，处于常规恢复窗口。`,
       level: "normal",
-      title: "正常推进",
-      message: `距离上次完成训练 ${days} 天，可以按计划执行，主项保留 1-2 次余量。`,
+      title: "可按计划推进",
+      message: `训练间隔 ${days} 天，处于常规恢复窗口。主项以 RPE 7–8 为上限，保留约 1–2 次 RIR（余力次数）。`,
       loadMultiplier: 1
     };
   }
 
   if (days <= 14) {
     return {
+      action: "主项较计划下调 10–15%，优先恢复动作质量。",
+      basis: `训练间隔 ${days} 天，恢复窗口较常规延长。`,
       level: "caution",
-      title: "小幅恢复",
-      message: `已经间隔 ${days} 天，建议主项比计划降低 10-15%，先找回动作质量。`,
+      title: "建议下调训练负荷",
+      message: `训练间隔 ${days} 天，恢复窗口较常规延长。主项较计划下调 10–15%，优先恢复动作质量。`,
       loadMultiplier: 0.875
     };
   }
 
   if (days <= 30) {
     return {
+      action: "主项较计划下调 20–30%，增加热身，不急于追求重量。",
+      basis: `训练间隔 ${days} 天，近期训练连续性不足。`,
       level: "deload",
-      title: "恢复训练",
-      message: `已经间隔 ${days} 天，建议降低 20-30%，增加热身，不急着冲重量。`,
+      title: "建议恢复或减量",
+      message: `训练间隔 ${days} 天，近期训练连续性不足。主项较计划下调 20–30%，增加热身，不急于追求重量。`,
       loadMultiplier: 0.75
     };
   }
 
   return {
+    action: "从保守负荷重新开始，优先确认动作质量与当日体感。",
+    basis: `训练间隔 ${days} 天，当前不宜直接恢复原有递进。`,
     level: "restart",
-    title: "重新激活",
-    message: `已经间隔 ${days} 天，今天按重新建立基线处理，动作质量优先于重量。`,
+    title: "建议重新建立基线",
+    message: `训练间隔 ${days} 天，当前不宜直接恢复原有递进。从保守负荷重新开始，优先确认动作质量与当日体感。`,
     loadMultiplier: 0.65
+  };
+}
+
+export function getRecommendationPresentation({
+  reason,
+  suggestedWeight,
+  type,
+  workout
+}: {
+  reason: string;
+  suggestedWeight: number;
+  type: RecommendationType | string;
+  workout?: { name: string; scheduledDate: string } | null;
+}) {
+  const normalizedType = type === "increase_weight" ? "increase" : type === "decrease_weight" ? "decrease" : type;
+  const direction =
+    normalizedType === "increase"
+      ? `小幅加重至 ${suggestedWeight}kg`
+      : normalizedType === "decrease"
+        ? `建议下调训练负荷至 ${suggestedWeight}kg`
+        : normalizedType === "deload"
+          ? `建议恢复或减量至 ${suggestedWeight}kg`
+          : "保持当前处方并继续记录";
+
+  return {
+    basis: reason,
+    direction,
+    impact: workout ? `${workout.scheduledDate} · ${workout.name} 的后续未完成训练日` : "应用后仅影响后续未完成训练日"
   };
 }
 

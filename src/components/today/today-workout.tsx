@@ -28,6 +28,7 @@ import {
   getWorkoutCoachCue,
   type ExerciseCoachRecommendation
 } from "@/domain/fitness-coach";
+import { parseRestTimerSeconds } from "@/domain/rest-timer-settings";
 import { isExerciseSubstitutionEligible } from "@/domain/exercise-substitution";
 import { trackEvent } from "@/lib/analytics";
 import {
@@ -1504,8 +1505,22 @@ export function TodayWorkout() {
                 {interruptionAdvice.title}
               </span>
             </div>
-            <p className="mt-2 text-sm leading-6 text-muted">{interruptionAdvice.message}</p>
-            <p className="mt-2 text-sm leading-6 text-muted">{coachCue}</p>
+            <p className="mt-2 text-sm leading-6 text-muted">
+              <span className="font-semibold text-ink">训练状态：</span>
+              {interruptionAdvice.title}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-muted">
+              <span className="font-semibold text-ink">判断依据：</span>
+              {interruptionAdvice.basis}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-muted">
+              <span className="font-semibold text-ink">执行建议：</span>
+              {interruptionAdvice.action}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-muted">
+              <span className="font-semibold text-ink">训练方向提示：</span>
+              {coachCue}
+            </p>
             {lastCompletedWorkout ? (
               <p className="mt-2 text-xs text-muted">
                 上次完成：{lastCompletedWorkout.scheduled_date} · {lastCompletedWorkout.name}
@@ -1828,8 +1843,25 @@ function RestTimerPanel({
   onSkip: () => void;
   onToggle: (enabled: boolean) => void;
 }) {
+  const [customSeconds, setCustomSeconds] = useState(String(seconds));
+  const [customSecondsError, setCustomSecondsError] = useState("");
   const progress = seconds > 0 ? Math.max(0, Math.min(100, (remaining / seconds) * 100)) : 0;
   const hasActiveTimer = remaining > 0;
+
+  useEffect(() => {
+    setCustomSeconds(String(seconds));
+  }, [seconds]);
+
+  function saveCustomSeconds() {
+    const result = parseRestTimerSeconds(customSeconds);
+    if (result.seconds === null) {
+      setCustomSecondsError(result.error ?? "休息时长无效，请重新输入。");
+      return;
+    }
+
+    setCustomSecondsError("");
+    onSecondsChange(result.seconds);
+  }
 
   return (
     <div className="rounded-xl border border-line bg-white p-4">
@@ -1900,6 +1932,34 @@ function RestTimerPanel({
                 {formatRestOption(option)}
               </button>
             ))}
+            <label className="flex min-w-36 flex-1 flex-col gap-1 sm:max-w-48">
+              <span className="text-xs font-medium text-muted">自定义默认时长（秒）</span>
+              <input
+                aria-describedby={customSecondsError ? "rest-timer-custom-seconds-error" : undefined}
+                aria-invalid={Boolean(customSecondsError)}
+                aria-label="自定义组间休息秒数"
+                className="h-11 w-full rounded-lg border border-line bg-white px-3 font-mono tabular-nums text-ink outline-none ring-action/20 transition focus:border-action focus:ring-4"
+                inputMode="numeric"
+                max={900}
+                min={30}
+                onBlur={saveCustomSeconds}
+                onChange={(event) => {
+                  setCustomSeconds(event.target.value);
+                  if (customSecondsError) setCustomSecondsError("");
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") event.currentTarget.blur();
+                }}
+                step={1}
+                type="number"
+                value={customSeconds}
+              />
+              {customSecondsError ? (
+                <span className="text-xs text-danger" id="rest-timer-custom-seconds-error" role="alert">
+                  {customSecondsError}
+                </span>
+              ) : null}
+            </label>
             <button
               className="h-9 rounded-lg border border-line px-3 text-sm font-semibold text-ink disabled:opacity-50"
               disabled={!enabled}
@@ -2177,10 +2237,10 @@ function readRestTimerSettings() {
     if (!rawSettings) return null;
 
     const settings = JSON.parse(rawSettings) as { enabled?: boolean; seconds?: number };
-    const seconds = Number(settings.seconds);
+    const parsedSeconds = parseRestTimerSeconds(String(settings.seconds));
     return {
       enabled: typeof settings.enabled === "boolean" ? settings.enabled : true,
-      seconds: restTimerOptions.includes(seconds) ? seconds : 120
+      seconds: parsedSeconds.seconds ?? 120
     };
   } catch {
     return null;

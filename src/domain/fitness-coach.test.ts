@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { buildExerciseCoachRecommendation, getRecommendationStatusLabel } from "./fitness-coach";
+import {
+  buildExerciseCoachRecommendation,
+  getInterruptionAdvice,
+  getRecommendationPresentation,
+  getRecommendationStatusLabel
+} from "./fitness-coach";
 
 describe("exercise coach recommendation safety gate", () => {
   const completedSet = (rpe: number | null) => ({
@@ -117,5 +122,32 @@ describe("recommendation status copy", () => {
     expect(getRecommendationStatusLabel("rejected")).toBe("已忽略");
     expect(getRecommendationStatusLabel("accepted")).toBe("已更新下次训练");
     expect(getRecommendationStatusLabel("modified")).toBe("修改后已更新下次训练");
+  });
+});
+
+describe("professional Coach presentation", () => {
+  it("keeps the interruption judgement and action separate without changing the load rule", () => {
+    expect(
+      getInterruptionAdvice({ lastCompletedDate: "2026-08-30", scheduledDate: "2026-08-31" })
+    ).toMatchObject({
+      action: expect.stringContaining("RPE 7–8"),
+      basis: "训练间隔 1 天，处于常规恢复窗口。",
+      title: "可按计划推进"
+    });
+  });
+
+  it("presents a pending recommendation as direction, evidence, and affected scope", () => {
+    expect(
+      getRecommendationPresentation({
+        reason: "深蹲：完成稳定，RPE 在目标范围内。",
+        suggestedWeight: 92.5,
+        type: "increase",
+        workout: { name: "蹲 A", scheduledDate: "2026-08-24" }
+      })
+    ).toEqual({
+      basis: "深蹲：完成稳定，RPE 在目标范围内。",
+      direction: "小幅加重至 92.5kg",
+      impact: "2026-08-24 · 蹲 A 的后续未完成训练日"
+    });
   });
 });

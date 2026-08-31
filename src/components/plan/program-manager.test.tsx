@@ -235,6 +235,9 @@ describe("ProgramManager cache hydration", () => {
       await Promise.resolve();
     });
     expect(findButton(container, "收起建议")?.getAttribute("aria-expanded")).toBe("true");
+    expect(container.textContent).toContain("调整方向：");
+    expect(container.textContent).toContain("判断依据：辅助动作完成稳定。");
+    expect(container.textContent).toContain("影响范围：2026-08-24 · 蹲 A 的后续未完成训练日");
     const weightInput = container.querySelector("input[aria-label='深蹲应用重量 kg']") as HTMLInputElement;
     await act(async () => {
       setInputValue(weightInput, "91");

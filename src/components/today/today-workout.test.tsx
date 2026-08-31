@@ -58,6 +58,12 @@ Object.defineProperty(window, "matchMedia", {
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
+function getSetNumberInputs(view: ParentNode) {
+  return [...view.querySelectorAll<HTMLInputElement>('input[type="number"]')].filter(
+    (input) => input.getAttribute("aria-label") !== "自定义组间休息秒数"
+  );
+}
+
 afterEach(() => {
   if (root) {
     act(() => root?.unmount());
@@ -168,7 +174,7 @@ describe("TodayWorkout cache hydration", () => {
       await Promise.resolve();
     });
 
-    const numberInputs = container.querySelectorAll<HTMLInputElement>('input[type="number"]');
+    const numberInputs = getSetNumberInputs(container);
     act(() => setInputValue(numberInputs[2]!, "8"));
 
     const completion = container.querySelector<HTMLInputElement>('input[aria-label="第 1 组完成"]');
@@ -186,7 +192,7 @@ describe("TodayWorkout cache hydration", () => {
       await Promise.resolve();
     });
 
-    const numberInputs = view.querySelectorAll<HTMLInputElement>('input[type="number"]');
+    const numberInputs = getSetNumberInputs(view);
     act(() => setInputValue(numberInputs[2]!, "7"));
     act(() => view.querySelector<HTMLInputElement>('input[aria-label="第 1 组完成"]')?.click());
 
@@ -256,7 +262,7 @@ describe("TodayWorkout cache hydration", () => {
     writeCachedWorkout({ slug: "barbell_bench_press" });
     ({ container, root } = renderTodayWorkout());
     await act(async () => { await Promise.resolve(); });
-    const numberInputs = container!.querySelectorAll<HTMLInputElement>('input[type="number"]');
+    const numberInputs = getSetNumberInputs(container!);
     act(() => setInputValue(numberInputs[2]!, "7"));
     act(() => container!.querySelector<HTMLInputElement>('input[aria-label="第 1 组完成"]')?.click());
     const completeButton = [...container!.querySelectorAll("button")].find((button) => button.textContent === "保存并完成训练");
@@ -279,7 +285,7 @@ describe("TodayWorkout cache hydration", () => {
     act(() => fillButton?.click());
 
     const completion = container.querySelector<HTMLInputElement>('input[aria-label="第 1 组完成"]');
-    const numberInputs = container.querySelectorAll<HTMLInputElement>('input[type="number"]');
+    const numberInputs = getSetNumberInputs(container);
     expect(completion?.checked).toBe(false);
     expect(numberInputs[2]?.value).toBe("");
   });
@@ -337,18 +343,89 @@ describe("TodayWorkout cache hydration", () => {
     expect(container.querySelectorAll('input[aria-label$="组完成"]')).toHaveLength(3);
     expect(JSON.parse(window.localStorage.getItem("strength-training-draft:workout-1") ?? "{}")["workout-exercise-1"]).toHaveLength(3);
   });
+
+  it("persists a valid custom rest default without changing an active countdown", async () => {
+    writeCachedWorkout({ slug: "barbell_bench_press" });
+    ({ container, root } = renderTodayWorkout());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const customRestInput = container!.querySelector<HTMLInputElement>('input[aria-label="自定义组间休息秒数"]');
+    expect(customRestInput).not.toBeNull();
+
+    act(() => {
+      setInputValue(customRestInput!, "150");
+      customRestInput!.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    expect(window.localStorage.getItem("strength-training-rest-timer")).toContain('"seconds":150');
+    expect(container!.textContent).toContain("2:30");
+
+    const numberInputs = getSetNumberInputs(container!);
+    act(() => setInputValue(numberInputs[2]!, "8"));
+    act(() => container!.querySelector<HTMLInputElement>('input[aria-label="第 1 组完成"]')?.click());
+    expect(container!.textContent).toContain("2:30");
+
+    act(() => {
+      setInputValue(customRestInput!, "180");
+      customRestInput!.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+    expect(container!.textContent).toContain("2:30");
+
+    const resetButton = container!.querySelector<HTMLButtonElement>('button[aria-label="重置休息倒计时"]');
+    act(() => resetButton?.click());
+    expect(container!.textContent).toContain("3:00");
+  });
+
+  it("keeps the last valid custom rest setting when input is invalid", async () => {
+    writeCachedWorkout({ slug: "barbell_bench_press" });
+    ({ container, root } = renderTodayWorkout());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const customRestInput = container!.querySelector<HTMLInputElement>('input[aria-label="自定义组间休息秒数"]');
+    expect(customRestInput).not.toBeNull();
+    act(() => {
+      setInputValue(customRestInput!, "150");
+      customRestInput!.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      setInputValue(customRestInput!, "29");
+      customRestInput!.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+    });
+
+    expect(container!.textContent).toContain("休息时长需在 30–900 秒之间。");
+    expect(window.localStorage.getItem("strength-training-rest-timer")).toContain('"seconds":150');
+  });
+
+  it("renders Coach guidance as separate training status, evidence, and execution guidance", async () => {
+    writeCachedWorkout({ lastCompletedDate: "2026-07-17", slug: "barbell_bench_press" });
+    ({ container, root } = renderTodayWorkout());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(container!.textContent).toContain("训练状态：可按计划推进");
+    expect(container!.textContent).toContain("判断依据：训练间隔 1 天，处于常规恢复窗口。");
+    expect(container!.textContent).toContain("执行建议：主项以 RPE 7–8 为上限");
+    expect(container!.textContent).toContain("训练方向提示：强度日不是力竭日。");
+  });
 });
 
 function writeCachedWorkout({
   slug,
   targetWeight = 100,
   targetSets = 1,
-  completedSets = 0
+  completedSets = 0,
+  lastCompletedDate = null
 }: {
   slug: string;
   targetWeight?: number;
   targetSets?: number;
   completedSets?: number;
+  lastCompletedDate?: string | null;
 }) {
   writeClientCache("strength-training-cache:today", {
     coachRecommendations: [],
@@ -370,7 +447,9 @@ function writeCachedWorkout({
         target_weight: targetWeight
       }
     ],
-    lastCompletedWorkout: null,
+    lastCompletedWorkout: lastCompletedDate
+      ? { id: "previous-workout", name: "拉 B · 容量", scheduled_date: lastCompletedDate }
+      : null,
     nextTraining: {
       dayType: "training",
       id: "workout-1",

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Brain, CheckCircle2, ChevronDown, ChevronUp, Dumbbell, Loader2, Moon, Pause, Play, PlusCircle, XCircle } from "lucide-react";
-import type { RecommendationType } from "@/domain/fitness-coach";
+import { getRecommendationPresentation, type RecommendationType } from "@/domain/fitness-coach";
 import { getNextWorkoutState } from "@/domain/next-workout";
 import { getScheduleItemPresentation } from "@/domain/rest-day-presentation";
 import {
@@ -1677,7 +1677,23 @@ export function ProgramManager() {
                     <p className="mt-1 text-sm text-muted">
                       {recommendation.previous_weight}kg → {recommendation.suggested_weight}kg
                     </p>
-                    <p className="mt-2 text-sm leading-6 text-muted">{recommendation.reason}</p>
+                    {(() => {
+                      const presentation = getRecommendationPresentation({
+                        reason: recommendation.reason,
+                        suggestedWeight: recommendation.suggested_weight,
+                        type: recommendation.recommendation_type,
+                        workout: recommendation.workouts
+                          ? { name: recommendation.workouts.name, scheduledDate: recommendation.workouts.scheduled_date }
+                          : null
+                      });
+                      return (
+                        <div className="mt-2 space-y-1 text-sm leading-6 text-muted">
+                          <p><span className="font-semibold text-ink">调整方向：</span>{presentation.direction}</p>
+                          <p><span className="font-semibold text-ink">判断依据：</span>{presentation.basis}</p>
+                          <p><span className="font-semibold text-ink">影响范围：</span>{presentation.impact}</p>
+                        </div>
+                      );
+                    })()}
                     <label className="mt-3 block max-w-40">
                       <span className="mb-1 block text-xs text-muted">应用重量 kg</span>
                       <input
