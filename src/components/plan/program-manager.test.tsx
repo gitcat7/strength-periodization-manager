@@ -27,6 +27,7 @@ afterEach(() => {
   root = null;
   container?.remove();
   container = null;
+  vi.useRealTimers();
   window.localStorage.clear();
   window.sessionStorage.clear();
   supabaseClient = createSupabaseClient({ pendingAuth: true });
@@ -126,6 +127,7 @@ describe("ProgramManager cache hydration", () => {
     });
 
     expect(container.textContent).toContain("当前周期");
+    expect(container.querySelector('a[href="/today"]')?.textContent).toContain("查看今日训练");
     expect(container.textContent).toContain("修改计划");
     expect(container.textContent).not.toContain("先选训练结构，再选安排方式");
     expect(container.textContent).not.toContain("训练安排与主项最近工作组");
@@ -138,6 +140,103 @@ describe("ProgramManager cache hydration", () => {
     });
     expect(container.textContent).toContain("先选训练结构，再选安排方式");
     expect(container.textContent).toContain("训练安排与主项最近工作组");
+  });
+
+  it("replaces the active training CTA with a paused-plan overview and manual recovery route selection", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-31T12:00:00"));
+    supabaseClient = createSupabaseClient({
+      program: { ...activeProgram(), schedule_revision: 3 },
+      scheduleEvents: [pauseEvent({ reason: "fatigue", resumeDate: "2026-09-03" })],
+      workoutExercises: [scheduledWorkoutExercise()],
+      workouts: [scheduledWorkout()]
+    });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("计划已暂停");
+    expect(container.textContent).toContain("暂停第 3 天");
+    expect(container.textContent).toContain("暂停日期：2026-08-29");
+    expect(container.textContent).toContain("疲劳累积，需要休整");
+    expect(container.textContent).toContain("预计恢复日期：2026-09-03");
+    expect(container.textContent).toContain("暂停期间不生成逾期训练、不计入完成率或 Coach 调整");
+    expect(container.textContent).toContain("恢复中心");
+    expect(container.textContent).toContain("第 2 周 · 蹲 A · 强度");
+    expect(container.textContent).not.toContain("查看今日训练");
+    expect(container.textContent).not.toContain("今天多休一天");
+    expect(container.textContent).not.toContain("暂停计划");
+    expect(container.textContent).not.toContain("调整本日动作");
+
+    await act(async () => {
+      findButton(container!, "恢复训练")?.click();
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(Array.from(container.querySelectorAll<HTMLInputElement>('input[name="resume-route"]')).every((input) => !input.checked)).toBe(true);
+  });
+
+  it("keeps a passed recovery date manual and disables recovery without a pending training day", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-31T12:00:00"));
+    supabaseClient = createSupabaseClient({
+      program: { ...activeProgram(), schedule_revision: 3 },
+      scheduleEvents: [pauseEvent({ reason: "time_conflict", resumeDate: "2026-08-30" })],
+      workouts: []
+    });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("预计恢复日期：2026-08-30");
+    expect(container.textContent).toContain("恢复日期已过，仍需手动确认恢复。");
+    expect(container.textContent).toContain("当前周期没有待恢复训练日，无法恢复日程。");
+    expect(findButton(container, "恢复训练")).toHaveProperty("disabled", true);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("shows that no recovery date is set without changing the paused state", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-31T12:00:00"));
+    supabaseClient = createSupabaseClient({
+      program: { ...activeProgram(), schedule_revision: 3 },
+      scheduleEvents: [pauseEvent({ reason: "personal", resumeDate: null })],
+      workouts: [scheduledWorkout()]
+    });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(<ProgramManager />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("未设置恢复日期");
+    expect(container.textContent).toContain("计划已暂停");
+    expect(container.textContent).not.toContain("查看今日训练");
   });
 
   it("does not offer plan-day structural editing after a completed set has loaded", async () => {
@@ -500,6 +599,43 @@ function activeProgram() {
   };
 }
 
+function scheduledWorkout() {
+  return {
+    day_type: "training",
+    id: "workout-1",
+    name: "第 2 周 · 蹲 A · 强度",
+    prescription_revision: 1,
+    schedule_index: 1,
+    scheduled_date: "2026-09-02",
+    sequence_index: 1,
+    status: "scheduled"
+  };
+}
+
+function pauseEvent({ reason, resumeDate }: { reason: string; resumeDate: string | null }) {
+  return {
+    created_at: "2026-08-29T08:00:00.000Z",
+    effective_date: "2026-08-29",
+    event_type: "pause_started",
+    id: "pause-event-1",
+    metadata: { reason, resume_date: resumeDate },
+    schedule_revision: 3
+  };
+}
+
+function scheduledWorkoutExercise() {
+  return {
+    exercise_id: "squat",
+    exercises: { id: "squat", is_main_lift: true, name: "深蹲", slug: "squat", training_direction: "squat" },
+    id: "workout-exercise-1",
+    order_index: 0,
+    target_reps: 7,
+    target_sets: 3,
+    target_weight: 90,
+    workout_id: "workout-1"
+  };
+}
+
 function pendingRecommendations() {
   return [
     {
@@ -545,6 +681,7 @@ function createSupabaseClient({
   rpcCalls = [],
   previewByRecommendationId = {},
   applyRecommendationErrorId,
+  scheduleEvents = [],
   workoutExercises = [],
   workouts = []
 }: {
@@ -557,6 +694,7 @@ function createSupabaseClient({
   rpcCalls?: RpcCall[];
   previewByRecommendationId?: Record<string, { workouts: Array<{ id: string; name: string; scheduled_date: string }> }>;
   applyRecommendationErrorId?: string;
+  scheduleEvents?: Record<string, unknown>[];
   workoutExercises?: Record<string, unknown>[];
   workouts?: Record<string, unknown>[];
 }) {
@@ -618,6 +756,7 @@ function createSupabaseClient({
       if (table === "log_recommendations") return recommendationTable;
       if (table === "plan_programs") return createQuery({ data: program, error: null });
       if (table === "plan_workouts") return createQuery({ data: workouts, error: null });
+      if (table === "ops_schedule_events") return createQuery({ data: scheduleEvents, error: null });
       if (table === "plan_workout_exercises") return createQuery({ data: workoutExercises, error: null });
       if (table === "log_set_logs") return createQuery({ data: completedSetWorkoutExerciseIds.map((workout_exercise_id) => ({ workout_exercise_id })), error: null });
       if (table === "usr_lift_profiles") return Object.assign(createQuery({ data: [], error: null }), { upsert: () => Promise.resolve({ error: null }) });

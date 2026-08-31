@@ -47,6 +47,7 @@ import {
   type PendingTraining,
   type ResumeRoute
 } from "@/domain/schedule-adjustment";
+import { buildPlanPausePresentation } from "@/domain/plan-pause-presentation";
 import { buildScheduleReflowPayload, type ReflowScheduleItem } from "@/domain/schedule-reflow-payload";
 import { ScheduleRuleFields } from "./schedule-rule-fields";
 import { ScheduleAdjustmentDialog } from "./schedule-adjustment-dialog";
@@ -1393,6 +1394,20 @@ export function ProgramManager() {
     ? Math.max(0, daysBetweenDates(pauseState.event.effective_date, todayDate))
     : 0;
   const recoveryAdvice = pauseState.paused ? getRecoveryLoadAdvice(daysInterrupted) : null;
+  const pausePresentation = pauseState.paused && pauseState.event
+    ? buildPlanPausePresentation({
+        effectiveDate: pauseState.event.effective_date,
+        nextTraining: pendingTrainings[0]
+          ? {
+              name: pendingTrainings[0].name,
+              focus: getWorkoutMeta(pendingTrainings[0].name).focus
+            }
+          : null,
+        reason: pauseState.reason,
+        resumeDate: pauseState.resumeDate,
+        today: todayDate
+      })
+    : null;
   const adjustmentControlsAvailable =
     Boolean(program) && scheduleAdjustmentSupported && !usesLegacyScheduleSchema;
   const hasPendingScheduleRows = getPendingScheduleRows(workouts).length > 0;
@@ -1452,6 +1467,78 @@ export function ProgramManager() {
             生成 {planSetup.weekCount} 周训练计划
           </button>
         </section>
+      ) : pauseState.paused && pausePresentation && pauseState.event ? (
+        <section className="rounded-xl border border-[#c75c1a]/30 bg-[#fff8f3] p-4">
+          <div className="flex items-start gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#c75c1a]/10 text-[#c75c1a]">
+              <Pause size={20} />
+            </span>
+            <div className="min-w-0">
+              <p className="page-kicker">暂停态总览</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-bold">计划已暂停</h2>
+                <span className="rounded-full bg-[#c75c1a]/10 px-2 py-1 text-sm font-semibold text-[#9e4918]">
+                  {pausePresentation.pausedDayLabel}
+                </span>
+              </div>
+              <p className="mt-1 truncate text-sm text-muted">{program.name}</p>
+            </div>
+          </div>
+
+          <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-3">
+            <div className="rounded-lg bg-white/70 p-3">
+              <dt className="text-muted">暂停日期</dt>
+              <dd className="mt-1 font-semibold">暂停日期：{pauseState.event.effective_date}</dd>
+            </div>
+            <div className="rounded-lg bg-white/70 p-3">
+              <dt className="text-muted">暂停原因</dt>
+              <dd className="mt-1 font-semibold">{pausePresentation.reasonLabel}</dd>
+            </div>
+            <div className="rounded-lg bg-white/70 p-3">
+              <dt className="text-muted">恢复安排</dt>
+              <dd className="mt-1 font-semibold">{pausePresentation.resumeDateLabel}</dd>
+            </div>
+          </dl>
+          {pausePresentation.resumeDatePassed ? (
+            <p className="mt-3 text-sm text-muted">恢复日期已过，仍需手动确认恢复。</p>
+          ) : null}
+          <p className="mt-3 text-sm text-muted">
+            暂停期间不生成逾期训练、不计入完成率或 Coach 调整；既有训练记录不改写。
+          </p>
+          {!pausePresentation.canResume ? (
+            <p className="mt-2 text-sm text-muted">{pausePresentation.noPendingReason}</p>
+          ) : null}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              aria-describedby={!pausePresentation.canResume ? "paused-recovery-unavailable" : undefined}
+              className="pressable inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-md bg-action px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={scheduleActionBusy || !pausePresentation.canResume}
+              onClick={() => openAdjustmentDialog("resume")}
+              type="button"
+            >
+              <Play size={16} />
+              恢复训练
+            </button>
+            {!pausePresentation.canResume ? (
+              <span className="sr-only" id="paused-recovery-unavailable">{pausePresentation.noPendingReason}</span>
+            ) : null}
+            <a
+              className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-md border border-line bg-white px-4 font-semibold text-ink"
+              href="#full-plan-workouts"
+            >
+              查看计划安排
+            </a>
+            {!showPlanSetup ? (
+              <button
+                className="pressable inline-flex h-11 items-center justify-center whitespace-nowrap rounded-md border border-line bg-white px-4 font-semibold text-ink"
+                onClick={() => setShowPlanSetup(true)}
+                type="button"
+              >
+                修改计划
+              </button>
+            ) : null}
+          </div>
+        </section>
       ) : (
         <section className="action-surface p-4">
           <div className="mb-4 flex items-center gap-3">
@@ -1509,27 +1596,27 @@ export function ProgramManager() {
               {pauseState.paused ? <Play size={20} /> : <Pause size={20} />}
             </span>
             <div>
-              <h2 className="font-semibold">日程调整</h2>
-              <p className="text-sm text-muted">暂停、恢复或多休一天，训练顺序会自动保持。</p>
+              <h2 className="font-semibold">{pauseState.paused ? "恢复中心" : "日程调整"}</h2>
+              <p className="text-sm text-muted">
+                {pauseState.paused
+                  ? "确认恢复路线后，后续训练日期会重新计算，训练顺序保持不变。"
+                  : "暂停、恢复或多休一天，训练顺序会自动保持。"}
+              </p>
             </div>
           </div>
 
           {pauseState.paused ? (
             <div className="rounded-lg border border-[#c75c1a]/30 bg-[#c75c1a]/5 p-3">
-              <p className="font-semibold text-[#c75c1a]">计划已暂停</p>
+              <p className="font-semibold text-[#c75c1a]">恢复负荷建议</p>
               <p className="mt-1 text-sm text-muted">
-                {pauseState.resumeDate ? `预计 ${pauseState.resumeDate} 恢复。` : "尚未设置恢复日期。"}
                 {recoveryAdvice ? ` ${recoveryAdvice.message}` : ""}
               </p>
-              <button
-                className="pressable mt-3 inline-flex items-center gap-2 rounded-md bg-action px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={scheduleActionBusy || !hasPendingScheduleRows}
-                onClick={() => openAdjustmentDialog("resume")}
-                type="button"
-              >
-                <Play size={16} />
-                恢复训练
-              </button>
+              {pausePresentation?.nextTrainingLabel ? (
+                <p className="mt-2 text-sm text-muted">待恢复训练：{pausePresentation.nextTrainingLabel}</p>
+              ) : (
+                <p className="mt-2 text-sm text-muted">{pausePresentation?.noPendingReason}</p>
+              )}
+              <p className="mt-2 text-sm text-muted">恢复后会以所选路线重新计算后续训练日期。</p>
             </div>
           ) : (
             <div className="flex flex-wrap gap-3">
@@ -1927,7 +2014,7 @@ export function ProgramManager() {
                   {(workout.status === "scheduled" || workout.status === "draft") && (workoutExercisesByWorkoutId[workout.id] ?? []).some((exercise) => completedSetExerciseIdSet.has(exercise.id)) ? (
                     <p className="mt-3 text-sm text-muted">已记录完成组，本训练日的动作结构已锁定。</p>
                   ) : null}
-                  {(workout.status === "scheduled" || workout.status === "draft") && !(workoutExercisesByWorkoutId[workout.id] ?? []).some((exercise) => completedSetExerciseIdSet.has(exercise.id)) ? (
+                  {!pauseState.paused && (workout.status === "scheduled" || workout.status === "draft") && !(workoutExercisesByWorkoutId[workout.id] ?? []).some((exercise) => completedSetExerciseIdSet.has(exercise.id)) ? (
                     <WorkoutPrescriptionGuardrailEditor
                       catalog={exerciseCatalog}
                       exercises={(workoutExercisesByWorkoutId[workout.id] ?? []).map((exercise) => ({
