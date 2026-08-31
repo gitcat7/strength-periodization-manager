@@ -63,3 +63,12 @@
 - [ ] 3. 提交执行记录：`git add docs/superpowers/plans/2026-08-31-rest-timer-coach-professional-copy.md`，提交信息 `docs: record rest timer coach delivery`；执行 `git push -u origin codex/rest-timer-coach-copy` 并记录 `git rev-parse HEAD`。
 - [ ] 4. 使用 `codex_app__send_message_to_thread` 通知测试任务 `019fac2b-9290-72f3-88d6-5b2344a8e949`（host `local`），包含固定 SHA、无 SQL 声明、变更文件、测试命令、30–900 边界、运行中计时器不跳变和 Coach 不改算法验收点。
 - [ ] 5. 在测试任务明确“验证通过”后，通知架构师任务 `019f9d55-a57d-7860-8d3d-210bafc8c3e3` 请求范围/部署授权。仅从被授权 SHA 的干净 detached worktree 部署；随后用 `BASE_URL=https://strength-periodization-manager.vercel.app pnpm smoke` 和无缓存 `/api/health` 验证，并回报部署 ID、URL 与结果给架构师。
+
+## Execution record — 2026-08-31
+
+- RED → GREEN（自定义休息）：`src/domain/rest-timer-settings.test.ts` 初次执行因模块不存在失败；实现 parser 后为 2/2 通过。`today-workout` focused 在加入 UI 用例后先因没有自定义输入失败，完成输入、localStorage reader 与运行中倒计时保持不变的实现后通过。
+- RED → GREEN（Coach）：领域测试先确认旧 `正常推进` 标题和缺少 presentation helper 为失败；Plan 组件测试先确认缺少“调整方向”标签为失败；Today Coach DOM 测试也在旧单段文案渲染下失败。补齐专业展示字段与两个页面标签后均通过。
+- Focused：`pnpm vitest run src/domain/rest-timer-settings.test.ts src/domain/fitness-coach.test.ts src/components/today/today-workout.test.tsx src/components/today/today-workout-coach.test.tsx src/components/plan/program-manager.test.tsx` — exit 0，5 files / 39 tests passed。（ProgramManager 输出一条既有 React act 警告。）
+- Full suite：`pnpm test` — exit 0，79 files passed / 2 skipped，370 passed / 2 skipped。
+- Release：`pnpm release:check` — exit 0，typecheck、production build 与 14 路由（含 `/api/health`）local smoke 均通过。隔离工作树初次缺少本地公开 Supabase 环境变量；仅复制现有、忽略的 `.env.local` 用于本地验证，未纳入 Git。
+- `git diff --check` — exit 0。无 SQL migration、schema、RPC、算法、缓存 key、依赖或环境提交变更。
